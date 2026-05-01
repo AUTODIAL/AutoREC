@@ -1,0 +1,3 @@
+# Dependencies are defined in pyproject.toml.
+# This keeps pip installs aligned with the package metadata.
+-e .[notebook]

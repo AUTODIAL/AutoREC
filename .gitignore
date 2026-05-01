@@ -1,0 +1,67 @@
+# Python
+__pycache__/
+src/autorec/__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Environments
+.venv/
+venv/
+env/
+ENV/
+.conda/
+.ipynb_checkpoints/
+
+# Packaging/build
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Jupyter / notebooks
+.ipynb_checkpoints/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Logs
+*.log
+logs/
+
+# Data and experiments
+datasets/
+outputs/
+runs/
+results/
+models/
+wandb/
+mlruns/
+
+# Large binary artifacts
+*.pkl
+!data/training_dataset.pkl
+*.pickle
+*.h5
+*.keras
+!trained_agent/agent_trained.keras
+*.hdf5
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.joblib
+*.npy
+*.npz
+
+# Optional: generated version file, only if your dynamic-version tool creates it
+# autorec/_version.py
+# src/autorec/_version.py
+
