@@ -1,5 +1,5 @@
-"""Contain some functions to add to ae.parser to simplify circuit AND recompute the
-component values of the simplified circuit.
+"""Contain some functions to simplify circuit AND recompute the component values of the
+simplified circuit. It is a modification to `autoeis.parser.simplify`.
 """
 
 from copy import deepcopy
