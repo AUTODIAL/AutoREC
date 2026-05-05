@@ -78,6 +78,6 @@ where = ["src"]
 autorec = ["default_configs/*.yaml"]
 
 [project.urls]
-"Homepage" = "https://github.com/AUTODIAL/AutoREC"
-Repository = ""https://github.com/AUTODIAL/AutoREC""
+Homepage = "https://github.com/AUTODIAL/AutoREC"
+Repository = "https://github.com/AUTODIAL/AutoREC"
 Paper = "https://arxiv.org/abs/2604.27266"
