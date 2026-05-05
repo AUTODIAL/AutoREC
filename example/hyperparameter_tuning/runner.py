@@ -3,23 +3,22 @@ precomputed scores that we can use to initially train Optuna.
 
 Usage:
 ```bash
-    $ python optuna_hyperparameter_tuning.py \
-        --target-dir ./results_optuna \
-        --num-initial 10 \
-        --num-iterations 5 \
+    $ python runner.py \
+        --target-dir ./hyperparameter_tuning_results \
+        --base-config-file ./base_config.yaml \
+        --num-initial 5 \
+        --num-iterations 10 \
         --batch-size 5 \
         --configs-dir ./configs \
-        [--test]
 ```
 
 Arguments:
     --target-dir: Target directory to store results
+    --base-config-file: Base configuration file to use for generating new configs
     --num-initial: Number of initial trials
     --num-iterations: Number of iterations to run
     --batch-size: Batch size for each iteration
     --configs-dir: Directory to save generated configurations
-    --test: Run test mode using fewer num_trials (still takes about 1 hour for each
-            calculation to complete)
 """
 
 from pathlib import Path
@@ -32,11 +31,11 @@ import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
 
-from hyperparameter_tuning_utils import (
+from utils import (
     ConfigurationHandler,
     write_job_script,
     block_until_completed,
-    compute_score,
+    compute_score
 )
 
 
@@ -52,9 +51,15 @@ parser = argparse.ArgumentParser()
 parser.add_argument(
     "--target-dir",
     type=str,
-    default="./results_optuna",
+    default="./hyperparameter_tuning_results",
     help="Target directory to store results",
 )
+parser.add_argument(
+        "--base-config-file",
+        type=str,
+        default="./base_config.yaml",
+        help="Base configuration file to use for generating new configs",
+    )
 parser.add_argument(
     "--num-initial", type=int, default=10, help="Number of initial trials"
 )
@@ -70,9 +75,6 @@ parser.add_argument(
     default="./configs",
     help="Directory to save generated configurations",
 )
-parser.add_argument(
-    "--test", action="store_true", help="Run fast test mode using GP surrogate"
-)
 args = parser.parse_args()
 
 
@@ -87,12 +89,8 @@ num_iterations = args.num_iterations
 nlast = 1000  # How many last episodes to average over for mean reward
 ndata_per_circuit = 270  # Number of data points per circuit in the dataset
 python_file = "main_factory.py"  # The training script to use
-if args.test:
-    base_config_file = WORK_DIR / "default_configs" / "environment_agent_config.yaml"
-    base_sbatch_options = {"time": "6:00:00", "mem_per_cpu": "4G"}
-else:
-    base_config_file = WORK_DIR / "default_configs" / "environment_agent_config_long.yaml"
-    base_sbatch_options = {"time": "48:00:00", "mem_per_cpu": "12G"}
+base_config_file = Path(args.base_config_file)
+base_sbatch_options = {"time": "72:00:00", "mem_per_cpu": "12G"}
 
 # Instantiate configuration handler
 config_handler = ConfigurationHandler(

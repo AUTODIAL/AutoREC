@@ -129,13 +129,22 @@ class EISDataPrep:
         if mode not in ["process", "load"]:
             raise ValueError(f"EISDataPrep: Invalid mode: '{mode}'. Must be 'process' or 'load'")
 
+        avail_eis_features = ["ReZ", "ImZ", "phi", "mag", "nReZ", "nImZ", "nphi", "nmag"]
+        if isinstance(eis_features, str):
+            eis_features = [eis_features]
+        for feature in eis_features:
+            if feature not in avail_eis_features:
+                raise ValueError(
+                    f"Invalid EIS feature: '{feature}'. "
+                    f"Available features: {avail_eis_features}"
+                )
+        self.eis_features = eis_features
+
         self.mode = mode
         self.evaluation = evaluation
-        self.eis_features = eis_features
         self.dataset = None
         self._validation_errors = []
         self._validation_warnings = []
-
 
         if mode == 'load':
             # Determine file type if in load mode
@@ -156,8 +165,6 @@ class EISDataPrep:
             if not self.path.is_dir():
                 raise ValueError(f"In 'process' mode, path must be a folder, got: {self.path}")
             self.file_type = None
-
-        pass
 
     def calculate_thresholds(
         self,

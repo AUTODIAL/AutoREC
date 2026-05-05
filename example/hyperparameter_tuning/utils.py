@@ -15,6 +15,8 @@ import pandas as pd
 from sklearn.preprocessing import StandardScaler
 import autoeis as ae
 
+from autorec.parser import _simplify_P, simplify
+
 
 # Hyperparameter search bounds
 search_space_bounds = {
@@ -406,38 +408,6 @@ def write_job_script(save_dir, python_file, config_file, sbatch_options, submit=
             return job_id
 
 
-# def block_until_completed(jobid_list):
-#     """Block progress until all jobs in jobid_list are completed."""
-#     if len(jobid_list) == 0:  # In case if there is no job submitted
-#         return
-
-#     completed = [False] * len(jobid_list)
-#     while True:
-#         if len(jobid_list) == 0:
-#             # This is when all jobs were previously completed, so that we have no jobs to
-#             # wait for anymore.
-#             break
-
-#         # Check the status of each job
-#         for ii, jobid in enumerate(jobid_list):
-#             if not completed[ii]:
-#                 check_command = f"squeue -j {jobid}"
-#                 check_process = subprocess.run(
-#                     check_command, shell=True, capture_output=True, text=True
-#                 )
-#                 output = check_process.stdout.strip()
-#                 lines = output.splitlines()
-#                 if len(lines) <= 1:
-#                     completed[ii] = True
-#                     print(f"Job {jobid} has completed.")
-#         if all(completed):
-#             print("All jobs have completed.")
-#             time.sleep(60)  # Wait a bit to ensure all files are written
-#             break
-#         else:
-#             time.sleep(60)  # Wait for 60 seconds before checking again
-
-
 def block_until_completed(jobid_list, poll_interval=60):
     """
     Block until all jobs in jobid_list reach a terminal Slurm state.
@@ -564,9 +534,9 @@ def compute_score(
             circuit_string = row["best_circuit"]
             params = row["best_param"]
             if simplify_redundancy:
-                simplified_circuit = simplify_circuit(circuit_string, params)
+                simplified_circuit = simplify(circuit_string, params)[0]
             else:
-                simplified_circuit = simplify_circuit_P(circuit_string, params)
+                simplified_circuit = _simplify_P(circuit_string, params)[0]
             if are_circuit_equivalent(simplified_circuit, ground_truth):
                 success_exact_count += 1
     score_success_exact_rate = success_exact_count / len(eval_results)
@@ -578,197 +548,6 @@ def compute_score(
     else:
         avg_score = np.mean([score_mean_reward, score_success_rate])
     return avg_score, (score_mean_reward, score_success_rate, score_success_exact_rate)
-
-
-def simplify_circuit_P(circuit_string, params, verbose=False):
-    """Simplify the circuit by replacing P with either R or C based on Pn value."""
-    circuit_string = copy.deepcopy(circuit_string)
-    # Replace P with R or C
-    params_copy = {}
-    for name, value in params.items():
-        # Parameter name that needs attention is "PXn", where "X" indicates the index of
-        # the component.
-        match = re.match(r"P(\d+)n", name)
-        if match:
-            index = int(match.group(1))
-            if value < 0.1:
-                # Replace P with R
-                circuit_string = re.sub(f"P{index}", f"R{index}", circuit_string)
-                params_copy[f"R{index}"] = 1 / params[f"P{index}w"]
-                if f"P{index}w" in params_copy:
-                    del params_copy[f"P{index}w"]
-                if verbose:
-                    print(f"Replaced P{index} → R{index} (R{index}={value:.4f})")
-            elif value > 0.9:
-                # Replace P with C
-                circuit_string = re.sub(f"P{index}", f"C{index}", circuit_string)
-                params_copy[f"C{index}"] = params[f"P{index}w"]
-                if f"P{index}w" in params_copy:
-                    del params_copy[f"P{index}w"]
-                if verbose:
-                    print(f"Replaced P{index} → C{index} (C{index}={value:.4f})")
-            else:
-                params_copy[name] = value
-        else:
-            params_copy[name] = value
-    return circuit_string, params_copy
-
-
-def simplify_circuit_R(circuit_string, params, verbose=False):
-    """Simplify the resistors in series or parallel."""
-    circuit_string = copy.deepcopy(circuit_string)
-    params = copy.deepcopy(params)
-    while True:
-        nomore_redundancy = True
-        # R in series
-        match = re.findall(r"R\d+-R\d+", circuit_string)
-        if match:
-            nomore_redundancy = False
-            index1 = int(re.findall(r"R(\d+)-R(\d+)", circuit_string)[0][0])
-            index2 = int(re.findall(r"R(\d+)-R(\d+)", circuit_string)[0][1])
-            circuit_string = circuit_string.replace(match[0], f"R{index1}")
-            params[f"R{index1}"] = params[f"R{index1}"] + params[f"R{index2}"]
-            del params[f"R{index2}"]
-            if verbose:
-                print(
-                    f"Combined series R{index1} + R{index2} → R{index1} "
-                    f"(R{index1}={params[f'R{index1}']:.4f})"
-                )
-        # R in parallel
-        match = re.findall(r"\[R\d+,R\d+\]", circuit_string)
-        if match:
-            nomore_redundancy = False
-            index1 = int(re.findall(r"\[R(\d+),R(\d+)\]", circuit_string)[0][0])
-            index2 = int(re.findall(r"\[R(\d+),R(\d+)\]", circuit_string)[0][1])
-            circuit_string = circuit_string.replace(match[0], f"R{index1}")
-            params[f"R{index1}"] = 1 / (
-                1 / params[f"R{index1}"] + 1 / params[f"R{index2}"]
-            )
-            del params[f"R{index2}"]
-            if verbose:
-                print(
-                    f"Combined parallel R{index1} + R{index2} → R{index1} "
-                    f"(R{index1}={params[f'R{index1}']:.4f})"
-                )
-        if nomore_redundancy:
-            break
-    return circuit_string, params
-
-
-def simplify_circuit_C(circuit_string, params, verbose=False):
-    """Simplify the capacitors in series or parallel."""
-    circuit_string = copy.deepcopy(circuit_string)
-    params = copy.deepcopy(params)
-    while True:
-        nomore_redundancy = True
-        # C in series
-        match = re.findall(r"C\d+-C\d+", circuit_string)
-        if match:
-            nomore_redundancy = False
-            index1 = int(re.findall(r"C(\d+)-C(\d+)", circuit_string)[0][0])
-            index2 = int(re.findall(r"C(\d+)-C(\d+)", circuit_string)[0][1])
-            circuit_string = circuit_string.replace(match[0], f"C{index1}")
-            params[f"C{index1}"] = 1 / (
-                1 / params[f"C{index1}"] + 1 / params[f"C{index2}"]
-            )
-            del params[f"C{index2}"]
-            if verbose:
-                print(
-                    f"Combined series C{index1} + C{index2} → C{index1} "
-                    f"(C{index1}={params[f'C{index1}']:.4f})"
-                )
-        # C in parallel
-        match = re.findall(r"\[C\d+,C\d+\]", circuit_string)
-        if match:
-            nomore_redundancy = False
-            index1 = int(re.findall(r"\[C(\d+),C(\d+)\]", circuit_string)[0][0])
-            index2 = int(re.findall(r"\[C(\d+),C(\d+)\]", circuit_string)[0][1])
-            circuit_string = circuit_string.replace(match[0], f"C{index1}")
-            params[f"C{index1}"] = params[f"C{index1}"] + params[f"C{index2}"]
-            del params[f"C{index2}"]
-            if verbose:
-                print(
-                    f"Combined parallel C{index1} + C{index2} → C{index1} "
-                    f"(C{index1}={params[f'C{index1}']:.4f})"
-                )
-        if nomore_redundancy:
-            break
-    return circuit_string, params
-
-
-def simplify_circuit_L(circuit_string, params, verbose=False):
-    """Simplify the inductors in series or parallel."""
-    circuit_string = copy.deepcopy(circuit_string)
-    params = copy.deepcopy(params)
-    while True:
-        nomore_redundancy = True
-        # L in series
-        match = re.findall(r"L\d+-L\d+", circuit_string)
-        if match:
-            nomore_redundancy = False
-            index1 = int(re.findall(r"L(\d+)-L(\d+)", circuit_string)[0][0])
-            index2 = int(re.findall(r"L(\d+)-L(\d+)", circuit_string)[0][1])
-            circuit_string = circuit_string.replace(match[0], f"L{index1}")
-            params[f"L{index1}"] = params[f"L{index1}"] + params[f"L{index2}"]
-            del params[f"L{index2}"]
-            if verbose:
-                print(
-                    f"Combined series L{index1} + L{index2} → L{index1} "
-                    f"(L{index1}={params[f'L{index1}']:.4f})"
-                )
-        # L in parallel
-        match = re.findall(r"\[L\d+,L\d+\]", circuit_string)
-        if match:
-            nomore_redundancy = False
-            index1 = int(re.findall(r"\[L(\d+),L(\d+)\]", circuit_string)[0][0])
-            index2 = int(re.findall(r"\[L(\d+),L(\d+)\]", circuit_string)[0][1])
-            circuit_string = circuit_string.replace(match[0], f"L{index1}")
-            params[f"L{index1}"] = 1 / (
-                1 / params[f"L{index1}"] + 1 / params[f"L{index2}"]
-            )
-            del params[f"L{index2}"]
-            if verbose:
-                print(
-                    f"Combined parallel L{index1} + L{index2} → L{index1} "
-                    f"(L{index1}={params[f'L{index1}']:.4f})"
-                )
-        if nomore_redundancy:
-            break
-    return circuit_string, params
-
-
-def simplify_circuit(
-    circuit_string,
-    params,
-    simplify_elements=["R", "C", "P", "L"],
-    verbose=False,
-):
-    """Replace P with R or C based on Pn value and remove redundant resistors."""
-    circuit_string = copy.deepcopy(circuit_string)
-    params = copy.deepcopy(params)
-    # Replace P with R or C
-    if "P" in simplify_elements:
-        circuit_string, params = simplify_circuit_P(circuit_string, params, verbose)
-    # Remove redundant
-    while True:
-        circuit_string_mod = copy.deepcopy(circuit_string)
-        if "R" in simplify_elements:
-            circuit_string_mod, params = simplify_circuit_R(
-                circuit_string_mod, params, verbose
-            )
-        if "C" in simplify_elements:
-            circuit_string_mod, params = simplify_circuit_C(
-                circuit_string_mod, params, verbose
-            )
-        if "L" in simplify_elements:
-            circuit_string_mod, params = simplify_circuit_L(
-                circuit_string_mod, params, verbose
-            )
-        if circuit_string_mod == circuit_string:
-            break
-        else:
-            circuit_string = circuit_string_mod
-    return circuit_string, params
 
 
 def are_circuit_equivalent(circuit1, circuit2):
