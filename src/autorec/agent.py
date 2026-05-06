@@ -921,7 +921,7 @@ class DDQN_ECM:
         success_rate.to_csv(self.save_dir / "success_rate.csv")
         NN_loss.to_csv(self.save_dir / "NN_loss.csv")
         terminal_states.to_csv(self.save_dir / "terminal_states.csv")
-        pd.DataFrame(statistical_analysis).to_pickle(self.save_dir / "statistical_analysis.csv")
+        pd.DataFrame(statistical_analysis).to_pickle(self.save_dir / "statistical_analysis.pkl")
 
         self._plot_training_metrics(NN_loss, statistical_analysis)
 
