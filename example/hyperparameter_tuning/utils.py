@@ -32,7 +32,7 @@ search_space_bounds = {
     # Prioritized replay parameters
     "prioritized_replay_alpha": [0.5, 1.5],
     "initial_beta": [0.01, 0.6],
-    "final_p": [0.7, 1.3],
+    "final_beta": [0.7, 1.3],
 }
 # Some hyperparameters are constrained to be integers
 integer_variables = [
