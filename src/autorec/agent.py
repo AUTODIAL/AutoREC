@@ -53,6 +53,7 @@ class DDQN_ECM:
         batch_size: int = 150,  
         train_frequency: int = 5,  
         update_target_frequency: int = 1000,  
+        gradient_steps: int = 1,
         NN_sleep: int = 1000,  
         buffer_capacity: int = 15000,
         optimizer_type: Union[str, tf.keras.optimizers.Optimizer] = "adam", 
@@ -145,6 +146,10 @@ class DDQN_ECM:
         update_target_frequency : int, optional
             Frequency (in steps) for updating the target network.
 
+        gradient_steps : int, optional
+            Number of gradient descent steps (epochs) to perform each time the model is
+            trained.
+
         NN_sleep : int, optional
             Number of initial transitions collected before training begins.
 
@@ -219,6 +224,7 @@ class DDQN_ECM:
         self.batch_size = batch_size
         self.train_frequency = train_frequency
         self.update_target_frequency = update_target_frequency
+        self.gradient_steps = gradient_steps
         self.NN_sleep = NN_sleep  # The number of initial data that should be gathered before the first training (should be larger than batch_size)
         self.buffer_capacity = buffer_capacity
         self.optimizer_type = optimizer_type
@@ -705,6 +711,7 @@ class DDQN_ECM:
 
     def _train_model(
         self,
+        gradient_steps: int,
         history,
     ):
         """
@@ -792,14 +799,17 @@ class DDQN_ECM:
             action_indices.append([counter, indices[0]])
             counter += 1
 
-        with tf.GradientTape() as tape:
-            q_values = self.model(np.array(all_states))
-            selected_q_values = tf.gather_nd(q_values, action_indices)
-            loss = weights * tf.square(target_q_values - selected_q_values)
-            loss_mean = tf.reduce_mean(loss)
-
-        grads = tape.gradient(loss_mean, self.model.trainable_variables)
-        self.optimizer.apply_gradients(zip(grads, self.model.trainable_variables))
+        # Add an extra loop around here so that we can run multiple sgd steps (i.e.,
+        # epoch) per every step we hit this point.
+        # Following SB3, name the control variable `gradient_steps`
+        for _ in gradient_steps:
+            with tf.GradientTape() as tape:
+                q_values = self.model(np.array(all_states))
+                selected_q_values = tf.gather_nd(q_values, action_indices)
+                loss = weights * tf.square(target_q_values - selected_q_values)
+                loss_mean = tf.reduce_mean(loss)
+            grads = tape.gradient(loss_mean, self.model.trainable_variables)
+            self.optimizer.apply_gradients(zip(grads, self.model.trainable_variables))
 
         # Calculate the loss and then calculate/update the priority for PER
         q_values = self.model(np.array(all_states))
@@ -878,6 +888,7 @@ class DDQN_ECM:
                     t,
                     e,
                     flatten_Z,
+                    self.gradient_steps,
                     buffer,
                     terminal_states,
                     iteration,
@@ -939,6 +950,7 @@ class DDQN_ECM:
         trial,
         episode,
         flatten_Z,
+        gradient_steps,
         buffer,
         terminal_states,
         iteration,
@@ -963,6 +975,7 @@ class DDQN_ECM:
                 deadloop_chain,
                 episode,
                 EIS_i,
+                gradient_steps,
                 buffer,
                 iteration,
                 target_freq,
@@ -1010,6 +1023,7 @@ class DDQN_ECM:
         deadloop_chain,
         episode,
         EIS_i,
+        gradient_steps,
         buffer,
         iteration,
         target_freq,
@@ -1073,7 +1087,7 @@ class DDQN_ECM:
 
         # # Check and perform training
         # NOTE: not moved to episode training
-        loss, memory = self._check_and_train(buffer, iteration, memory)
+        loss, memory = self._check_and_train(gradient_steps, buffer, iteration, memory)
 
         # # Update target network if needed
         # NOTE: not Moved to episode training
@@ -1121,7 +1135,7 @@ class DDQN_ECM:
             "loss": loss,
         }
 
-    def _check_and_train(self, buffer, iteration, memory):
+    def _check_and_train(self, gradient_steps, buffer, iteration, memory):
         """Check if training is needed and perform training step."""
         loss = None
         run_training = (iteration == self.NN_sleep) or (
@@ -1130,7 +1144,7 @@ class DDQN_ECM:
 
         if run_training:
             history_buffer_df = buffer.to_dataframe()
-            loss = self._train_model(history_buffer_df)
+            loss = self._train_model(gradient_steps, history_buffer_df)
             memory = 0
             # Update buffer priorities
             for idx in range(len(history_buffer_df)):
