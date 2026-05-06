@@ -29,40 +29,40 @@ class DDQN_ECM:
     def __init__(
         self,
         training_env: EIS_ECM_Env,
-        eval_env: Optional[EIS_ECM_Env] = None,  
+        eval_env: Optional[EIS_ECM_Env] = None,
         save_dir: Path = Path("./"),
         save_start: Optional[int] = 0,
         save_frequency: Optional[int] = 500,
-        action_cap: int| None = None, 
+        action_cap: int | None = None,
         random_seed: int = 42,
-        # RL Parameters 
-        episodes_trial: int = 1,  
+        # RL Parameters
+        episodes_trial: int = 1,
         num_trials: int = 8000,
-        gamma: float = 0.99,  
-        continuous_deadloop: int = 2,  
-        latent_deadloop: int = 4,  
-        invalid_terminals: bool = False,  
+        gamma: float = 0.99,
+        continuous_deadloop: int = 2,
+        latent_deadloop: int = 4,
+        invalid_terminals: bool = False,
         # Dynamic variable
-        initial_epsilon: float = 1.0,  
-        epsilon_min: float = 0.1,  
-        epsilon_decay: float = 0.99968,  
-        start_decay: int = 10,  
-        bayesian: bool = False,  
+        initial_epsilon: float = 1.0,
+        epsilon_min: float = 0.1,
+        epsilon_decay: float = 0.99968,
+        start_decay: int = 10,
+        bayesian: bool = False,
         # NN hyperparameters
-        learning_rate: float = 0.0005,  
-        batch_size: int = 150,  
-        train_frequency: int = 5,  
-        update_target_frequency: int = 1000,  
-        NN_sleep: int = 1000,  
+        learning_rate: float = 0.0005,
+        batch_size: int = 150,
+        train_frequency: int = 5,
+        update_target_frequency: int = 1000,
+        NN_sleep: int = 1000,
         buffer_capacity: int = 15000,
-        optimizer_type: Union[str, tf.keras.optimizers.Optimizer] = "adam", 
+        optimizer_type: Union[str, tf.keras.optimizers.Optimizer] = "adam",
         # Prioritized replay parameters
         prioritized_replay_alpha: float = 0.6,
         prioritized_replay_eps: float = 1e-6,
-        initial_beta: float = 0.4,  
+        initial_beta: float = 0.4,
         beta_jump: float = 1.06,
-        start_jump: Optional[float] = None,  
-        anneal_fraction: Optional[float] = None, 
+        start_jump: Optional[float] = None,
+        anneal_fraction: Optional[float] = None,
         final_beta: float = 0.7,
     ):
         """
@@ -112,7 +112,7 @@ class DDQN_ECM:
         latent_deadloop : int, optional
             Maximum number of the same visited state so far before detecting a latent deadloop.
 
-        invalid_terminals : bool, optional 
+        invalid_terminals : bool, optional
             If True, invalid actions terminate the episode. Otherwise, a kickout
             mechanism is used to prevent deadloops (Not efficient).
 
@@ -176,7 +176,7 @@ class DDQN_ECM:
         final_beta : float, optional
             Final importance-sampling correction factor.
         """
-        
+
         # Store environments
         self.training_env = training_env
         self.eval_env = (
@@ -411,7 +411,7 @@ class DDQN_ECM:
 
         save_format : str, default='keras'
             File format for saving the model
-            
+
             OPTIONS:
             - 'keras' (recommended):
             - 'h5' (legacy)
@@ -432,7 +432,7 @@ class DDQN_ECM:
 
         Note:
         -----
-        Only the MAIN model is saved (not the target model). 
+        Only the MAIN model is saved (not the target model).
         """
         filepath = Path(filepath)
         filepath.parent.mkdir(parents=True, exist_ok=True)
@@ -447,7 +447,7 @@ class DDQN_ECM:
 
     def load_model(self, filepath: str | Path) -> None:
         """
-        Load a previously trained neural network model from disk. Also, Target model is automatically created as a copy of the loaded model.     
+        Load a previously trained neural network model from disk. Also, Target model is automatically created as a copy of the loaded model.
 
         If resuming training, you'll need to separately restore:
         - Replay buffer: history = pd.read_pickle('replay_buffer.pkl')
@@ -469,7 +469,7 @@ class DDQN_ECM:
         (different chromosome_HEAD_len, different elements, etc.), the model
         architecture may not match and loading will fail. Ensure the environment
         configuration matches what was used during training.
-        
+
         """
         filepath = Path(filepath)
         if not filepath.exists():
@@ -571,7 +571,6 @@ class DDQN_ECM:
     def invalid_actions(self, conding_length: int) -> list:
         """
         Identify all actions that would create invalid circuit configurations or repetitions.
-
 
         Parameters:
         -----------
@@ -769,7 +768,7 @@ class DDQN_ECM:
         next_q_values_main = self.model.predict(np.array(all_next_state), verbose=0)
         next_actions = np.argmax(next_q_values_main, axis=1)
 
-        # Use the target model for predicting the Q-values of the best next action 
+        # Use the target model for predicting the Q-values of the best next action
         next_q_values = self.target_model.predict(np.array(all_next_state), verbose=0)
         max_next_q_values = next_q_values[np.arange(self.batch_size), next_actions]
 
@@ -825,7 +824,8 @@ class DDQN_ECM:
         # Initialize CircularBuffer for efficient experience replay
         buffer = CircularBuffer(
             capacity=self.buffer_capacity,
-            dtypes=[ # Standard for NumPy: (name, dtype, shape) for multi-dimensional fields
+            dtypes=[
+                # Standard for NumPy: (name, dtype, shape) for multi-dimensional fields
                 ("EIS", "i4"),
                 ("state", "U50"),
                 (
@@ -901,7 +901,6 @@ class DDQN_ECM:
                     statistical_analysis, episode_result["total_reward"]
                 )
 
-
             # intermediate saving
             if (
                 t >= self._save_start
@@ -922,7 +921,7 @@ class DDQN_ECM:
         success_rate.to_csv(self.save_dir / "success_rate.csv")
         NN_loss.to_csv(self.save_dir / "NN_loss.csv")
         terminal_states.to_csv(self.save_dir / "terminal_states.csv")
-
+        pd.DataFrame(statistical_analysis).to_pickle(self.save_dir / "statistical_analysis.csv")
 
         self._plot_training_metrics(NN_loss, statistical_analysis)
 
@@ -986,7 +985,7 @@ class DDQN_ECM:
                 success_count += 1
                 terminal_states = self._record_terminal_state(
                     terminal_states, EIS_i, episode, a, step_result["env_output"]
-                ) # For dev purpose only
+                )  # For dev purpose only
                 break
 
             if self.invalid_terminals and step_result["validity"] == 0:
@@ -1018,14 +1017,14 @@ class DDQN_ECM:
         """
         This function performs one complete RL interaction step inside an episode. It handles:
 
-        - action selection, 
-        - environment transition, 
+        - action selection,
+        - environment transition,
         - replay-buffer insertion,
-        - model training and target-network update, 
-        - deadloop detection, 
-        
+        - model training and target-network update,
+        - deadloop detection,
+
         and
-        
+
             returns all updated tracking values needed by the caller.
         """
         # Action selection with deadloop handling
@@ -1347,12 +1346,11 @@ class DDQN_ECM:
         except Exception:
             pass
 
-
     def generate_ECM(
         self,
         EIS_i: Optional[int] = None,
         flatten_Z: Optional[np.ndarray] = None,
-        # ground_truth_state: Optional[Any] = None, TODO: Should fix the unkown ground_truth_state during dataprep 
+        # ground_truth_state: Optional[Any] = None, TODO: Should fix the unkown ground_truth_state during dataprep
         ground_truth_circuit: Optional[str] = None,
         max_actions: Optional[int] = None,
         verbose: bool = True,
@@ -1554,7 +1552,7 @@ class DDQN_ECM:
         # Generate circuit evolution GIF if requested
         if gif_generation and EIS_i is not None and Z_true is not None:
             prepare_and_generate_circuit_gif(
-                _active_env = self._active_env,
+                _active_env=self._active_env,
                 action_history=action_history,
                 best_result=best_result,
                 EIS_i=EIS_i,
