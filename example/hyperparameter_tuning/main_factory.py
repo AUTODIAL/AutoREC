@@ -58,7 +58,9 @@ if csv_path.exists() and pkl_path.exists():
 else:
     try:
         print("No existing evaluation results found. Performing evaluation...")
-        eval_results = agent.eval_batch_eis(all_values=True, max_actions=24, verbose=True)
+        eval_results = agent.eval_all_eis(
+            max_actions=24, verbose=True, use_eval_env=False
+        )
         # Save evaluation results
         print("Saving evaluation results...")
         eval_results.to_csv(csv_path, index=False)
