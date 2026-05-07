@@ -1,5 +1,13 @@
 """Collection of utility functions and variables for hyperparameter tuning and
 configuration management.
+
+Notes
+-----
+
+We assume that the list modules used in the cluster is saved as "default", and that the
+Python environment is created using `virtualenv` and is located at `~/autorec_env`. If
+your setup differs, please modify the `MODULE_SAVELIST_NAME` and `PYTHON_ENV_PATH`
+variables accordingly.
 """
 
 from pathlib import Path
@@ -17,6 +25,10 @@ import autoeis as ae
 
 from autorec.parser import _simplify_P, simplify
 
+
+# Variables to specify the presetup environments
+MODULE_SAVELIST_NAME = "default"
+PYTHON_ENV_PATH = "$HOME/autorec_env"
 
 # Hyperparameter search bounds
 search_space_bounds = {
@@ -341,7 +353,7 @@ def write_job_script(save_dir, python_file, config_file, sbatch_options, submit=
             f"#SBATCH --job-name='{job_name}'   # job name",
             "#SBATCH --account=rrg-j3goals",
             "#SBATCH --constraint='turin'",
-            f"#SBATCH --output={save_dir}/%x_slurm-%A-%a.out   # output and error log",
+            f"#SBATCH --output={save_dir}/%x_slurm-%A.out   # output and error log",
             "",
             "echo '------------------------------------------------------------'",
             "echo 'Running job $SLURM_JOB_NAME'",
@@ -355,8 +367,8 @@ def write_job_script(save_dir, python_file, config_file, sbatch_options, submit=
             "echo '------------------------------------------------------------'",
             "",
             "# DEFINE YOUR ENVIRONMENT VARIABLES HERE",
-            "MODULE_SAVELIST_NAME='basic'",
-            "PYTHON_ENV_PATH=$HOME/eis_env",
+            f"MODULE_SAVELIST_NAME='{MODULE_SAVELIST_NAME}'",
+            f"PYTHON_ENV_PATH={PYTHON_ENV_PATH}",
             "",
             "# Load necessary modules and activate environment",
             "export OMP_NUM_THREADS=1",
