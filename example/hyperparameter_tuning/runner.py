@@ -5,7 +5,7 @@ Usage:
 ```bash
     $ python runner.py \
         --target-dir ./hyperparameter_tuning_results \
-        --base-config-file ./base_config.yaml \
+        --base-config ./base_config.yaml \
         --num-initial 5 \
         --num-iterations 10 \
         --batch-size 5 \
@@ -14,7 +14,7 @@ Usage:
 
 Arguments:
     --target-dir: Target directory to store results
-    --base-config-file: Base configuration file to use for generating new configs
+    --base-config: Base configuration file to use for generating new configs
     --num-initial: Number of initial trials
     --num-iterations: Number of iterations to run
     --batch-size: Batch size for each iteration
@@ -35,7 +35,7 @@ from utils import (
     ConfigurationHandler,
     write_job_script,
     block_until_completed,
-    compute_score
+    compute_score,
 )
 
 
@@ -55,11 +55,11 @@ parser.add_argument(
     help="Target directory to store results",
 )
 parser.add_argument(
-        "--base-config-file",
-        type=str,
-        default="./base_config.yaml",
-        help="Base configuration file to use for generating new configs",
-    )
+    "--base-config",
+    type=str,
+    default="./base_config.yaml",
+    help="Base configuration file to use for generating new configs",
+)
 parser.add_argument(
     "--num-initial", type=int, default=10, help="Number of initial trials"
 )
@@ -89,7 +89,7 @@ num_iterations = args.num_iterations
 nlast = 1000  # How many last episodes to average over for mean reward
 ndata_per_circuit = 270  # Number of data points per circuit in the dataset
 python_file = "main_factory.py"  # The training script to use
-base_config_file = Path(args.base_config_file)
+base_config_file = Path(args.base_config)
 base_sbatch_options = {"time": "72:00:00", "mem_per_cpu": "12G"}
 
 # Instantiate configuration handler
@@ -257,7 +257,7 @@ for iteration in range(num_iterations - 1):
     # Collect results from trials
     print(f"Collecting results from iteration {iteration + 2}...")
     score_list = []
-    for config_id in config_id_list:
+    for ii, config_id in enumerate(config_id_list):
         SAMPLE_DIR = config_handler.configs_list[config_id]["agent"]["save_dir"]
         avg_score, score_elements = compute_score(SAMPLE_DIR, nlast)
         print("Config ID:", config_id, "Score:", avg_score)
