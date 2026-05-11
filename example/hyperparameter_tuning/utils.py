@@ -377,7 +377,7 @@ def write_job_script(save_dir, python_file, config_file, sbatch_options, submit=
             "",
             "# RUN YOUR PYTHON SCRIPT",
             "# DEFINE YOUR PYTHON SCRIPT PARAMETERS HERE",
-            "SCRIPTS='main_factory.py'",
+            f"SCRIPTS='{python_file}'",
             f"ARGS='-c {config_file}'",
             "",
             "# Run calculation",
