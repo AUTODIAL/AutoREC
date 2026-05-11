@@ -188,7 +188,7 @@ def _simplify_structure_with_values(
             if isinstance(comp, dict):
                 comp_type = list(comp)[0][0]
             else:
-                if comp[0].keys() == "p":  # It's a parallel block
+                if list(comp[0].keys())[0] == "p":  # It's a parallel block
                     comp_type = "p"
 
             if comp_type in simplifiable_types:
@@ -313,9 +313,7 @@ def _move_ohmic_resistors_to_the_beginning(
     """
     ohmic_resistors = ae.parser.find_ohmic_resistors(circuit)
     struct = ae.parser._parse_to_structure(circuit)
-    for comp in struct:
-        if comp in ohmic_resistors:
-            struct.remove(comp)
+    struct = [comp for comp in struct if comp not in ohmic_resistors]
     # We assume that the first element is always "s"
     for R in ohmic_resistors[::-1]:
         struct.insert(1, R)

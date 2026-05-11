@@ -99,7 +99,7 @@ class CustomLogScaler:
         self.fitted = False
 
     def fit(self, df: pd.DataFrame):
-        # Log-transform continuous features (log1p handles 0 safely)
+        # Log-transform continuous features
         log_transformed = np.log(df[self.continuous_features].values)
         # Fit internal StandardScaler
         self.scaler.fit(log_transformed)
@@ -336,6 +336,7 @@ class ConfigurationHandler:
 
 
 def write_job_script(save_dir, python_file, config_file, sbatch_options, submit=False):
+    save_dir = Path(save_dir)
     time = sbatch_options.get("time", "2:00:00")
     cpus_per_task = sbatch_options.get("cpus_per_task", 2)
     nodes = sbatch_options.get("nodes", 1)
@@ -399,7 +400,7 @@ def write_job_script(save_dir, python_file, config_file, sbatch_options, submit=
         ]
     )
     # Write to file
-    Path(save_dir).mkdir(parents=True, exist_ok=True)
+    save_dir.mkdir(parents=True, exist_ok=True)
     with open(save_dir / "submit.sh", "w") as f:
         f.write(submit_script)
 
