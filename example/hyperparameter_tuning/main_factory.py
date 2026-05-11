@@ -28,7 +28,7 @@ parser.add_argument(
 )
 args = parser.parse_args()
 CONFIG_FILE = args.config
-print("Configuration file:", {CONFIG_FILE}, "\n")
+print("Configuration file:", CONFIG_FILE, "\n")
 
 # MAIN CALCULATION - TRAIN THE AGENT
 print("MAIN CALCULATION - TRAIN THE AGENT")
