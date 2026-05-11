@@ -360,8 +360,8 @@ def write_job_script(save_dir, python_file, config_file, sbatch_options, submit=
             "echo 'Allocated node: `hostname`'",
             "echo 'Job started at: `date`'",
             "echo '------------------------------------------------------------'",
-            ""
-            "# Print all SBATCH parameters for this job"
+            "",
+            "# Print all SBATCH parameters for this job",
             "echo 'Printing SBATCH parameters...'",
             "scontrol show job $SLURM_JOB_ID",
             "echo '------------------------------------------------------------'",
