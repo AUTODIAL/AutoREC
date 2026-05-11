@@ -83,7 +83,7 @@ class EISDataPrep:
         path: Union[str, Path],
         mode: str = 'load',
         evaluation: bool = False,
-        eis_features: list = ["ImZ", "phi", "mag", "nphi"]
+        eis_features: Optional[list] = ["ImZ", "phi", "mag", "nphi"]
     ):
         """
         Initialize EISDataPrep, please ensure the provided data fits the expectations below.
