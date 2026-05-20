@@ -16,6 +16,7 @@ venv/
 env/
 ENV/
 .conda/
+.autorec_runtime/
 .ipynb_checkpoints/
 
 # Packaging/build
