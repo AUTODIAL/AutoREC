@@ -31,7 +31,7 @@ import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
 
-from utils import (
+from tuning_utils import (
     ConfigurationHandler,
     write_job_script,
     block_until_completed,
