@@ -188,7 +188,7 @@ def _simplify_structure_with_values(
             if isinstance(comp, dict):
                 comp_type = list(comp)[0][0]
             else:
-                if list(comp[0].keys())[0] == "p":  # It's a parallel block
+                if list(comp[0])[0] == "p":  # It's a parallel block
                     comp_type = "p"
 
             if comp_type in simplifiable_types:
