@@ -9,7 +9,6 @@ Usage:
         --num-initial 5 \
         --num-iterations 10 \
         --batch-size 5 \
-        --configs-dir ./configs \
 ```
 
 Arguments:
@@ -18,7 +17,6 @@ Arguments:
     --num-initial: Number of initial trials
     --num-iterations: Number of iterations to run
     --batch-size: Batch size for each iteration
-    --configs-dir: Directory to save generated configurations
 """
 
 from pathlib import Path
@@ -69,19 +67,13 @@ parser.add_argument(
 parser.add_argument(
     "--batch-size", type=int, default=5, help="Batch size for each iteration"
 )
-parser.add_argument(
-    "--configs-dir",
-    type=str,
-    default="./configs",
-    help="Directory to save generated configurations",
-)
 args = parser.parse_args()
 
 
 # Hyperparameter tuning settings
 RESULTS_DIR = Path(args.target_dir)
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-configs_dir = Path(args.configs_dir)
+configs_dir = RESULTS_DIR / "configs"
 num_initial = args.num_initial
 batch_size = args.batch_size
 num_iterations = args.num_iterations
