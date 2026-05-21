@@ -198,9 +198,52 @@ class EISDataPrep:
             raise RuntimeError(
                 "calculate_thresholds should only be called in 'process' mode"
             )
-        return find_both_threshold(
-            freq, Z_true, upper_bound_decrease, lower_bound_increase
-        )
+
+        for _ in range(3):
+            linKK_kwargs = {"c": 0.4, "max_M": 100, "fit_type": "complex", "add_cap": True}
+            linKK_silent = ae.utils.suppress_output_legacy(linKK,)
+            _, _, Z_linKK, _, _ = linKK_silent(freq, Z_true, **linKK_kwargs)
+        chi_kk = chi_obj_func(Z_true, Z_linKK)
+        r2_kk = ae.metrics.r2_score(Z_true, Z_linKK)
+
+        chi_thresh = chi_kk * lower_bound_increase
+        r2_thresh = r2_kk * upper_bound_decrease
+
+        return chi_thresh, r2_thresh
+
+    @staticmethod
+    def interpolate_EIS(freq, Z, freq_new):
+        """
+        Interpolate the EIS impedance data.
+
+        Given a list of new frequency values, we interpolate the current impedance data for
+        those new frequency values.
+
+        Parameters
+        ----------
+        freq: np.array
+            Original frequency data.
+        Z: np.array
+            Original impedance data.
+        freq_new: np.array
+            New array of frequencies that we want.
+
+        Returns
+        -------
+        New interpolated impedance values
+
+        Usage
+        -----
+        >>> freq_new = np.logspace(*(np.log10(freq[[0, -1]])), npoints, endpoint=True)
+        >>> Z_new = interpolate_eis(freq, Z, freq_new)
+        """
+        idx_sort = np.argsort(freq)
+        idx_sort_new = np.argsort(freq_new)
+        real_new = CubicSpline(freq[idx_sort], Z[idx_sort].real)(freq_new[idx_sort_new])
+        imag_new = CubicSpline(freq[idx_sort], Z[idx_sort].imag)(freq_new[idx_sort_new])
+        # Revert the sorting
+        inv_idx_sort_new = np.argsort(idx_sort_new)
+        return real_new[inv_idx_sort_new] + 1j * imag_new[inv_idx_sort_new]
 
     @staticmethod
     def normalize_EIS(experiment_Z):
@@ -208,15 +251,45 @@ class EISDataPrep:
         Normalize EIS data using min-max normalization.
         Returns normalized impedance, angles, magnitude, and scaled magnitude.
         """
-        return normalize_EIS(experiment_Z)
+        def get_norm(value):
+            """Generic min-max normalization: scales to [0, 1] range"""
+            value_shifted_by_offset = value - np.min(value)
+            return value_shifted_by_offset / np.max(value_shifted_by_offset)
+
+        real_norm = get_norm(np.real(experiment_Z))
+        imag_norm = get_norm(np.imag(experiment_Z))
+        Z_norm = real_norm + 1j * imag_norm
+
+        angles = np.angle(experiment_Z)
+        angles_norm = get_norm(angles)
+
+        mag = np.abs(experiment_Z)
+        mag_norm = get_norm(mag)
+
+        mag_scaled = np.log10(np.abs(experiment_Z)) / max(np.log10(np.abs(experiment_Z)))
+
+        return Z_norm, angles_norm, mag_norm, mag_scaled
 
     @staticmethod
     def flatten_EIS(experiment_Z, eis_features=["ImZ", "phi", "mag", "nphi"]):
         """
-        Normalize each feature of EIS data and concatenate (flatten) the selected
-        features.
+        Normalize each feature of EIS data and concatenate (flatten) the selected features.
         """
-        return flatten_EIS(experiment_Z, eis_features)
+        Z, phi, _, mag = EISDataPrep.normalize_EIS(experiment_Z)
+        ReZ = np.real(Z)
+        ImZ = np.imag(Z)
+        all_values = {
+            "ReZ": ReZ,
+            "ImZ": ImZ,
+            "phi": phi,
+            "mag": mag,
+            "nReZ": -ReZ,
+            "nImZ": -ImZ,
+            "nphi": -phi,
+            "nmag": -mag,
+        }
+        flatten_Z = np.concatenate([all_values[f] for f in eis_features])
+        return flatten_Z
 
     def load_single_csv(self, csv_path: Path, base_path: Path) -> Optional[dict]:
         """
@@ -791,145 +864,6 @@ class EISDataPrep:
             print(f"Dataset saved to {output_path}")
         else:
             raise ValueError(f"Unsupported file_type: {file_type}")
-
-
-def interpolate_eis(freq, Z, freq_new):
-    """
-    Interpolate the EIS impedance data.
-
-    Given a list of new frequency values, we interpolate the current impedance data for
-    those new frequency values.
-
-    Parameters
-    ----------
-    freq: np.array
-        Original frequency data.
-    Z: np.array
-        Original impedance data.
-    freq_new: np.array
-        New array of frequencies that we want.
-
-    Returns
-    -------
-    New interpolated impedance values
-
-    Usage
-    -----
-    >>> freq_new = np.logspace(*(np.log10(freq[[0, -1]])), npoints, endpoint=True)
-    >>> Z_new = interpolate_eis(freq, Z, freq_new)
-    """
-    idx_sort = np.argsort(freq)
-    idx_sort_new = np.argsort(freq_new)
-    real_new = CubicSpline(freq[idx_sort], Z[idx_sort].real)(freq_new[idx_sort_new])
-    imag_new = CubicSpline(freq[idx_sort], Z[idx_sort].imag)(freq_new[idx_sort_new])
-    # Revert the sorting
-    inv_idx_sort_new = np.argsort(idx_sort_new)
-    return real_new[inv_idx_sort_new] + 1j * imag_new[inv_idx_sort_new]
-
-
-# Include the following functions for easy access to these functionalities without
-# instantiating EISDataPrep class.
-def find_both_threshold(
-    experiment_freq, experiment_Z, upper_bound_decrease=0.997, lower_bound_increase=2.5
-):
-    # tol_linKK= 5e-1
-    for _ in range(3):
-        linKK_kwargs = {"c": 0.5, "max_M": 100, "fit_type": "complex", "add_cap": True}
-        linKK_silent = ae.utils.suppress_output_legacy(
-            linKK,
-        )
-        M, mu, Z_linKK, res_real, res_imag = linKK_silent(
-            experiment_freq, experiment_Z, **linKK_kwargs
-        )
-
-    r2_kk = ae.metrics.r2_score(experiment_Z, Z_linKK)
-    r2_thresh_kk = r2_kk * upper_bound_decrease
-
-    chi_kk = chi_obj_func(experiment_Z, Z_linKK)
-    chi_thresh_kk = lower_bound_increase * chi_kk
-
-    return chi_thresh_kk, r2_thresh_kk
-
-
-def find_chi_threshold(experiment_freq, experiment_Z, lower_bound_increase=2.5):
-    # tol_linKK= 5e-1
-    for _ in range(3):
-        linKK_kwargs = {"c": 0.5, "max_M": 100, "fit_type": "complex", "add_cap": True}
-        linKK_silent = ae.utils.suppress_output_legacy(
-            linKK,
-        )
-        M, mu, Z_linKK, res_real, res_imag = linKK_silent(
-            experiment_freq, experiment_Z, **linKK_kwargs
-        )
-
-    chi_kk = chi_obj_func(experiment_Z, Z_linKK)
-    chi_thresh_kk = lower_bound_increase * chi_kk
-
-    return chi_thresh_kk
-
-
-def find_r2_threshold(experiment_freq, experiment_Z, upper_bound_decrease=0.997):
-    # tol_linKK= 5e-1
-    for _ in range(3):
-        linKK_kwargs = {"c": 0.5, "max_M": 100, "fit_type": "complex", "add_cap": True}
-        linKK_silent = ae.utils.suppress_output_legacy(
-            linKK,
-        )
-        M, mu, Z_linKK, res_real, res_imag = linKK_silent(
-            experiment_freq, experiment_Z, **linKK_kwargs
-        )
-
-    r2_kk = ae.metrics.r2_score(experiment_Z, Z_linKK)
-    r2_thresh_kk = r2_kk * upper_bound_decrease
-
-    return r2_thresh_kk
-
-
-def normalize_EIS(experiment_Z):
-    """
-    Normalize EIS data using min-max normalization.
-    Returns normalized impedance, angles, magnitude, and scaled magnitude.
-    """
-
-    def get_norm(value):
-        """Generic min-max normalization: scales to [0, 1] range"""
-        value_shifted_by_offset = value - np.min(value)
-        return value_shifted_by_offset / np.max(value_shifted_by_offset)
-
-    real_norm = get_norm(np.real(experiment_Z))
-    imag_norm = get_norm(np.imag(experiment_Z))
-    Z_norm = real_norm + 1j * imag_norm
-
-    angles = np.angle(experiment_Z)
-    angles_norm = get_norm(angles)
-
-    mag = np.abs(experiment_Z)
-    mag_norm = get_norm(mag)
-
-    mag_scaled = np.log10(np.abs(experiment_Z)) / max(np.log10(np.abs(experiment_Z)))
-
-    return Z_norm, angles_norm, mag_norm, mag_scaled
-
-
-def flatten_EIS(experiment_Z, eis_features=["ImZ", "phi", "mag", "nphi"]):
-    """
-    Normalize each feature of EIS data and concatenate (flatten) the selected features.
-    """
-    Z, phi, _, mag = normalize_EIS(experiment_Z)
-    ReZ = np.real(Z)
-    ImZ = np.imag(Z)
-    all_values = {
-        "ReZ": ReZ,
-        "ImZ": ImZ,
-        "phi": phi,
-        "mag": mag,
-        "nReZ": -ReZ,
-        "nImZ": -ImZ,
-        "nphi": -phi,
-        "nmag": -mag,
-    }
-    flatten_Z = np.concatenate([all_values[f] for f in eis_features])
-    return flatten_Z
 
 
 # ==================== USAGE EXAMPLES ====================
