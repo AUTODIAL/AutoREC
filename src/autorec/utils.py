@@ -1,4 +1,4 @@
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Iterable, Mapping
 import contextlib
 import glob
 import io
@@ -7,29 +7,27 @@ import os
 import re
 import warnings
 from pathlib import Path
-from typing import Optional
 
 import autoeis as ae
 from autoeis.utils import parse_initial_guess, generate_initial_guess, generate_circuit_fn
 
-import arviz as az
-from impedance.validation import linKK
 import matplotlib.pyplot as plt
 import numpy as np
 from numpy.linalg import norm
 import pandas as pd
 import jax.numpy as jnp
 from scipy.optimize import least_squares
-import matplotlib.pyplot as plt
 import tensorflow as tf
 
 
 log = logging.getLogger(__name__)
 
+
 class DivergenceError(Exception):
     """Raised when circuit parameter fitting fails to converge."""
 
     pass
+
 
 ec = ae.core.ec
 
@@ -120,6 +118,7 @@ def set_global_seed(seed: int = 42, deterministic_ops: bool = True):
     
     print(f"Global seed set to {seed}")
     print(f"Deterministic operations: {deterministic_ops}")
+
 
 def chi_obj_func(Z, Z_pred):
     """Computes ECM error based on residual-based χ2."""
@@ -311,6 +310,7 @@ def state_encode(state, ELEMENTS_extended):
 
     return flattened_encoded_string
 
+
 def parse_state_to_circuit(state: str) -> tuple[str, int, str]:
     """
     Parse chromosome state into circuit representation.
@@ -330,6 +330,7 @@ def parse_state_to_circuit(state: str) -> tuple[str, int, str]:
     coding_length = len(tree)
     coding = state[0:coding_length]
     return circuit, coding_length, coding
+
 
 def karva_to_circuit(karva: str):
     """
@@ -387,6 +388,7 @@ def validity_check(circuit: str):
 
     return validity
 
+
 def action_validity(state, action_type, action_position):
     """
     Check whether replacing one chromosome position creates a valid action.
@@ -416,7 +418,7 @@ def action_validity(state, action_type, action_position):
     # coding = state[0:conding_length]
     circuit = karva_to_circuit(karva)
     validity = validity_check(circuit)
-    if  action_position > conding_length-1:
+    if action_position > conding_length-1:
         validity = False 
     if state == new_state:
         validity = False 
@@ -427,6 +429,7 @@ def action_validity(state, action_type, action_position):
         validity_state = 1
     
     return validity_state
+
 
 def get_parameter_bounds(circuit: str) -> tuple:
     """Returns a 2-element tuple of lower and upper bounds, to be used in
@@ -454,6 +457,7 @@ def get_parameter_bounds(circuit: str) -> tuple:
     bounds = [bounds_dict[type_] for type_ in types]
     bounds = tuple(zip(*bounds))
     return bounds
+
 
 def fit_circuit_parameters_NEW(
     circuit: str,
@@ -619,7 +623,7 @@ def fit_circuit_parameters_NEW(
         "X2": obj_X2,
         "PW": obj_PW,
         "B": obj_B,
-        "log-B" : obj_log_B,
+        "log-B": obj_log_B,
         "log-BW": obj_log_BW
 
     }[method]
@@ -674,7 +678,7 @@ def fit_circuit_parameters_NEW(
     return dict(zip(variables, p0)), X2, r2_score, r2_mag, r2_phase
 
 
-def plot_bar(data, title = None, filename = None, color = 'red'):
+def plot_bar(data, title=None, filename=None, color='red'):
     """
     Save a labeled bar plot for a mapping of category values.
 
@@ -709,7 +713,7 @@ def plot_bar(data, title = None, filename = None, color = 'red'):
     plt.xlabel("Categories")
     plt.ylabel("Success rate %")
     plt.title("Bar Plot of Given Data ({title})" if title else "Bar Plot of Given Data")
-    plt.ylim(0,100)
+    plt.ylim(0, 100)
 
     # Rotate x labels for better visibility
     plt.xticks(rotation=45, ha="right")
@@ -741,7 +745,7 @@ def create_circuit_evolution_visualization(
     gif_frame_duration=2500,
     gif_final_frame_duration=5000,
     cleanup_temp_files=True,
-    save_dir = None
+    save_dir=None
 ):
     """
     Create circuit evolution visualization frames and GIF for evaluation results.
@@ -1051,9 +1055,7 @@ def create_circuit_evolution_visualization(
     print(f"✓ Final frame held for {durations[-1]/1000}s")
 
 
-
 # Add this new method to the DDQN_ECM class (before create_circuit_evolution_visualization)
-
 def prepare_and_generate_circuit_gif(
     _active_env,
     action_history,
