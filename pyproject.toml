@@ -19,9 +19,9 @@ authors = [
   { name = "Kabir Verma", email = "kverma@uwaterloo.ca" },
   { name = "Jason Hattrick-Simpers", email = "jason.hattrick.simpers@utoronto.ca" },
 ]
-maintainers = [  
+maintainers = [
   { name = "Ali Jaberi", email = "444ajaberi555@gmail.com" },
-  { name = "Yonatan Kurniawan", email = "kurniawanyo@outlook.com" } 
+  { name = "Yonatan Kurniawan", email = "kurniawanyo@outlook.com" }
 ]
 dependencies = [
   "arviz>=0.23,<0.24",
@@ -58,8 +58,10 @@ notebook = [
   "ipywidgets==8.1.3",
   "jupyterlab==4.2.4",
 ]
+
 dev = [
   "build>=1",
+  "pre-commit>=3,<5",
   "pytest>=8,<9",
   "ruff>=0.6,<1",
 ]
@@ -72,7 +74,6 @@ include-package-data = true
 where = ["src"]
 
 [tool.setuptools_scm]
-
 
 [tool.setuptools.package-data]
 autorec = ["default_configs/*.yaml"]

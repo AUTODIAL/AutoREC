@@ -20,7 +20,7 @@ electrochemical systems.
 
 
 >  AutoREC is now published in arxiv. You can find the paper [here](https://doi.org/10.48550/arXiv.2604.27266). If you find AutoREC useful, please consider citing it in your work.
-> 
+>
 > A. Jaberi, Y. Kurniawan, et al., AutoREC: A software platform for developing reinforcement learning agents for equivalent circuit model generation from electrochemical impedance spectroscopy data
 
 ## Key Features
@@ -269,6 +269,10 @@ the best circuit, fitted parameters, metrics, and action history.
 ```text
 AutoREC/
 |-- pyproject.toml                  # Package metadata and dependencies
+|-- ruff.toml                       # Ruff linting and formatting configuration
+|-- .pre-commit-config.yaml         # Pre-commit hook configuration
+|-- .editorconfig                   # Editor-independent whitespace settings
+|-- Makefile                        # Development setup and linting commands
 |-- environment.yml                 # Conda environment that installs this package
 |-- requirements.txt                # Pip entry point that installs from pyproject.toml
 |-- setup_env.sh                    # Convenience conda setup script
@@ -285,7 +289,7 @@ AutoREC/
 |       |-- environment.py          # RL environment for ECM generation
 |       |-- factory.py              # Builders for config-driven workflows
 |       |-- utils.py                # Shared utilities
-|       |-- runtime.py              # helper for run time fix 
+|       |-- runtime.py              # Runtime setup helpers
 |       |-- default_configs/        # Package-level default configs
 |       `-- optimized_data_structures/
 |-- trained_agent/                  # Example trained model
@@ -302,11 +306,68 @@ AutoREC/
 The codebase includes support for saving models and training outputs. More
 efficient training and circuit representation are under development for public use.
 
+### Development Setup
+
+For development work, first create and activate the AutoREC environment:
+
+```bash
+conda create -n autorec_env python=3.10 -y
+conda activate autorec_env
+python -m pip install --upgrade pip
+```
+
+Then install the package with development dependencies and enable the pre-commit
+hooks:
+
+```bash
+make setup-dev
+```
+
+This command installs AutoREC in editable mode with the development dependencies
+and runs `pre-commit install`.
+
+If you also want the notebook dependencies, run:
+
+```bash
+make setup-notebook-dev
+```
+
+### Pre-commit Hooks
+
+AutoREC uses pre-commit hooks to keep formatting and linting consistent before
+changes are committed. After running `make setup-dev` or
+`make setup-notebook-dev`, the configured checks will run automatically whenever
+you commit changes with `git commit`.
+
+To manually run the same checks on all files, use:
+
+```bash
+make lint
+```
+
+Some hooks may modify files automatically, such as removing trailing whitespace,
+fixing missing final newlines, sorting imports, or formatting Python files. If
+that happens during a commit, stage the modified files and commit again:
+
+```bash
+git add .
+git commit -m "Your commit message"
+```
+
+To skip the hooks in exceptional cases, use:
+
+```bash
+git commit --no-verify
+```
+
+This should be used sparingly, since it bypasses the formatting and linting
+checks.
+
 ## Citation
 
 If you use AutoREC, please cite the accompanying AutoREC paper. You can find the paper [here](https://doi.org/10.48550/arXiv.2604.27266).
 
-> AutoREC: A software platform for developing reinforcement learning agents for equivalent circuit model generation from electrochemical impedance spectroscopy data. 
+> AutoREC: A software platform for developing reinforcement learning agents for equivalent circuit model generation from electrochemical impedance spectroscopy data.
 
 ## License
 
