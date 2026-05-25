@@ -11,6 +11,7 @@ import autoeis as ae
 import impedance.validation
 from impedance.validation import linKK
 from autorec.utils import chi_obj_func
+
 impedance.validation.circuit_elements["np"] = np
 
 # Constant definition for threshold calculations
@@ -21,15 +22,19 @@ DEFAULT_LOWER_BOUND_INCREASE = 2.5
 
 class EISDataPrep:
     """
-    EIS data preparation class for loading, processing, and validating datasets containing EIS (Electrochemical Impedance Spectroscopy) data required for training the RL agent using DDDN_ECM.
+    EIS data preparation class for loading, processing, and validating datasets containing EIS
+    (Electrochemical Impedance Spectroscopy) data required for training the RL agent using
+    DDDN_ECM.
 
     Can either:
     1. Load raw CSV files from a folder and process them
-        Process includes calculating the necessary values needed for EIS such as thresholds and flattening the frequency and Z values.
+       Process includes calculating the necessary values needed for EIS such as thresholds and
+       flattening the frequency and Z values.
     2. Load and validate existing processed pickle/CSV files
 
     Expectations:
-        The final dataset must have the following 6 columns with an optional column that's required only for evaluation.
+        The final dataset must have the following 6 columns with an optional column that's
+        required only for evaluation.
 
         - sub_id: Identifier tracking which subfolder/file the data came from
         - true_circuit: Circuit representation as string (from folder name)
@@ -39,51 +44,61 @@ class EISDataPrep:
         - chi_thresh: Chi-square threshold value
         - r2_thresh: R-squared threshold value
 
-        We expect each EIS to have the same number of values in their freq, Z_imag, Z_real columns.
-        Eg. EIS 1: will have 80 data points and EIS n should have the same number of points as EIS 1.
+        We expect each EIS to have the same number of values in their freq, Z_imag, Z_real
+        columns.
+        Eg. EIS 1: will have 80 data points and EIS n should have the same number of points as
+        EIS 1.
 
     File Requirements:
     1. Pickle files
-        Pickle files will be loaded directly. The expectation will be that they have all the data, unless the process flag is on.
+        Pickle files will be loaded directly. The expectation will be that they have all the
+        data, unless the process flag is on.
     2. CSV files
-        Three columns should be provided: freq, Z_imag, Z_real with these exact column names. The CSV files should all be in a single folder.
+        Three columns should be provided: freq, Z_imag, Z_real with these exact column names.
+        The CSV files should all be in a single folder.
 
         Optional:
-        - The folder name will be used as the string for column: true_circuit, such that all the csv files in a folder are expected to have the same ECM. The name used for the circuit will be the direct parent of the file. So please be mindful of folder substructures. If you would like more descriptive folder names, or make subcategorizations, then the name of the folder will be split on the '_' character.
+        - The folder name will be used as the string for column: true_circuit, such that all
+          the csv files in a folder are expected to have the same ECM. The name used for the
+          circuit will be the direct parent of the file. So please be mindful of folder
+          substructures. If you would like more descriptive folder names, or make
+          subcategorizations, then the name of the folder will be split on the '_' character.
         Eg. if two folder paths exist:
         Raw_EIS/simple_circuits/RRR_1 and Raw_EIS/simple_circuits/RRR
-        All the CSV files in both folders, will be classified as having their true_circuit as "RRR"
+        All the CSV files in both folders, will be classified as having their true_circuit as
+        "RRR"
 
-        - If the true_circuit isn't available, an arbitrary name can be used and the dataset won't be prepared for evaluation
-        to help with specific and detailed tracking, the name of the file is used as the label for sub-id
+        - If the true_circuit isn't available, an arbitrary name can be used and the dataset
+          won't be prepared for evaluation to help with specific and detailed tracking, the
+          name of the file is used as the label for sub-id
 
     """
 
     REQUIRED_COLUMNS = [
-      "sub_id",
-      "freq",
-      "Z_true",
-      "flatten_Z",
-      "chi_thresh",
-      "r2_thresh",
+        "sub_id",
+        "freq",
+        "Z_true",
+        "flatten_Z",
+        "chi_thresh",
+        "r2_thresh",
     ]
 
     EVAL_REQUIRED_COLUMNS = [
-        'sub_id',
-        'true_circuit',
-        'freq',
-        'Z_true',
-        'flatten_Z',
-        'chi_thresh',
-        'r2_thresh',
+        "sub_id",
+        "true_circuit",
+        "freq",
+        "Z_true",
+        "flatten_Z",
+        "chi_thresh",
+        "r2_thresh",
     ]
 
     def __init__(
         self,
         path: Union[str, Path],
-        mode: str = 'load',
+        mode: str = "load",
         evaluation: bool = False,
-        eis_features: Optional[list] = ["ImZ", "phi", "mag", "nphi"]
+        eis_features: Optional[list] = ["ImZ", "phi", "mag", "nphi"],
     ):
         """
         Initialize EISDataPrep, please ensure the provided data fits the expectations below.
@@ -127,7 +142,9 @@ class EISDataPrep:
             raise FileNotFoundError(f"EISDataPrep: Path not found: {self.path}")
 
         if mode not in ["process", "load"]:
-            raise ValueError(f"EISDataPrep: Invalid mode: '{mode}'. Must be 'process' or 'load'")
+            raise ValueError(
+                f"EISDataPrep: Invalid mode: '{mode}'. Must be 'process' or 'load'"
+            )
 
         avail_eis_features = ["ReZ", "ImZ", "phi", "mag", "nReZ", "nImZ", "nphi", "nmag"]
         if isinstance(eis_features, str):
@@ -146,16 +163,16 @@ class EISDataPrep:
         self._validation_errors = []
         self._validation_warnings = []
 
-        if mode == 'load':
+        if mode == "load":
             # Determine file type if in load mode
             if not self.path.is_file():
                 raise ValueError(f"In 'load' mode, path must be a file, got: {self.path}")
 
             suffix = self.path.suffix.lower()
-            if suffix in ['.pkl', '.pickle']:
-                self.file_type = 'pickle'
-            elif suffix == '.csv':
-                self.file_type = 'csv'
+            if suffix in [".pkl", ".pickle"]:
+                self.file_type = "pickle"
+            elif suffix == ".csv":
+                self.file_type = "csv"
             else:
                 raise ValueError(
                     f"Cannot auto-detect file type from extension '{suffix}'. "
@@ -171,7 +188,7 @@ class EISDataPrep:
         freq: np.ndarray,
         Z_true: np.ndarray,
         upper_bound_decrease: float = DEFAULT_UPPER_BOUND_DECREASE,
-        lower_bound_increase: float = DEFAULT_LOWER_BOUND_INCREASE
+        lower_bound_increase: float = DEFAULT_LOWER_BOUND_INCREASE,
     ) -> tuple:
         """
         Calculate chi_thresh and r2_thresh by fitting the circuit.
@@ -194,14 +211,14 @@ class EISDataPrep:
             (chi_thresh, r2_thresh) values
         """
         # Explicit check for process mode only
-        if self.mode != 'process':
-            raise RuntimeError(
-                "calculate_thresholds should only be called in 'process' mode"
-            )
+        if self.mode != "process":
+            raise RuntimeError("calculate_thresholds should only be called in 'process' mode")
 
         for _ in range(3):
             linKK_kwargs = {"c": 0.4, "max_M": 100, "fit_type": "complex", "add_cap": True}
-            linKK_silent = ae.utils.suppress_output_legacy(linKK,)
+            linKK_silent = ae.utils.suppress_output_legacy(
+                linKK,
+            )
             _, _, Z_linKK, _, _ = linKK_silent(freq, Z_true, **linKK_kwargs)
         chi_kk = chi_obj_func(Z_true, Z_linKK)
         r2_kk = ae.metrics.r2_score(Z_true, Z_linKK)
@@ -251,6 +268,7 @@ class EISDataPrep:
         Normalize EIS data using min-max normalization.
         Returns normalized impedance, angles, magnitude, and scaled magnitude.
         """
+
         def get_norm(value):
             """Generic min-max normalization: scales to [0, 1] range"""
             value_shifted_by_offset = value - np.min(value)
@@ -312,8 +330,8 @@ class EISDataPrep:
             data = pd.read_csv(csv_path)
 
             # Extract frequency and impedance
-            freq = np.array(data['freq'])
-            Z_true = np.array(data['Z_real'] + 1j * data['Z_imag'])
+            freq = np.array(data["freq"])
+            Z_true = np.array(data["Z_real"] + 1j * data["Z_imag"])
 
             # Normalize and flatten
             flatten_Z = self.flatten_EIS(Z_true, self.eis_features)
@@ -329,13 +347,13 @@ class EISDataPrep:
             chi_thresh, r2_thresh = self.calculate_thresholds(freq, Z_true)
 
             return {
-                'sub_id': sub_id,
-                'true_circuit': circuit_string,
-                'freq': freq,
-                'Z_true': Z_true,
-                'flatten_Z': flatten_Z,
-                'chi_thresh': chi_thresh,
-                'r2_thresh': r2_thresh
+                "sub_id": sub_id,
+                "true_circuit": circuit_string,
+                "freq": freq,
+                "Z_true": Z_true,
+                "flatten_Z": flatten_Z,
+                "chi_thresh": chi_thresh,
+                "r2_thresh": r2_thresh,
             }
 
         except Exception as e:
@@ -364,8 +382,8 @@ class EISDataPrep:
         if parent_folder == base_path:
             # No subfolder, extract from filename as fallback
             stem = csv_path.stem
-            if '_' in stem:
-                circuit_string = stem.rsplit('_', 1)[0]
+            if "_" in stem:
+                circuit_string = stem.rsplit("_", 1)[0]
             else:
                 circuit_string = stem
         else:
@@ -408,7 +426,7 @@ class EISDataPrep:
         all_data = []
 
         # Recursively get all CSV files from all subfolders
-        csv_files = list(self.path.rglob('*.csv'))
+        csv_files = list(self.path.rglob("*.csv"))
         print(f"Found {len(csv_files)} CSV files (including subfolders)")
 
         # Group files by folder for reporting
@@ -428,8 +446,8 @@ class EISDataPrep:
         print(f"\nProcessed {len(df)} samples successfully")
 
         # Report unique circuits found
-        if 'true_circuit' in df.columns:
-            unique_circuits = df['true_circuit'].nunique()
+        if "true_circuit" in df.columns:
+            unique_circuits = df["true_circuit"].nunique()
             print(f"Found {unique_circuits} unique circuit types")
             print(f"Circuits: {sorted(df['true_circuit'].unique())}")
 
@@ -445,8 +463,8 @@ class EISDataPrep:
         pd.DataFrame
             Loaded pandas DataFrame
         """
-        if self.file_type in ['pkl', 'pickle']:
-            with open(self.path, 'rb') as f:
+        if self.file_type in ["pkl", "pickle"]:
+            with open(self.path, "rb") as f:
                 data = pickle.load(f)
 
             if not isinstance(data, pd.DataFrame):
@@ -456,7 +474,7 @@ class EISDataPrep:
                 )
             return data
 
-        if self.file_type == 'csv':
+        if self.file_type == "csv":
             # Load CSV - may need special handling for array columns
             return pd.read_csv(self.path)
 
@@ -492,7 +510,9 @@ class EISDataPrep:
             return False
 
         # Determine which columns are required based on evaluation mode
-        required_cols = self.EVAL_REQUIRED_COLUMNS if self.evaluation else self.REQUIRED_COLUMNS
+        required_cols = (
+            self.EVAL_REQUIRED_COLUMNS if self.evaluation else self.REQUIRED_COLUMNS
+        )
 
         # Check for required columns
         missing_columns = []
@@ -507,10 +527,7 @@ class EISDataPrep:
             self._validation_errors.append(error_msg)
 
         # Check for extra columns (as warning only)
-        extra_columns = [
-            col for col in self.dataset.columns
-            if col not in required_cols
-        ]
+        extra_columns = [col for col in self.dataset.columns if col not in required_cols]
         if extra_columns:
             self._validation_warnings.append(
                 f"Dataset contains extra columns (will be ignored): {', '.join(extra_columns)}"
@@ -528,14 +545,14 @@ class EISDataPrep:
         Validate circuit strings using ae.parser.validate_circuit().
         Adds warnings for invalid circuit formats.
         """
-        if 'true_circuit' not in self.dataset.columns:
+        if "true_circuit" not in self.dataset.columns:
             return
 
         invalid_circuits = []
         circuit_errors = {}
 
         # Check each unique circuit
-        unique_circuits = self.dataset['true_circuit'].unique()
+        unique_circuits = self.dataset["true_circuit"].unique()
 
         for circuit in unique_circuits:
             try:
@@ -551,9 +568,7 @@ class EISDataPrep:
             )
             for circuit in invalid_circuits[:5]:  # Show first 5
                 error_msg = circuit_errors.get(circuit, "Unknown error")
-                self._validation_warnings.append(
-                    f"  - '{circuit}': {error_msg}"
-                )
+                self._validation_warnings.append(f"  - '{circuit}': {error_msg}")
             if len(invalid_circuits) > 5:
                 self._validation_warnings.append(
                     f"  ... and {len(invalid_circuits) - 5} more invalid circuits"
@@ -563,6 +578,7 @@ class EISDataPrep:
         """
         Validate that each column contains the expected data type/structure.
         """
+
         def check_array_column(col_name):
             """Check if column contains array-like data."""
             if col_name in self.dataset.columns:
@@ -596,15 +612,15 @@ class EISDataPrep:
                     )
 
         # Validate array columns
-        for col in ['Z_true', 'freq', 'flatten_Z']:
+        for col in ["Z_true", "freq", "flatten_Z"]:
             check_array_column(col)
 
         # Validate string columns
-        for col in ['true_circuit', 'sub_id']:
+        for col in ["true_circuit", "sub_id"]:
             check_string_column(col)
 
         # Validate numeric columns
-        for col in ['chi_thresh', 'r2_thresh']:
+        for col in ["chi_thresh", "r2_thresh"]:
             check_numeric_column(col)
 
     # TODO: double check if it works fine
@@ -620,7 +636,7 @@ class EISDataPrep:
             return
 
         # Check columns exist
-        array_cols = ['freq', 'Z_true', 'flatten_Z']
+        array_cols = ["freq", "Z_true", "flatten_Z"]
         missing = [col for col in array_cols if col not in self.dataset.columns]
         if missing:
             return  # Will be caught by other validation
@@ -628,19 +644,19 @@ class EISDataPrep:
         # First: Check within-sample consistency (freq and Z_true must match for each sample)
         within_sample_errors = []
         for idx, row in self.dataset.iterrows():
-            freq_len = len(row['freq'])
-            Z_len = len(row['Z_true'])
+            freq_len = len(row["freq"])
+            Z_len = len(row["Z_true"])
 
             if freq_len != Z_len:
-                sub_id = row.get('sub_id', f'row {idx}')
+                sub_id = row.get("sub_id", f"row {idx}")
                 within_sample_errors.append(
                     f"{sub_id}: freq has {freq_len} points but Z_true has {Z_len} points"
                 )
 
         if within_sample_errors:
             self._validation_errors.append(
-                f"Found {len(within_sample_errors)} samples where freq and Z_true lengths don't match. "
-                f"Each sample must have equal freq and impedance points."
+                f"Found {len(within_sample_errors)} samples where freq and Z_true lengths "
+                "don't match. Each sample must have equal freq and impedance points."
             )
             for error in within_sample_errors[:3]:
                 self._validation_errors.append(f"  - {error}")
@@ -651,9 +667,8 @@ class EISDataPrep:
             return  # Don't proceed to cross-sample validation if within-sample is broken
 
         # Second: Check cross-sample consistency (all samples have same dimensions)
-        first_freq_len = len(self.dataset.iloc[0]['freq'])
-        first_Z_len = len(self.dataset.iloc[0]['Z_true'])
-        first_flatten_len = len(self.dataset.iloc[0]['flatten_Z'])
+        first_freq_len = len(self.dataset.iloc[0]["freq"])
+        first_flatten_len = len(self.dataset.iloc[0]["flatten_Z"])
 
         # Track inconsistencies across samples
         freq_mismatches = []
@@ -661,19 +676,19 @@ class EISDataPrep:
 
         # Check all samples (skip first since it's the reference)
         for idx, row in self.dataset.iloc[1:].iterrows():
-            current_freq_len = len(row['freq'])
-            current_flatten_len = len(row['flatten_Z'])
+            current_freq_len = len(row["freq"])
+            current_flatten_len = len(row["flatten_Z"])
 
             # Check freq length (Z_true will match freq due to within-sample check)
             if current_freq_len != first_freq_len:
-                sub_id = row.get('sub_id', f'row {idx}')
+                sub_id = row.get("sub_id", f"row {idx}")
                 freq_mismatches.append(
                     f"{sub_id}: {current_freq_len} points (expected {first_freq_len})"
                 )
 
             # Check flatten_Z length
             if current_flatten_len != first_flatten_len:
-                sub_id = row.get('sub_id', f'row {idx}')
+                sub_id = row.get("sub_id", f"row {idx}")
                 flatten_mismatches.append(
                     f"{sub_id}: {current_flatten_len} points (expected {first_flatten_len})"
                 )
@@ -712,9 +727,9 @@ class EISDataPrep:
         str
             Formatted error message
         """
-        error_msg = f"\n{'='*60}\n"
+        error_msg = f"\n{'=' * 60}\n"
         error_msg += "EISDataPrep VALIDATION FAILED\n"
-        error_msg += f"{'='*60}\n\n"
+        error_msg += f"{'=' * 60}\n\n"
         error_msg += f"Path: {self.path}\n"
         error_msg += f"Mode: {self.mode}\n"
         error_msg += f"Evaluation Mode: {self.evaluation}\n\n"
@@ -726,15 +741,17 @@ class EISDataPrep:
         for i, error in enumerate(self._validation_errors, 1):
             error_msg += f"  {i}. {error}\n"
 
-        required_cols = self.EVAL_REQUIRED_COLUMNS if self.evaluation else self.REQUIRED_COLUMNS
+        required_cols = (
+            self.EVAL_REQUIRED_COLUMNS if self.evaluation else self.REQUIRED_COLUMNS
+        )
 
-        error_msg += f"\n{'='*60}\n"
+        error_msg += f"\n{'=' * 60}\n"
         error_msg += "Required Columns:\n"
         for col in required_cols:
             status = "✓" if self.dataset is not None and col in self.dataset.columns else "✗"
             error_msg += f"  {status} {col}\n"
 
-        return error_msg + f"{'='*60}\n"
+        return error_msg + f"{'=' * 60}\n"
 
     def load(self) -> pd.DataFrame:
         """
@@ -751,7 +768,7 @@ class EISDataPrep:
             If validation fails
         """
         try:
-            if self.mode == 'process':
+            if self.mode == "process":
                 self.dataset = self.process_raw_data()
             else:
                 self.dataset = self._load_data()
@@ -778,9 +795,9 @@ class EISDataPrep:
     # ==================== UTILITY METHODS ====================
     def get_summary(self) -> None:
         """Print summary of the loaded/processed dataset."""
-        print("="*80)
+        print("=" * 80)
         print("DATASET SUMMARY")
-        print("="*80)
+        print("=" * 80)
         print(f"Mode: {self.mode}")
         print(f"Evaluation Mode: {self.evaluation}")
         print(f"Path: {self.path}")
@@ -792,29 +809,28 @@ class EISDataPrep:
             print(f"\nShape: {self.dataset.shape}")
 
             # Show circuit distribution
-            if 'true_circuit' in self.dataset.columns:
-                circuit_counts = self.dataset['true_circuit'].value_counts()
-                print(f"\nCircuit distribution:")
+            if "true_circuit" in self.dataset.columns:
+                circuit_counts = self.dataset["true_circuit"].value_counts()
+                print("\nCircuit distribution:")
                 print(circuit_counts)
 
             # Show sub_id info
-            if 'sub_id' in self.dataset.columns:
+            if "sub_id" in self.dataset.columns:
                 print(f"\nUnique files/subfolders: {self.dataset['sub_id'].nunique()}")
 
             if len(self.dataset) > 0:
                 print(f"\nSample flatten_Z length: {len(self.dataset.iloc[0]['flatten_Z'])}")
                 print(f"Sample freq length: {len(self.dataset.iloc[0]['freq'])}")
 
-            print("\n" + "="*80)
+            print("\n" + "=" * 80)
             print("FIRST 5 ROWS (metadata only)")
-            print("="*80)
+            print("=" * 80)
             # Show just the metadata columns for clarity
-            metadata_cols = [col for col in [
-                'true_circuit',
-                'sub_id',
-                'chi_thresh',
-                'r2_thresh'
-                ] if col in self.dataset.columns]
+            metadata_cols = [
+                col
+                for col in ["true_circuit", "sub_id", "chi_thresh", "r2_thresh"]
+                if col in self.dataset.columns
+            ]
             print(self.dataset[metadata_cols].head())
 
     def get_validation_summary(self) -> dict:
@@ -827,19 +843,20 @@ class EISDataPrep:
             Dictionary containing validation status, errors, and warnings
         """
         return {
-            'is_valid': len(self._validation_errors) == 0,
-            'errors': self._validation_errors.copy(),
-            'warnings': self._validation_warnings.copy(),
-            'path': str(self.path),
-            'mode': self.mode,
-            'evaluation': self.evaluation,
-            'num_rows': len(self.dataset) if self.dataset is not None else 0,
-            'columns_found': list(self.dataset.columns) if self.dataset is not None else [],
-            'required_columns': (self.EVAL_REQUIRED_COLUMNS if self.evaluation
-                               else self.REQUIRED_COLUMNS).copy()
+            "is_valid": len(self._validation_errors) == 0,
+            "errors": self._validation_errors.copy(),
+            "warnings": self._validation_warnings.copy(),
+            "path": str(self.path),
+            "mode": self.mode,
+            "evaluation": self.evaluation,
+            "num_rows": len(self.dataset) if self.dataset is not None else 0,
+            "columns_found": list(self.dataset.columns) if self.dataset is not None else [],
+            "required_columns": (
+                self.EVAL_REQUIRED_COLUMNS if self.evaluation else self.REQUIRED_COLUMNS
+            ).copy(),
         }
 
-    def save(self, output_path: Union[str, Path], file_type: str = 'pickle'):
+    def save(self, output_path: Union[str, Path], file_type: str = "pickle"):
         """
         Save the processed dataset.
 
@@ -855,11 +872,11 @@ class EISDataPrep:
 
         output_path = Path(output_path)
 
-        if file_type == 'pickle':
-            with open(output_path, 'wb') as f:
+        if file_type == "pickle":
+            with open(output_path, "wb") as f:
                 pickle.dump(self.dataset, f)
             print(f"Dataset saved to {output_path}")
-        elif file_type == 'csv':
+        elif file_type == "csv":
             self.dataset.to_csv(output_path, index=False)
             print(f"Dataset saved to {output_path}")
         else:
@@ -869,21 +886,21 @@ class EISDataPrep:
 # ==================== USAGE EXAMPLES ====================
 if __name__ == "__main__":
     # Example 1: Process raw CSV files from a folder (with subfolders)
-    print("="*80)
+    print("=" * 80)
     print("EXAMPLE 1: Processing raw CSV files (recursive)")
-    print("="*80)
+    print("=" * 80)
 
     prep1 = EISDataPrep(
         path="./EIS_raw/",
-        mode='process',
-        evaluation=False  # Training mode
+        mode="process",
+        evaluation=False,  # Training mode
     )
 
     dataset1 = prep1.load()
     prep1.get_summary()
 
     # Save the processed data
-    prep1.save('processed_training_data.pkl')
+    prep1.save("processed_training_data.pkl")
 
     # print("\n" + "="*80)
     # print("EXAMPLE 2: Processing for evaluation (requires ground truth)")

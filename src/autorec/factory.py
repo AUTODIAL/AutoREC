@@ -1,10 +1,10 @@
 """
 Factory helpers for building AutoREC environments and agents from configuration.
 
-Configurations can be provided as YAML file paths or dictionaries. Environment
-configuration is merged with package defaults, datasets are loaded into pandas
-DataFrames, and agent configuration is used to construct ``DDQN_ECM`` instances
-with the requested training and evaluation environments.
+Configurations can be provided as YAML file paths or dictionaries. Environment configuration
+is merged with package defaults, datasets are loaded into pandas DataFrames, and agent
+configuration is used to construct ``DDQN_ECM`` instances with the requested training and
+evaluation environments.
 """
 
 from pathlib import Path
@@ -38,14 +38,13 @@ def _yaml_reader(file_path: Union[str, Path]) -> Dict:
     with open(file_path, "r") as file:
         return yaml.safe_load(file)
 
-# Load default values from a YAML file, in case of missing parameters, in which case we
-# will just fill in using the defaults.
+
+# Load default values from a YAML file, in case of missing parameters, in which case we will
+# just fill in using the defaults.
 _DEFAULT_ENV_CONFIG_PATH = (
     Path(__file__).parent / "default_configs" / "environment_config.yaml"
 )
-_DEFAULT_AGENT_CONFIG_PATH = (
-    Path(__file__).parent / "default_configs" / "agent_config.yaml"
-)
+_DEFAULT_AGENT_CONFIG_PATH = Path(__file__).parent / "default_configs" / "agent_config.yaml"
 default_env_config = _yaml_reader(_DEFAULT_ENV_CONFIG_PATH)
 default_agent_config = _yaml_reader(_DEFAULT_AGENT_CONFIG_PATH)
 default_env_agent_config = {
@@ -86,24 +85,22 @@ def environment_builder(args: Union[str, Path, Dict]) -> EIS_ECM_Env:
 
 # It doesn't make sense to have just agent_builder, since the agent needs an environment.
 def environment_and_agent_builder(
-    args: Union[str, Path, Dict]
+    args: Union[str, Path, Dict],
 ) -> (EIS_ECM_Env, EIS_ECM_Env, DDQN_ECM):
-    """Build both an EIS_ECM_Env environment and a DDQN_ECM agent from a single
-    configuration.
+    """Build both an EIS_ECM_Env environment and a DDQN_ECM agent from a single configuration.
 
     The configuration needs to have "environment" and "agent" sections.
 
     Parameters
     ----------
     args : Union[str, Path, Dict]
-        Configuration for the environment and agent. Can be a YAML file path or a
-        dictionary.
+        Configuration for the environment and agent. Can be a YAML file path or a dictionary.
 
     Returns
     -------
     (EIS_ECM_Env, EIS_ECM_Env, DDQN_ECM)
-        A tuple containing two instances of the EIS_ECM_Env environments (for training
-        and evaluation, in which the latter can be None) and the DDQN_ECM agent.
+        A tuple containing two instances of the EIS_ECM_Env environments (for training and
+        evaluation, in which the latter can be None) and the DDQN_ECM agent.
     """
     if isinstance(args, (str, Path)):
         config = _yaml_reader(args)

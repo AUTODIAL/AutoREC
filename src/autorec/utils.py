@@ -40,8 +40,8 @@ def save_evaluation_results(
     """
     Save evaluation results in both CSV and pickle formats.
 
-    CSV is human-readable and useful for quick analysis. Pickle preserves
-    complex data types such as circuits and arrays.
+    CSV is human-readable and useful for quick analysis. Pickle preserves complex data types
+    such as circuits and arrays.
 
     Args:
         eval_df: Evaluation results DataFrame.
@@ -68,12 +68,12 @@ def save_evaluation_results(
 def set_global_seed(seed: int = 42, deterministic_ops: bool = True):
     """
     Set seeds for all random number generators to ensure reproducibility.
-    
+
     Args:
         seed: Random seed value
         deterministic_ops: If True, enables deterministic operations in TensorFlow
                           (may reduce performance but ensures reproducibility)
-    
+
     Notes:
         - Must be called BEFORE importing any modules that use randomness
         - Must be called BEFORE any random operations occur
@@ -83,39 +83,39 @@ def set_global_seed(seed: int = 42, deterministic_ops: bool = True):
     import random
     import numpy as np
     import tensorflow as tf
-    
+
     # 1. Set Python's built-in random seed
     random.seed(seed)
-    
+
     # 2. Set NumPy random seed
     np.random.seed(seed)
-    
+
     # 3. Set TensorFlow seeds
     tf.random.set_seed(seed)
-    
+
     # 4. Set environment variables for hash seed (affects Python's hash randomization)
-    os.environ['PYTHONHASHSEED'] = str(seed)
-    
+    os.environ["PYTHONHASHSEED"] = str(seed)
+
     # 5. Configure TensorFlow for deterministic operations
     if deterministic_ops:
         # Enable deterministic ops (TF 2.x)
-        os.environ['TF_DETERMINISTIC_OPS'] = '1'
-        
+        os.environ["TF_DETERMINISTIC_OPS"] = "1"
+
         # For older TensorFlow versions, also set:
         # os.environ['TF_CUDNN_DETERMINISTIC'] = '1'
-        
+
         try:
             # Enable op determinism (TF 2.9+)
             tf.config.experimental.enable_op_determinism()
         except AttributeError:
             print("Warning: tf.config.experimental.enable_op_determinism() not available")
             print("Using TF_DETERMINISTIC_OPS environment variable instead")
-    
+
     # 6. Limit TensorFlow parallelism for reproducibility
     # This reduces non-determinism from parallel execution
     tf.config.threading.set_inter_op_parallelism_threads(1)
     tf.config.threading.set_intra_op_parallelism_threads(1)
-    
+
     print(f"Global seed set to {seed}")
     print(f"Deterministic operations: {deterministic_ops}")
 
@@ -169,14 +169,14 @@ def draw_circuit_png(circuit: str, output_path: Path, dpi: int) -> None:
             {"__builtins__": {}},
             {"C": C, "L": L, "P": P, "R": R},
         )
-        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
-            io.StringIO()
+        with (
+            contextlib.redirect_stdout(io.StringIO()),
+            contextlib.redirect_stderr(io.StringIO()),
         ):
             circuit_network.draw(filename=str(output_path), style="american", dpi=dpi)
     except Exception as exc:
         raise RuntimeError(
-            f"lcapy failed to draw circuit {circuit!r} "
-            f"(converted expression: {lcapy_expr!r})."
+            f"lcapy failed to draw circuit {circuit!r} (converted expression: {lcapy_expr!r})."
         ) from exc
 
     if not output_path.exists() or not _is_nonblank_image(output_path):
@@ -241,7 +241,7 @@ def plot_eval_fit(
     ax.legend(loc="upper left", fontsize="medium")
     ax.set_xlabel("Re(Z)")
     ax.set_ylabel("-Im(Z)")
-    ax.set_title(f"Nyquist plot - EIS {EIS_i+1}")
+    ax.set_title(f"Nyquist plot - EIS {EIS_i + 1}")
 
     metrics_text = (
         f"Reached terminal state: {good_fit}\n"
@@ -267,7 +267,7 @@ def plot_eval_fit(
 
     fig.subplots_adjust(left=0.08, right=0.96, top=0.88, bottom=0.12)
     plt.savefig(
-        save_dir / "fit_plots" / f"fit_EIS_i_{EIS_i+1}.png",
+        save_dir / "fit_plots" / f"fit_EIS_i_{EIS_i + 1}.png",
         bbox_inches="tight",
     )
     plt.close()
@@ -277,18 +277,16 @@ def state_encode(state, ELEMENTS_extended):
     """
     One-hot encode a GEP chromosome state for neural-network input.
 
-    The expressed coding region is detected from the circuit tree. Any
-    non-coding chromosome positions are replaced with ``X`` before one-hot
-    encoding so the returned vector has a fixed length for a given chromosome
-    configuration.
+    The expressed coding region is detected from the circuit tree. Any non-coding chromosome
+    positions are replaced with ``X`` before one-hot encoding so the returned vector has a
+    fixed length for a given chromosome configuration.
 
     Parameters
     ----------
     state : str
         GEP chromosome string using ``/`` for parallel connections.
     ELEMENTS_extended : list[str]
-        Ordered list of allowed symbols, including ``X`` for non-coding
-        positions.
+        Ordered list of allowed symbols, including ``X`` for non-coding positions.
 
     Returns
     -------
@@ -296,13 +294,13 @@ def state_encode(state, ELEMENTS_extended):
         Flattened one-hot encoded state vector.
     """
     ec = ae.core.ec
-    karva = state.replace('/', '-')
+    karva = state.replace("/", "-")
     tree = ec.karva_to_tree(karva)
     conding_length = len(tree)
     len_non_coding = len(state) - conding_length
 
     coding = state[0:conding_length]
-    refined_state = coding+'X'*len_non_coding
+    refined_state = coding + "X" * len_non_coding
     refined_state_index = [ELEMENTS_extended.index(char) for char in refined_state]
     encoded_string = tf.one_hot(refined_state_index, depth=len(ELEMENTS_extended))
     # bipolar_encoded_string = 2 * encoded_string - 1
@@ -334,10 +332,11 @@ def parse_state_to_circuit(state: str) -> tuple[str, int, str]:
 
 def karva_to_circuit(karva: str):
     """
-    Convert a karva representation of a circuit into its corresponding circuit structure 
+    Convert a karva representation of a circuit into its corresponding circuit structure
 
     Parameters:
-    - karva (str): The karva representation of the circuit: karva is the same as GEP, with '/' replaced by '-'.
+    - karva (str): The karva representation of the circuit: karva is the same as GEP,
+      with '/' replaced by '-'.
 
     Returns:
     - circuit: The circuit structure obtained from the karva representation.
@@ -346,7 +345,7 @@ def karva_to_circuit(karva: str):
     tree = ec.karva_to_tree(karva)
     circuit = ec.tree_to_circuit(tree)[0]
     # function = ae.utils.generate_circuit_fn(circuit)
-    return circuit 
+    return circuit
 
 
 def validity_check(circuit: str):
@@ -363,10 +362,12 @@ def validity_check(circuit: str):
     Returns:
     validity (bool): True if the circuit is valid, False otherwise.
     """
-    validity = ae.parser.validate_circuit(circuit)  # First check: not empty/duplication, contains valid element
-    
+    validity = ae.parser.validate_circuit(
+        circuit
+    )  # First check: not empty/duplication, contains valid element
+
     # Second check: circuits without an ohmic resistance
-    resistors = ae.parser.find_ohmic_resistors(circuit)      
+    resistors = ae.parser.find_ohmic_resistors(circuit)
     if not resistors:
         validity = False
 
@@ -393,9 +394,8 @@ def action_validity(state, action_type, action_position):
     """
     Check whether replacing one chromosome position creates a valid action.
 
-    An action is considered invalid if it changes a non-coding position, leaves
-    the chromosome unchanged, or produces a circuit that fails the circuit
-    validity checks.
+    An action is considered invalid if it changes a non-coding position, leaves the chromosome
+    unchanged, or produces a circuit that fails the circuit validity checks.
 
     Parameters
     ----------
@@ -411,29 +411,29 @@ def action_validity(state, action_type, action_position):
     int
         ``1`` if the action is valid, otherwise ``0``.
     """
-    new_state = state[:action_position] + f"{action_type}" + state[action_position+1:]
-    karva = new_state.replace('/', '-')
+    new_state = state[:action_position] + f"{action_type}" + state[action_position + 1 :]
+    karva = new_state.replace("/", "-")
     tree = ec.karva_to_tree(karva)
     conding_length = len(tree)
     # coding = state[0:conding_length]
     circuit = karva_to_circuit(karva)
     validity = validity_check(circuit)
-    if action_position > conding_length-1:
-        validity = False 
+    if action_position > conding_length - 1:
+        validity = False
     if state == new_state:
-        validity = False 
+        validity = False
 
-    if validity == False:
+    if validity is False:
         validity_state = 0
     else:
         validity_state = 1
-    
+
     return validity_state
 
 
 def get_parameter_bounds(circuit: str) -> tuple:
-    """Returns a 2-element tuple of lower and upper bounds, to be used in
-    SciPy's ``least_squares``.
+    """Returns a 2-element tuple of lower and upper bounds, to be used in SciPy's
+    ``least_squares``.
 
     Parameters
     ----------
@@ -490,30 +490,27 @@ def fit_circuit_parameters_NEW(
     max_iters : int, optional
         Maximum number of fitting attempts. Default is 50.
     min_iters : int, optional
-        Minimum number of fitting attempts before early stopping. Default is 25.
-        If ``min_iters`` is reached AND circuit fitter converges, the fitting
-        process stops.
+        Minimum number of fitting attempts before early stopping. Default is 25. If
+        ``min_iters`` is reached AND circuit fitter converges, the fitting process stops.
     bounds : Iterable[tuple], optional
-        List of two tuples, each containing the lower and upper bounds,
-        respectively, for the circuit parameters. Default is None. The order
-        of the values should match the order of the circuit parameters as
-        returned by ``parser.get_parameter_labels``.
+        List of two tuples, each containing the lower and upper bounds, respectively, for the
+        circuit parameters. Default is None. The order of the values should match the order of
+        the circuit parameters as returned by ``parser.get_parameter_labels``.
     max_nfev : int, optional
-        Maximum number of function evaluations for the circuit fitter.
-        Default is None. See ``scipy.optimize.least_squares`` for details.
+        Maximum number of function evaluations for the circuit fitter. Default is None. See
+        ``scipy.optimize.least_squares`` for details.
     ftol : float, optional
-        Relative tolerance for termination by cost-function change. Default is
-        1e-15. See ``scipy.optimize.least_squares`` for details.
+        Relative tolerance for termination by cost-function change. Default is 1e-15. See
+        ``scipy.optimize.least_squares`` for details.
     xtol : float, optional
-        Relative tolerance for termination by parameter change. Default is
-        1e-15. See ``scipy.optimize.least_squares`` for details.
+        Relative tolerance for termination by parameter change. Default is 1e-15. See
+        ``scipy.optimize.least_squares`` for details.
     tol_chi_squared : float, optional
-        Tolerance for the chi-squared error. This only gets triggered if
-        ``min_iters`` is set. A good chi-squared value is 1e-3 or smaller.
-        Default is 1e-2.
+        Tolerance for the chi-squared error. This only gets triggered if ``min_iters`` is set.
+        A good chi-squared value is 1e-3 or smaller. Default is 1e-2.
     method : str, optional
-        Objective function to use for fitting. Choose from ``"UW"``, ``"X2"``,
-        ``"PW"``, ``"B"``, ``"log-B"``, and ``"log-BW"``:
+        Objective function to use for fitting. Choose from ``"UW"``, ``"X2"``, ``"PW"``,
+        ``"B"``, ``"log-B"``, and ``"log-BW"``:
 
           * ``"UW"``: unweighted real and imaginary residuals.
           * ``"X2"``: residuals weighted by impedance magnitude.
@@ -537,31 +534,32 @@ def fit_circuit_parameters_NEW(
     -----
     This function uses SciPy's ``least_squares`` to fit the circuit parameters.
     """
+
     def obj_UW(p):
         """Computes ECM error based on the Nyquist plot."""
         Z_pred = fn(freq, p)
         res = jnp.hstack((Z_pred.real - Z.real, Z_pred.imag - Z.imag))
         return res
-    
+
     def obj_X2(p):
         """Computes ECM error based on residual-based χ2."""
         Z_pred = fn(freq, p)
-        residual_real = (Z_pred.real - Z.real)
-        residual_imag = (Z_pred.imag - Z.imag)
+        residual_real = Z_pred.real - Z.real
+        residual_imag = Z_pred.imag - Z.imag
         weight = 1 / np.sqrt(Z.real**2 + Z.imag**2)
-        res = jnp.hstack((residual_real*weight, residual_imag*weight))
+        res = jnp.hstack((residual_real * weight, residual_imag * weight))
         return res
 
     def obj_PW(p):
         """Computes ECM error based on residual-based χ2."""
         Z_pred = fn(freq, p)
-        residual_real = (Z_pred.real - Z.real)
-        residual_imag = (Z_pred.imag - Z.imag)
+        residual_real = Z_pred.real - Z.real
+        residual_imag = Z_pred.imag - Z.imag
         weight_real = 1 / Z.real
         weight_imag = 1 / Z.imag
-        res = jnp.hstack((residual_real*weight_real, residual_imag*weight_imag))
+        res = jnp.hstack((residual_real * weight_real, residual_imag * weight_imag))
         return res
-    
+
     def obj_B(p):
         """Computes ECM error based on the Bode plot."""
         Z_pred = fn(freq, p)
@@ -570,7 +568,7 @@ def fit_circuit_parameters_NEW(
         res = jnp.hstack((mag - mag_gt, phase - phase_gt))
         # res = jnp.hstack((mag - mag_gt, phase - phase_gt))
         return res
-    
+
     def obj_log_B(p):
         """Computes ECM error based on the Bode plot."""
         Z_pred = fn(freq, p)
@@ -579,16 +577,18 @@ def fit_circuit_parameters_NEW(
         res = jnp.hstack((jnp.log10(mag) - jnp.log10(mag_gt), phase - phase_gt))
         # res = jnp.hstack((mag - mag_gt, phase - phase_gt))
         return res
-    
+
     def obj_log_BW(p):
         """Computes ECM error based on the Bode plot."""
         Z_pred = fn(freq, p)
         mag = jnp.abs(Z_pred)
         phase = jnp.angle(Z_pred)
-        res = jnp.hstack((jnp.log10(mag / mag_gt)/jnp.log10(mag_gt), (phase - phase_gt)/phase_gt))
+        res = jnp.hstack(
+            (jnp.log10(mag / mag_gt) / jnp.log10(mag_gt), (phase - phase_gt) / phase_gt)
+        )
         # res = jnp.hstack((mag - mag_gt, phase - phase_gt))
         return res
-    
+
     def obj_chi_squared(p):
         """Computes ECM error based on residual-based χ2."""
         Z_pred = fn(freq, p)
@@ -602,11 +602,11 @@ def fit_circuit_parameters_NEW(
 
         residual = (Z_pred.real - Z.real) ** 2 + (Z_pred.imag - Z.imag) ** 2
         weight = 1 / (Z.real**2 + Z.imag**2)
-    
+
         phase = jnp.angle(Z_pred)
-        res = jnp.hstack(((phase - phase_gt)/phase_gt, residual * weight))
+        res = jnp.hstack(((phase - phase_gt) / phase_gt, residual * weight))
         return res
-    
+
     def obj_mag(p):
         """Computes ECM error based on the magnitude of impedance deviation."""
         Z_pred = fn(freq, p)
@@ -624,8 +624,7 @@ def fit_circuit_parameters_NEW(
         "PW": obj_PW,
         "B": obj_B,
         "log-B": obj_log_B,
-        "log-BW": obj_log_BW
-
+        "log-BW": obj_log_BW,
     }[method]
 
     mag_gt = jnp.abs(Z)
@@ -664,7 +663,7 @@ def fit_circuit_parameters_NEW(
     r2_phase = ae.metrics.r2_score(jnp.angle(Z), jnp.angle(fn(freq, p0)))
     X2 = obj_chi_squared(p0).mean()
     log.info(
-        f"Converged in {i+1} iterations with "
+        f"Converged in {i + 1} iterations with "
         f"X^2 = {X2:.3e}, R^2 (|Z|) = {r2_mag:.4f}, R^2 (phase) = {r2_phase:.4f}"
     )
 
@@ -678,7 +677,7 @@ def fit_circuit_parameters_NEW(
     return dict(zip(variables, p0)), X2, r2_score, r2_mag, r2_phase
 
 
-def plot_bar(data, title=None, filename=None, color='red'):
+def plot_bar(data, title=None, filename=None, color="red"):
     """
     Save a labeled bar plot for a mapping of category values.
 
@@ -702,11 +701,11 @@ def plot_bar(data, title=None, filename=None, color='red'):
     for bar in bars:
         yval = bar.get_height()
         plt.text(
-            bar.get_x() + bar.get_width()/2,  # x coordinate: center of the bar
-            yval,                            # y coordinate: top of the bar
-            f'{yval:.2f}',                       # text: the value of the bar
-            ha='center',                     # horizontal alignment: center
-            va='bottom'                      # vertical alignment: bottom (just above the bar)
+            bar.get_x() + bar.get_width() / 2,  # x coordinate: center of the bar
+            yval,  # y coordinate: top of the bar
+            f"{yval:.2f}",  # text: the value of the bar
+            ha="center",  # horizontal alignment: center
+            va="bottom",  # vertical alignment: bottom (just above the bar)
         )
 
     # Labels and title
@@ -720,7 +719,7 @@ def plot_bar(data, title=None, filename=None, color='red'):
 
     # Show the plot
     if filename is not None:
-        plt.savefig(f'{filename}.png')
+        plt.savefig(f"{filename}.png")
     # plt.clf()
 
 
@@ -745,7 +744,7 @@ def create_circuit_evolution_visualization(
     gif_frame_duration=2500,
     gif_final_frame_duration=5000,
     cleanup_temp_files=True,
-    save_dir=None
+    save_dir=None,
 ):
     """
     Create circuit evolution visualization frames and GIF for evaluation results.
@@ -812,7 +811,7 @@ def create_circuit_evolution_visualization(
 
     # Generate frames for each circuit
     for i, circuit in enumerate(circuits):
-        print(f"  Processing circuit {i+1}/{len(circuits)}: {circuit}")
+        print(f"  Processing circuit {i + 1}/{len(circuits)}: {circuit}")
 
         # Get precomputed data for this circuit
         Z_sim = circuit_predictions[i]
@@ -839,7 +838,8 @@ def create_circuit_evolution_visualization(
             y=0.97,
         )
 
-        # Create grid: left side for Nyquist plot, right side split for circuit (top) and metrics (bottom)
+        # Create grid: left side for Nyquist plot, right side split for circuit (top) and
+        # metrics (bottom)
         gs = fig.add_gridspec(
             2,
             2,
@@ -901,7 +901,7 @@ def create_circuit_evolution_visualization(
         circuit_img = Image.open(output_dir / f"temp_circuit_{i}.png")
         ax_circuit.imshow(circuit_img)
         ax_circuit.axis("off")
-        stage_title = f"Stage {i+1}: {circuit}"
+        stage_title = f"Stage {i + 1}: {circuit}"
         if i == len(circuits) - 1:  # Last frame
             stage_title = f"Final Circuit: {circuit}"
         ax_circuit.set_title(
@@ -1010,9 +1010,7 @@ def create_circuit_evolution_visualization(
 
         # Save final frame to special folder
         if i == len(circuits) - 1:
-            final_path = (
-                output_dir / "final_circuits" / f"final_circuit_EIS_{eis_id}.png"
-            )
+            final_path = output_dir / "final_circuits" / f"final_circuit_EIS_{eis_id}.png"
             plt.savefig(
                 final_path,
                 dpi=frame_dpi,
@@ -1025,16 +1023,12 @@ def create_circuit_evolution_visualization(
 
         plt.close("all")
 
-        print(
-            f"    ✓ Frame saved (R²: {r2:.4f}, χ²: {chi2:.4f}, passed: {passed_threshold})"
-        )
+        print(f"    ✓ Frame saved (R²: {r2:.4f}, χ²: {chi2:.4f}, passed: {passed_threshold})")
 
     print("\nCreating GIF...")
 
     # Create GIF with longer last frame
-    frames = [
-        Image.open(f) for f in sorted(glob.glob(str(output_dir / "frame_*.png")))
-    ]
+    frames = [Image.open(f) for f in sorted(glob.glob(str(output_dir / "frame_*.png")))]
     durations = [gif_frame_duration] * len(frames)
     durations[-1] = gif_final_frame_duration  # Hold last frame longer
 
@@ -1052,21 +1046,16 @@ def create_circuit_evolution_visualization(
         print("✓ Cleaned up temporary files")
 
     print(f"✓ Saved {gif_path} ({len(frames)} frames)")
-    print(f"✓ Final frame held for {durations[-1]/1000}s")
+    print(f"✓ Final frame held for {durations[-1] / 1000}s")
 
 
 # Add this new method to the DDQN_ECM class (before create_circuit_evolution_visualization)
 def prepare_and_generate_circuit_gif(
-    _active_env,
-    action_history,
-    best_result,
-    EIS_i,
-    Z_true,
-    save_dir
+    _active_env, action_history, best_result, EIS_i, Z_true, save_dir
 ):
     """
-    Extract circuit progression from action history and generate circuit evolution GIF.
-    All metrics are taken directly from action_history (no recalculation).
+    Extract circuit progression from action history and generate circuit evolution GIF. All
+    metrics are taken directly from action_history (no recalculation).
 
     Parameters:
     -----------
@@ -1112,9 +1101,7 @@ def prepare_and_generate_circuit_gif(
 
                 # Generate Z_sim for plotting only
                 try:
-                    params = ae.utils.fit_circuit_parameters(
-                        circuit, _active_env.freq, Z_true
-                    )
+                    params = ae.utils.fit_circuit_parameters(circuit, _active_env.freq, Z_true)
                     circuit_fn = ae.utils.generate_circuit_fn(circuit)
                     Z_sim = circuit_fn(_active_env.freq, list(params.values()))
 
@@ -1132,9 +1119,7 @@ def prepare_and_generate_circuit_gif(
                     r2_phase_list.append(r2_phase)
                     r2_scores.append(r2)
                     chi2_scores.append(chi2)
-                    passed_thresholds.append(
-                        good_fit
-                    )  # Use good_fit from action_history!
+                    passed_thresholds.append(good_fit)  # Use good_fit from action_history!
 
                 except Exception as e:
                     print(f"    ⚠ Warning: Could not fit circuit {circuit}: {e}")
@@ -1147,9 +1132,7 @@ def prepare_and_generate_circuit_gif(
 
         # Get metrics from best_result
         try:
-            params = ae.utils.fit_circuit_parameters(
-                circuit, _active_env.freq, Z_true
-            )
+            params = ae.utils.fit_circuit_parameters(circuit, _active_env.freq, Z_true)
             circuit_fn = ae.utils.generate_circuit_fn(circuit)
             Z_sim = circuit_fn(_active_env.freq, list(params.values()))
 
@@ -1196,12 +1179,14 @@ def prepare_and_generate_circuit_gif(
                 gif_frame_duration=2500,
                 gif_final_frame_duration=5000,
                 cleanup_temp_files=True,
-                save_dir=save_dir
+                save_dir=save_dir,
             )
             print(f"✓ Circuit evolution GIF generated for EIS {EIS_i}")
         except Exception as e:
             print(f"⚠ Warning: Could not generate GIF: {e}")
     else:
         print(
-            f"⚠ Warning: Insufficient data for GIF generation (circuits: {len(circuit_progression)}, predictions: {len(circuit_predictions)})"
+            "⚠ Warning: Insufficient data for GIF generation "
+            f"(circuits: {len(circuit_progression)}, "
+            f"predictions: {len(circuit_predictions)})"
         )

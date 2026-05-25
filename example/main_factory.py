@@ -53,16 +53,16 @@ RUN_MODE = "quick"
 # RUN_MODE = "full"
 
 if RUN_MODE == "quick":
-    EVAL_SAMPLE_SIZE = 20      # Evaluate on 20 random EIS
+    EVAL_SAMPLE_SIZE = 20  # Evaluate on 20 random EIS
 elif RUN_MODE == "full":
-    EVAL_SAMPLE_SIZE = 100     # More comprehensive evaluation
+    EVAL_SAMPLE_SIZE = 100  # More comprehensive evaluation
 else:
     raise ValueError(f"Invalid RUN_MODE: {RUN_MODE}. Use 'quick' or 'full'")
 
 # Directory structure for outputs is read from the YAML agent configuration.
 SAVE_DIR = Path(config["agent"]["save_dir"])
-MODEL_SAVE_DIR = SAVE_DIR / Path("models")       # Trained neural networks
-RESULTS_SAVE_DIR = SAVE_DIR / Path("results")    # Evaluation DataFrames
+MODEL_SAVE_DIR = SAVE_DIR / Path("models")  # Trained neural networks
+RESULTS_SAVE_DIR = SAVE_DIR / Path("results")  # Evaluation DataFrames
 
 # ============================================================================
 # 2. ENVIRONMENT AND AGENT SETUP
@@ -132,8 +132,8 @@ try:
     # Run evaluation batch on the training environment used by this example.
     eval_sample_results = agent.eval_batch_eis(
         eis_indices=eval_indices,
-        max_actions=action_cap,    # Maximum mutations per EIS
-        verbose=False,             # Don't print details for each EIS
+        max_actions=action_cap,  # Maximum mutations per EIS
+        verbose=False,  # Don't print details for each EIS
     )
 
     # Save results for analysis.
@@ -142,6 +142,7 @@ try:
 except Exception as e:
     print(f"\n⚠ Error during sample evaluation: {e}")
     import traceback
+
     traceback.print_exc()
 
 # ============================================================================

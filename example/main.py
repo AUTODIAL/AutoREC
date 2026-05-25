@@ -52,18 +52,18 @@ RUN_MODE = "quick"
 
 # Configure based on run mode
 if RUN_MODE == "quick":
-    NUM_TRIALS = 50           # Short training for testing
-    EVAL_SAMPLE_SIZE = 20      # Evaluate on 20 random EIS
+    NUM_TRIALS = 50  # Short training for testing
+    EVAL_SAMPLE_SIZE = 20  # Evaluate on 20 random EIS
 elif RUN_MODE == "full":
-    NUM_TRIALS = 8000          # Full training run
-    EVAL_SAMPLE_SIZE = 100     # More comprehensive evaluation
+    NUM_TRIALS = 8000  # Full training run
+    EVAL_SAMPLE_SIZE = 100  # More comprehensive evaluation
 else:
     raise ValueError(f"Invalid RUN_MODE: {RUN_MODE}. Use 'quick' or 'full'")
 
 # Directory structure for outputs
-SAVE_DIR = Path("example_outputs")   # Base directory for this run
-MODEL_SAVE_DIR = SAVE_DIR / Path("models")        # Trained neural networks
-RESULTS_SAVE_DIR = SAVE_DIR / Path("results")    # Evaluation DataFrames
+SAVE_DIR = Path("example_outputs")  # Base directory for this run
+MODEL_SAVE_DIR = SAVE_DIR / Path("models")  # Trained neural networks
+RESULTS_SAVE_DIR = SAVE_DIR / Path("results")  # Evaluation DataFrames
 
 
 # ============================================================================
@@ -73,7 +73,7 @@ RESULTS_SAVE_DIR = SAVE_DIR / Path("results")    # Evaluation DataFrames
 
 data_prepper = EISDataPrep(
     path="../data/training_dataset.pkl",  # Pre-processed pickle file
-    evaluation=True,             # Ground truth circuits available for validation
+    evaluation=True,  # Ground truth circuits available for validation
 )
 
 # Load the dataset into memory
@@ -90,10 +90,10 @@ print(validation_summary)
 # Create the RL-EIS environment for AutoREC
 
 env = EIS_ECM_Env(
-    dataset=dataset,           # The EIS measurements to fit
-    seed=42,                    # Random seed for reproducibility
-    chromosome_HEAD_len=10,     # Length of GEP head (affects circuit complexity)
-    cache_enabled=True          # Enable LRU cache (highly recommended)
+    dataset=dataset,  # The EIS measurements to fit
+    seed=42,  # Random seed for reproducibility
+    chromosome_HEAD_len=10,  # Length of GEP head (affects circuit complexity)
+    cache_enabled=True,  # Enable LRU cache (highly recommended)
 )
 
 # Calculate action space size
@@ -105,11 +105,11 @@ action_cap = env.chromosome_HEAD_len + env.chromosome_TAIL_len + 3
 # ============================================================================
 # Create the DDQN agent
 agent = DDQN_ECM(
-    env,                        # The environment to interact with
-    action_cap=action_cap,      # Maximum actions per episode
-    num_trials=NUM_TRIALS,      # Total training episodes
-    save_dir=SAVE_DIR,          # Where to save checkpoints and models
-    save_frequency=100          # Save checkpoint every 100 trials
+    env,  # The environment to interact with
+    action_cap=action_cap,  # Maximum actions per episode
+    num_trials=NUM_TRIALS,  # Total training episodes
+    save_dir=SAVE_DIR,  # Where to save checkpoints and models
+    save_frequency=100,  # Save checkpoint every 100 trials
 )
 
 # ============================================================================
@@ -129,7 +129,7 @@ if final_model_file.exists():
 else:
     # No model found - train a new one
     print(f"No existing model found. Training new model for {NUM_TRIALS} trials...")
-    
+
     # Train the agent
     training_results = agent.train()
 
@@ -139,7 +139,7 @@ else:
 
     try:
         agent.save_model(model_path)
-        print(f"✓ Model saved successfully")
+        print("✓ Model saved successfully")
     except Exception as e:
         print(f"⚠ Error saving model: {e}")
 
@@ -153,18 +153,16 @@ try:
     # Select random sample of EIS to evaluate
     # We don't evaluate all EIS because it takes a long time
     eval_indices = np.random.choice(
-        len(dataset), 
-        size=min(EVAL_SAMPLE_SIZE, len(dataset)), 
-        replace=False
+        len(dataset), size=min(EVAL_SAMPLE_SIZE, len(dataset)), replace=False
     ).tolist()
 
     print(f"\nEvaluating {len(eval_indices)} random EIS samples...")
 
     # Run evaluation batch
     eval_sample_results = agent.eval_batch_eis(
-        eis_indices=eval_indices, 
-        max_actions=action_cap,    # Maximum mutations per EIS
-        verbose=False              # Don't print details for each EIS
+        eis_indices=eval_indices,
+        max_actions=action_cap,  # Maximum mutations per EIS
+        verbose=False,  # Don't print details for each EIS
     )
 
     # Save results for analysis
@@ -173,6 +171,7 @@ try:
 except Exception as e:
     print(f"\n⚠ Error during sample evaluation: {e}")
     import traceback
+
     traceback.print_exc()
 
 # ============================================================================

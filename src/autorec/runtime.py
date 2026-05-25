@@ -1,8 +1,8 @@
 """Runtime setup helpers for AutoREC scripts.
 
-This module intentionally avoids importing TensorFlow, JAX, NumPy, Matplotlib,
-or AutoEIS at import time. Call ``configure_autorec_runtime`` before importing
-the rest of AutoREC in standalone scripts.
+This module intentionally avoids importing TensorFlow, JAX, NumPy, Matplotlib, or AutoEIS at
+import time. Call ``configure_autorec_runtime`` before importing the rest of AutoREC in
+standalone scripts.
 """
 
 from __future__ import annotations
@@ -19,11 +19,10 @@ def configure_autorec_runtime(
 ) -> Path:
     """Configure native-library runtime settings for standalone AutoREC scripts.
 
-    AutoREC uses AutoEIS/JuliaCall together with TensorFlow/JAX. In standalone
-    terminal runs, initializing TensorFlow/JAX before Julia can crash the Python
-    process at the native-library level. This helper sets writable runtime
-    directories, limits BLAS/OpenMP thread pools, and optionally initializes
-    AutoEIS/Julia before TensorFlow/JAX are imported.
+    AutoREC uses AutoEIS/JuliaCall together with TensorFlow/JAX. In standalone terminal runs,
+    initializing TensorFlow/JAX before Julia can crash the Python process at the native-library
+    level. This helper sets writable runtime directories, limits BLAS/OpenMP thread pools, and
+    optionally initializes AutoEIS/Julia before TensorFlow/JAX are imported.
 
     Args:
         thread_count: Thread count used for OpenMP, MKL, OpenBLAS, and NumExpr.
@@ -58,7 +57,9 @@ def configure_autorec_runtime(
     os.environ.setdefault("NUMEXPR_NUM_THREADS", thread_count)
 
     if suppress_tf_logs:
-        os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3") # Suppress TensorFlow logging (1: INFO, 2: WARNING, 3: ERROR) - example: you are using different TensorFlow than the trained model you are loading 
+        os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
+        # Suppress TensorFlow logging (1: INFO, 2: WARNING, 3: ERROR) -
+        # example: you are using different TensorFlow than the trained model you are loading
 
     if warmup_autoeis:
         import autoeis as ae

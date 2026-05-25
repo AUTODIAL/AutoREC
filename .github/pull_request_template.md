@@ -2,9 +2,9 @@
 
 Include a concise summary of the major changes in this pull request.
 
-- 
-- 
-- 
+-
+-
+-
 
 ## Type of change
 
@@ -45,8 +45,8 @@ Please avoid adding dependencies for trivial functionality or dependencies that 
 
 If this is a work-in-progress, list what still needs to be done.
 
-- 
-- 
+-
+-
 
 ## Checklist
 

@@ -11,7 +11,12 @@ from tensorflow.keras import layers
 
 import autoeis as ae
 from autorec.environment import EIS_ECM_Env
-from autorec.utils import *
+from autorec.utils import (
+    karva_to_circuit,
+    validity_check,
+    plot_eval_fit,
+    prepare_and_generate_circuit_gif,
+)
 from autorec.optimized_data_structures.circular_buffer import CircularBuffer
 
 
@@ -19,11 +24,10 @@ class DDQN_ECM:
     """
     Double Deep Q-Network agent for EIS equivalent-circuit discovery.
 
-    The agent interacts with an ``EIS_ECM_Env`` environment by mutating GEP
-    chromosome strings, stores transitions in a prioritized replay buffer, and
-    trains a neural network to select circuit mutations that eventually prodcue ECM.
-    The class also provides helpers for saving/loading Keras models and
-    evaluating trained agents on one or more EIS measurements.
+    The agent interacts with an ``EIS_ECM_Env`` environment by mutating GEP chromosome strings,
+    stores transitions in a prioritized replay buffer, and trains a neural network to select
+    circuit mutations that eventually prodcue ECM. The class also provides helpers for
+    saving/loading Keras models and evaluating trained agents on one or more EIS measurements.
     """
 
     def __init__(
@@ -68,10 +72,10 @@ class DDQN_ECM:
         """
         Initialize the reinforcement learning agent and its training configuration.
 
-        This constructor sets up the training environment, neural network training
-        parameters, replay buffer configuration, and exploration strategy used by
-        the agent. The agent follows a Double Deep Q-Network (DDQN) framework with
-        prioritized experience replay and epsilon-greedy exploration.
+        This constructor sets up the training environment, neural network training parameters,
+        replay buffer configuration, and exploration strategy used by the agent. The agent
+        follows a Double Deep Q-Network (DDQN) framework with prioritized experience replay
+        and epsilon-greedy exploration.
 
         Parameters
         ----------
@@ -113,8 +117,8 @@ class DDQN_ECM:
             Maximum number of the same visited state so far before detecting a latent deadloop.
 
         invalid_terminals : bool, optional
-            If True, invalid actions terminate the episode. Otherwise, a kickout
-            mechanism is used to prevent deadloops (Not efficient).
+            If True, invalid actions terminate the episode. Otherwise, a kickout mechanism is
+            used to prevent deadloops (Not efficient).
 
         initial_epsilon : float, optional
             Initial exploration rate for epsilon-greedy action selection.
@@ -129,9 +133,8 @@ class DDQN_ECM:
             Trial number after which epsilon decay begins.
 
         bayesian : bool, optional
-            If True, a Bayesian posterior-based bonus is added to the reward.
-            This option is currently retained for compatibility and is not
-            active in the reward calculation.
+            If True, a Bayesian posterior-based bonus is added to the reward. This option is
+            currently retained for compatibility and is not active in the reward calculation.
 
         learning_rate : float, optional
             Learning rate used by the neural network optimizer.
@@ -170,8 +173,8 @@ class DDQN_ECM:
             Trial index when beta annealing begins.
 
         anneal_fraction : Optional[float], optional
-            Fraction of training during which beta is annealed.
-            If None, computed as (3/5 * num_trials) / num_trials - 0.005
+            Fraction of training during which beta is annealed. If None, computed as
+            (3/5 * num_trials) / num_trials - 0.005
 
         final_beta : float, optional
             Final importance-sampling correction factor.
@@ -193,9 +196,7 @@ class DDQN_ECM:
             action_cap
             if action_cap is not None
             else (
-                self._active_env.chromosome_HEAD_len
-                + self._active_env.chromosome_TAIL_len
-                + 3
+                self._active_env.chromosome_HEAD_len + self._active_env.chromosome_TAIL_len + 3
             )
         )
         self.episodes_trial = episodes_trial
@@ -233,9 +234,7 @@ class DDQN_ECM:
         self.final_beta = final_beta
 
         # Compute dynamic hyperparameter values if not explicitly set
-        self.start_jump = (
-            (2 / 5) * num_trials if self.start_jump is None else self.start_jump
-        )
+        self.start_jump = (2 / 5) * num_trials if self.start_jump is None else self.start_jump
 
         self.anneal_fraction = (
             (3 / 5 * num_trials) / num_trials - 0.005
@@ -246,9 +245,7 @@ class DDQN_ECM:
         # Create optimizer
         if isinstance(self.optimizer_type, str):
             if self.optimizer_type == "adam":
-                self.optimizer = tf.keras.optimizers.Adam(
-                    learning_rate=self.learning_rate
-                )
+                self.optimizer = tf.keras.optimizers.Adam(learning_rate=self.learning_rate)
             else:
                 raise ValueError(f"Unsupported optimizer type: {self.optimizer_type}")
         else:  # User passed optimizer object directly
@@ -302,8 +299,8 @@ class DDQN_ECM:
         Update the training environment.
 
         Args:
-            new_training_env: New environment to use for training
-            switch_to_it: If True, immediately switch active_env to this new environment
+            new_training_env: New environment to use for training switch_to_it: If True,
+            immediately switch active_env to this new environment
         """
         self.training_env = new_training_env
         if switch_to_it:
@@ -339,8 +336,8 @@ class DDQN_ECM:
         This method builds two identical neural networks:
         1. Main model: Used for selecting actions and gets trained
         2. Target model: Used for calculating Q-value targets, updated less frequently
-        The target model starts with identical weights to the main model but
-        diverges during training as only the main model is updated frequently.
+        The target model starts with identical weights to the main model but diverges during
+        training as only the main model is updated frequently.
 
         Network Architecture:
         ---------------------
@@ -377,8 +374,9 @@ class DDQN_ECM:
             self._active_env.chromosome_HEAD_len,
             self._active_env.chromosome_TAIL_len,
         )
-        elems_extended_len, elems_len = len(self._active_env.ELEMENTS_EXTENDED), len(
-            self._active_env.ELEMENTS
+        elems_extended_len, elems_len = (
+            len(self._active_env.ELEMENTS_EXTENDED),
+            len(self._active_env.ELEMENTS),
         )
         eis_input_len = self._active_env.EIS_INPUT_SZE
 
@@ -427,8 +425,8 @@ class DDQN_ECM:
         - save_format='keras' → ensures '.keras' extension
         - save_format='h5' → ensures '.h5' extension
 
-        If you specify 'model' as filepath with save_format='keras',
-        it will be saved as 'model.keras' automatically.
+        If you specify 'model' as filepath with save_format='keras', it will be saved as
+        'model.keras' automatically.
 
         Note:
         -----
@@ -447,7 +445,8 @@ class DDQN_ECM:
 
     def load_model(self, filepath: str | Path) -> None:
         """
-        Load a previously trained neural network model from disk. Also, Target model is automatically created as a copy of the loaded model.
+        Load a previously trained neural network model from disk. Also, Target model is
+        automatically created as a copy of the loaded model.
 
         If resuming training, you'll need to separately restore:
         - Replay buffer: history = pd.read_pickle('replay_buffer.pkl')
@@ -465,10 +464,10 @@ class DDQN_ECM:
 
         Note:
         -----
-        If you're loading a model trained with different environment parameters
-        (different chromosome_HEAD_len, different elements, etc.), the model
-        architecture may not match and loading will fail. Ensure the environment
-        configuration matches what was used during training.
+        If you're loading a model trained with different environment parameters (different
+        chromosome_HEAD_len, different elements, etc.), the model architecture may not match
+        and loading will fail. Ensure the environment configuration matches what was used
+        during training.
 
         """
         filepath = Path(filepath)
@@ -482,11 +481,12 @@ class DDQN_ECM:
 
     def scheduler(self, trial: int, schedule_timesteps: float) -> float:
         """
-        Calculate the importance sampling weight exponent (beta) for prioritized replay (Refer to the PER original paper by Google DeepMind).
+        Calculate the importance sampling weight exponent (beta) for prioritized replay (Refer
+        to the PER original paper by Google DeepMind).
 
         This scheduler gradually increases beta from initial_beta to final_beta over training,
-        starting with less bias correction (focusing on learning from important samples)
-        and ending with full bias correction (ensuring unbiased gradient updates).
+        starting with less bias correction (focusing on learning from important samples) and
+        ending with full bias correction (ensuring unbiased gradient updates).
 
         Parameters:
         -----------
@@ -508,14 +508,17 @@ class DDQN_ECM:
         value = self.initial_beta + fraction * (self.final_beta - self.initial_beta)
         return value
 
-    def _sample_experience(self, history: pd.DataFrame, prioritized_replay_beta: float) -> tuple:
+    def _sample_experience(
+        self, history: pd.DataFrame, prioritized_replay_beta: float
+    ) -> tuple:
         """
-        Sample a batch of experiences from the replay buffer using prioritized sampling (Refer to the PER original paper by Google DeepMind)..
+        Sample a batch of experiences from the replay buffer using prioritized sampling (Refer
+        to the PER original paper by Google DeepMind)..
 
-        Instead of sampling uniformly (all experiences equally likely), this method
-        samples experiences proportional to their priority. Experiences with higher
-        priority (larger TD error = more surprising) are sampled more frequently
-        because the agent can learn more from them.
+        Instead of sampling uniformly (all experiences equally likely), this method samples
+        experiences proportional to their priority. Experiences with higher priority (larger
+        TD error = more surprising) are sampled more frequently because the agent can learn
+        more from them.
 
         Parameters:
         -----------
@@ -546,15 +549,15 @@ class DDQN_ECM:
                 Normalized so max(weights) = 1.0
                 Shape: (batch_size,)
         """
-        priority_powered_alpha = (
-            history["priority"].values ** self.prioritized_replay_alpha)
+        priority_powered_alpha = history["priority"].values ** self.prioritized_replay_alpha
         total_priority = priority_powered_alpha.sum()
 
         # Use the already calculated priority_powered_alpha values
         probabilities = priority_powered_alpha / total_priority
 
         # Ensure probabilities sum to exactly 1.0 to avoid numerical errors
-        # NOTE: Changed from original no OOP code so we need to keep an eye on it (add this comment)
+        # NOTE: Changed from original no OOP code so we need to keep an eye on it
+        # (add this comment)
         probabilities = probabilities / probabilities.sum()
 
         indices = np.random.choice(
@@ -606,7 +609,7 @@ class DDQN_ECM:
             if self._active_env.state == new_state:
                 validity = False
 
-            if validity == False:
+            if validity is False:
                 invalid_indices.append(idx)
 
         return invalid_indices
@@ -621,16 +624,17 @@ class DDQN_ECM:
 
         This implementation offers two modes:
         1. Uniform: Consider all actions (valid + invalid) equally
-        2. Non-uniform: Bias selection toward valid or invalid actions (This will be used for deadloop detection algorithm)
+        2. Non-uniform: Bias selection toward valid or invalid actions (This will be used for
+           deadloop detection algorithm)
 
-        The epsilon value typically decays over training: starting high (explore a lot)
-        and decreasing toward epsilon_min (exploit learned knowledge).
+        The epsilon value typically decays over training: starting high (explore a lot) and
+        decreasing toward epsilon_min (exploit learned knowledge).
 
         Parameters:
         -----------
         flatten_Z : np.ndarray
-            Flattened, normalized EIS impedance data for the current episode
-            (referred to as the combined EIS representation in the paper)
+            Flattened, normalized EIS impedance data for the current episode (referred to as
+            the combined EIS representation in the paper)
 
         uniform : bool, default=True
             Action selection strategy:
@@ -657,7 +661,7 @@ class DDQN_ECM:
         ec = ae.core.ec
         ACTION_LIST = self._active_env.ACTIONS_LIST
         if np.random.rand() <= self.epsilon:  # Explore
-            if uniform == True:
+            if uniform is True:
                 # Option 1: just random selection amonge all valid/invalid actions
                 rnd_number = np.random.randint(0, len(ACTION_LIST))
                 chosen_action = ACTION_LIST.iloc[rnd_number]
@@ -684,7 +688,7 @@ class DDQN_ECM:
             NN_state = np.concatenate((flatten_Z, encoded_state))
             q_values = self.model.predict(NN_state[np.newaxis], verbose=0)
 
-            if uniform == True:
+            if uniform is True:
                 # Option 1: just select the best action amonge all valid/invalid actions
                 chosen_action = ACTION_LIST.iloc[int(np.argmax(q_values[0]))]
             else:
@@ -692,7 +696,6 @@ class DDQN_ECM:
                 karva = self._active_env.state.replace("/", "-")
                 tree = ec.karva_to_tree(karva)
                 conding_length = len(tree)
-                circuit = karva_to_circuit(karva)
                 invalid_indices = self.invalid_actions(conding_length)
                 q_values[0][invalid_indices] = -np.inf
                 chosen_action = ACTION_LIST.iloc[int(np.argmax(q_values[0]))]
@@ -725,7 +728,18 @@ class DDQN_ECM:
         all_actions = []
 
         # Select only the 8 columns needed
-        # samples_subset = samples[['EIS', 'state', 'action_type', 'action_position', 'new_state', 'reward', 'terminal_flag', 'priority']]
+        # samples_subset = samples[
+        #     [
+        #         "EIS",
+        #         "state",
+        #         "action_type",
+        #         "action_position",
+        #         "new_state",
+        #         "reward",
+        #         "terminal_flag",
+        #         "priority",
+        #     ]
+        # ]
         samples_subset = samples[
             [
                 "EIS",
@@ -739,7 +753,16 @@ class DDQN_ECM:
             ]
         ]
 
-        # for sample_EIS_i, sample_state, sample_action_type, sample_action_position, sample_next_state, sample_reward, sample_flag, sample_priority in samples_subset.itertuples(index=False):
+        # for (
+        #     sample_EIS_i,
+        #     sample_state,
+        #     sample_action_type,
+        #     sample_action_position,
+        #     sample_next_state,
+        #     sample_reward,
+        #     sample_flag,
+        #     sample_priority,
+        # ) in samples_subset.itertuples(index=False):
         for (
             sample_EIS_i,
             encoded_state,
@@ -774,11 +797,12 @@ class DDQN_ECM:
 
         # Calculate target Q-values
         target_q_values = (
-            np.array(all_rewards)
-            + (1 - np.array(all_flags)) * self.gamma * max_next_q_values
+            np.array(all_rewards) + (1 - np.array(all_flags)) * self.gamma * max_next_q_values
         )
 
-        # NOTE: This part is for Predicted Q-value and loss calculation (Predicted Q-value is also know as Selected Q-value as it is the Q-value for the selected/sampled action of that state)
+        # NOTE: This part is for Predicted Q-value and loss calculation (Predicted Q-value is
+        # also know as Selected Q-value as it is the Q-value for the selected/sampled action
+        # of that state)
         # find action indices (labels)
         action_indices = []
         counter = 0
@@ -862,7 +886,10 @@ class DDQN_ECM:
         target_freq = 0
         memory = 0
         success_count = 0
-        statistical_analysis = {"episodic_cumul_reward": [], "episodic_mean_reward": []} # Learning curve tracking
+        statistical_analysis = {
+            "episodic_cumul_reward": [],
+            "episodic_mean_reward": [],
+        }  # Learning curve tracking
 
         # Main trial loop
         for t in range(self.num_trials):
@@ -872,7 +899,9 @@ class DDQN_ECM:
             print("Trial: ", t, f"for EIS_i: {EIS_i} (EIS of {ground_truth})")
 
             # Run all episodes for this trial
-            for e in range(self.episodes_trial): # NOTE: For dev purpose only as episodes_trial=1 for now
+            for e in range(
+                self.episodes_trial
+            ):  # NOTE: For dev purpose only as episodes_trial=1 for now
                 episode_result = self._run_episode(
                     EIS_i,
                     t,
@@ -902,10 +931,7 @@ class DDQN_ECM:
                 )
 
             # intermediate saving
-            if (
-                t >= self._save_start
-                and (t - self._save_start) % self._save_frequency == 0
-            ):
+            if t >= self._save_start and (t - self._save_start) % self._save_frequency == 0:
                 self.model.save(self.model_dir / f"dqn_model_trial_{t}.keras")
                 print(f"Intermediate model saved at trial {t}")
 
@@ -915,13 +941,15 @@ class DDQN_ECM:
 
         print("RL loop is completed")
         final_time = time.time()
-        print(f"Training took {(final_time - initial_time)/60:.2f} minutes")
+        print(f"Training took {(final_time - initial_time) / 60:.2f} minutes")
 
         self.model.save(self.save_dir / "dqn_model.keras")
         success_rate.to_csv(self.save_dir / "success_rate.csv")
         NN_loss.to_csv(self.save_dir / "NN_loss.csv")
         terminal_states.to_csv(self.save_dir / "terminal_states.csv")
-        pd.DataFrame(statistical_analysis).to_pickle(self.save_dir / "statistical_analysis.pkl")
+        pd.DataFrame(statistical_analysis).to_pickle(
+            self.save_dir / "statistical_analysis.pkl"
+        )
 
         self._plot_training_metrics(NN_loss, statistical_analysis)
 
@@ -1053,9 +1081,7 @@ class DDQN_ECM:
         new_encoded_state = self._active_env.encoded_state.copy()
 
         # Add experience to buffer with priority
-        priority = (
-            buffer.buffer["priority"][: buffer.size].max() if len(buffer) > 0 else 1.0
-        )
+        priority = buffer.buffer["priority"][: buffer.size].max() if len(buffer) > 0 else 1.0
 
         buffer.add(
             EIS=EIS_i,
@@ -1079,7 +1105,8 @@ class DDQN_ECM:
         target_freq = self._check_and_update_target(target_freq)
 
         # Detect deadloops
-        # NOTE: not moved to episode training because deadloop detection needs a lot of information from the current action
+        # NOTE: not moved to episode training because deadloop detection needs a lot of
+        # information from the current action
         new_deadloop_chain, new_deadloop_flag = self._detect_deadloop(
             validity,
             action_num,
@@ -1134,9 +1161,7 @@ class DDQN_ECM:
             # Update buffer priorities
             for idx in range(len(history_buffer_df)):
                 if idx < buffer.size:
-                    buffer.buffer["priority"][idx] = history_buffer_df.iloc[idx][
-                        "priority"
-                    ]
+                    buffer.buffer["priority"][idx] = history_buffer_df.iloc[idx]["priority"]
 
         else:
             # Update memory counter
@@ -1196,8 +1221,7 @@ class DDQN_ECM:
         if (
             len(
                 terminal_states[
-                    (terminal_states["state"] == state)
-                    & (terminal_states["EIS"] == EIS_i)
+                    (terminal_states["state"] == state) & (terminal_states["EIS"] == EIS_i)
                 ]
             )
             == 0
@@ -1275,13 +1299,12 @@ class DDQN_ECM:
 
         return statistical_analysis
 
-
     def _plot_training_metrics(self, NN_loss, statistical_analysis):
         """Generate training visualization plots"""
         self._use_file_plot_backend()
 
         # 1. Epsilon and Beta over trials
-        fig = plt.figure(figsize=(8, 5))
+        _ = plt.figure(figsize=(8, 5))
         plt.plot(self.epsilon_list, label="epsilon", color="blue", linestyle="-")
         plt.plot(self.beta_list, label="beta", color="red", linestyle="-")
         plt.title("Dynamic variables")
@@ -1294,7 +1317,7 @@ class DDQN_ECM:
         plt.close()
 
         # 2. Episodic rewards
-        fig = plt.figure(figsize=(8, 5))
+        _ = plt.figure(figsize=(8, 5))
         plt.plot(
             [i for i in range(len(statistical_analysis["episodic_cumul_reward"]))],
             statistical_analysis["episodic_cumul_reward"],
@@ -1315,7 +1338,7 @@ class DDQN_ECM:
         plt.close()
 
         # 3. Neural network loss
-        fig = plt.figure(figsize=(8, 5))
+        _ = plt.figure(figsize=(8, 5))
         if "loss" in NN_loss:
             plt.plot(NN_loss["loss"])
         plt.xlabel("Training steps")
@@ -1350,7 +1373,8 @@ class DDQN_ECM:
         self,
         EIS_i: Optional[int] = None,
         flatten_Z: Optional[np.ndarray] = None,
-        # ground_truth_state: Optional[Any] = None, TODO: Should fix the unkown ground_truth_state during dataprep
+        # TODO: Should fix the unkown ground_truth_state during dataprep
+        # ground_truth_state: Optional[Any] = None,
         ground_truth_circuit: Optional[str] = None,
         max_actions: Optional[int] = None,
         verbose: bool = True,
@@ -1362,7 +1386,8 @@ class DDQN_ECM:
         Evaluate the trained agent on a single EIS measurement.
 
         Can be called either with:
-        - EIS_i: to evaluate on a dataset entry (fetches flatten_Z and ground truth automatically)
+        - EIS_i: to evaluate on a dataset entry (fetches flatten_Z and ground truth
+          automatically)
         - flatten_Z: to evaluate on provided impedance data (ground truth optional)
 
         Args:
@@ -1386,7 +1411,8 @@ class DDQN_ECM:
             self.switch_to_training()
 
         # Validate inputs - need either EIS_i or flatten_Z
-        # TODO: Right now the option for using flatten_Z is not working (Have to find a smart way of handling different input size)
+        # TODO: Right now the option for using flatten_Z is not working (Have to find a smart
+        # way of handling different input size)
         if EIS_i is None and flatten_Z is None:
             raise ValueError("Must provide either EIS_i or flatten_Z")
         if EIS_i is not None and flatten_Z is not None:
@@ -1423,14 +1449,14 @@ class DDQN_ECM:
         }
 
         if verbose:
-            print(f"\n{'='*80}")
+            print(f"\n{'=' * 80}")
             # if ground_truth_state is not None:
             #     print(f"Evaluating EIS {EIS_i}: Ground Truth = {ground_truth_state}")
             # else:
             #     print(f"Evaluating EIS {EIS_i} (no ground truth provided)")
             if ground_truth_circuit is not None:
                 print(f"True Circuit: {ground_truth_circuit}")
-            print(f"{'='*80}")
+            print(f"{'=' * 80}")
 
         for a in range(max_actions):
             # Get greedy action (epsilon=0)
@@ -1487,7 +1513,7 @@ class DDQN_ECM:
                 print(f"  Coding: {coding}")
                 print(f"  Reward: {reward:.4f}")
                 if metrics:
-                    print(f"  Metrics:")
+                    print("  Metrics:")
                     for key, value in metrics.items():
                         if isinstance(value, (int, float)):
                             print(f"    {key}: {value:.6f}")
@@ -1529,14 +1555,14 @@ class DDQN_ECM:
         }
 
         if verbose:
-            print(f"\n{'='*80}")
-            print(f"Evaluation Summary:")
+            print(f"\n{'=' * 80}")
+            print("Evaluation Summary:")
             print(f"  Solution Found: {best_result['found_solution']}")
             print(f"  Best Reward: {best_result['reward']:.4f}")
             print(f"  Actions Taken: {len(action_history)}/{max_actions}")
             if best_result["circuit"]:
                 print(f"  Best Circuit: {best_result['circuit']}")
-            print(f"{'='*80}\n")
+            print(f"{'=' * 80}\n")
 
         if get_fit_plots:
             plot_eval_fit(
@@ -1557,7 +1583,7 @@ class DDQN_ECM:
                 best_result=best_result,
                 EIS_i=EIS_i,
                 Z_true=Z_true,
-                save_dir=self.save_dir
+                save_dir=self.save_dir,
             )
 
         return eval_result
@@ -1628,26 +1654,24 @@ class DDQN_ECM:
             eis_indices = np.random.choice(
                 all_indices, size=sample_size, replace=False
             ).tolist()
-            print(f"\n{'='*80}")
-            print(
-                f"Quick Check: Evaluating {sample_size} random EIS from {env_type} dataset"
-            )
-            print(f"{'='*80}\n")
+            print(f"\n{'=' * 80}")
+            print(f"Quick Check: Evaluating {sample_size} random EIS from {env_type} dataset")
+            print(f"{'=' * 80}\n")
         elif all_rows:
             # Evaluate all EIS in dataset
             eis_indices = list(range(len(dataset)))
-            print(f"\n{'='*80}")
+            print(f"\n{'=' * 80}")
             print(f"Evaluating ALL EIS in {env_type} dataset ({len(eis_indices)} total)")
-            print(f"{'='*80}\n")
+            print(f"{'=' * 80}\n")
         else:
             # Use provided eis_indices
             if eis_indices is None:
                 raise ValueError(
                     "Must provide eis_indices, set all_rows=True, or set num_samples"
                 )
-            print(f"\n{'='*80}")
+            print(f"\n{'=' * 80}")
             print(f"Batch Evaluation: {len(eis_indices)} EIS measurements")
-            print(f"{'='*80}\n")
+            print(f"{'=' * 80}\n")
 
         results = []
         start_time = time.time()
@@ -1699,22 +1723,25 @@ class DDQN_ECM:
         results_df = pd.DataFrame(results)
 
         # Print summary statistics
-        print(f"\n{'='*80}")
-        print(f"Batch Evaluation Complete")
-        print(f"{'='*80}")
+        print(f"\n{'=' * 80}")
+        print("Batch Evaluation Complete")
+        print(f"{'=' * 80}")
         print(f"Total EIS evaluated: {len(results_df)}")
         print(
-            f"Solutions found: {results_df['found_solution'].sum()} ({results_df['found_solution'].mean()*100:.1f}%)"
+            f"Solutions found: {results_df['found_solution'].sum()} "
+            f"({results_df['found_solution'].mean() * 100:.1f}%)"
         )
         print(f"Average best reward: {results_df['best_reward'].mean():.4f}")
         if results_df["found_solution"].sum() > 0:
             print(
-                f"Average actions to solution: {results_df[results_df['found_solution']]['best_action_number'].mean():.1f}"
+                "Average actions to solution: "
+                f"{results_df[results_df['found_solution']]['best_action_number'].mean():.1f}"
             )
         print(
-            f"Evaluation time: {eval_time:.1f} seconds ({eval_time/len(results_df):.2f} s/EIS)"
+            f"Evaluation time: {eval_time:.1f} seconds "
+            f"({eval_time / len(results_df):.2f} s/EIS)"
         )
-        print(f"{'='*80}\n")
+        print(f"{'=' * 80}\n")
 
         return results_df
 
@@ -1728,10 +1755,9 @@ class DDQN_ECM:
         """
         Evaluate the trained agent on every EIS row in the selected dataset.
 
-        This is a convenience wrapper around ``eval_batch_eis(all_rows=True)``.
-        Use ``use_eval_env=True`` to evaluate all rows in the evaluation
-        environment, or ``use_eval_env=False`` to evaluate all rows in the
-        training environment.
+        This is a convenience wrapper around ``eval_batch_eis(all_rows=True)``. Use
+        ``use_eval_env=True`` to evaluate all rows in the evaluation environment, or
+        ``use_eval_env=False`` to evaluate all rows in the training environment.
 
         Args:
             max_actions: Maximum number of actions per EIS (default: self.action_cap).

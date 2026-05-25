@@ -18,6 +18,7 @@ def reciprocal_sum(*values):
 
 
 def combine_R(*values, connection):
+    """Combine R values based on the connection type (series or parallel)."""
     if connection == "series":
         return direct_sum(*values)
     elif connection == "parallel":
@@ -25,6 +26,7 @@ def combine_R(*values, connection):
 
 
 def combine_C(*values, connection):
+    """Combine C values based on the connection type (series or parallel)."""
     if connection == "series":
         return reciprocal_sum(*values)
     elif connection == "parallel":
@@ -32,10 +34,12 @@ def combine_C(*values, connection):
 
 
 def combine_L(*values, connection):
+    """Combine L values based on the connection type (series or parallel)."""
     return combine_R(*values, connection=connection)
 
 
 def combine_components(*values, component_type, connection):
+    """Combine component values based on the component type and connection type."""
     if component_type == "R":
         return combine_R(*values, connection=connection)
     elif component_type == "C":
@@ -53,16 +57,15 @@ def _simplify_P(
     """
     Simplify the circuit by replacing P with either R or C based on Pn value.
 
-    If `Pn < Pn_low`, then P is replaced with R. If `Pn > Pn_high`, then P is replaced
-    with C.
+    If `Pn < Pn_low`, then P is replaced with R. If `Pn > Pn_high`, then P is replaced with C.
 
     Parameters
     ----------
     circuit : str
         CDC string representation of the circuit to be simplified.
     params : dict
-        Dictionary of parameters for the circuit, where keys are component names and
-        values are the corresponding component values.
+        Dictionary of parameters for the circuit, where keys are component names and values
+        are the corresponding component values.
     Pn_low : float, optional
         Threshold for replacing P with R, i.e., replace P with R when Pn < Pn_low.
     Pn_high : float, optional
@@ -77,8 +80,8 @@ def _simplify_P(
     # Replace P with R or C
     params_copy = {}
     for name, value in params.items():
-        # Parameter name that needs attention is "PXn", where "X" indicates the index
-        # of the component.
+        # Parameter name that needs attention is "PXn", where "X" indicates the index of the
+        # component.
         match = re.match(r"P(\d+)n", name)
         if match:
             index = int(match.group(1))
@@ -105,24 +108,23 @@ def _attach_values_to_structure(
     structure: Union[List, str], parameters: Dict[str, float]
 ) -> List:
     """
-    Given the structure representation of the circuit (output of
-    `ae._parser_to_structure`), attach the component values to the structure.
+    Given the structure representation of the circuit (output of `ae._parser_to_structure`),
+    attach the component values to the structure.
 
     Parameters
     ----------
     structure : list or str
-        The structure representation of the circuit in the form of nested lists of
-        strings.
+        The structure representation of the circuit in the form of nested lists of strings.
     parameters : dict
-        Dictionary of parameters for the circuit, where keys are component names and
-        values are the corresponding component values.
+        Dictionary of parameters for the circuit, where keys are component names and values
+        are the corresponding component values.
 
     Returns
     -------
     list
-        The structure representation of the circuit with component values attached, in
-        the form of nested lists of dictionaries, where each dictionary has the component
-        name as the key and the component value as the value.
+        The structure representation of the circuit with component values attached, in the
+        form of nested lists of dictionaries, where each dictionary has the component name as
+        the key and the component value as the value.
     """
     structure = deepcopy(structure)
     parameters = deepcopy(parameters)
@@ -134,38 +136,32 @@ def _attach_values_to_structure(
     # structure is a component string like "R1", "C5", "P4"
     comp = structure
     if comp.startswith("P"):
-        return {
-            comp: {
-                "w": parameters.get(f"{comp}w"),
-                "n": parameters.get(f"{comp}n"),
-            }
-        }
+        return {comp: {"w": parameters.get(f"{comp}w"), "n": parameters.get(f"{comp}n")}}
     else:
         return {comp: parameters.get(comp)}
 
 
 def _simplify_structure_with_values(
-    struct: List[Union[Dict[str, float], List]]
+    struct: List[Union[Dict[str, float], List]],
 ) -> Union[List, Dict[str, float]]:
     """
-    Recursively simplifies the nested list structure and compute the equivalent
-    component values in a single pass
+    Recursively simplifies the nested list structure and compute the equivalent component
+    values in a single pass
 
     Parameters
     ----------
     struct : list or dict
-        The structure representation of the circuit with component values attached, in
-        the form of nested lists of dictionaries, where each dictionary has the component
-        name as the key and the component value as the value.
+        The structure representation of the circuit with component values attached, in the
+        form of nested lists of dictionaries, where each dictionary has the component name as
+        the key and the component value as the value.
 
     Returns
     -------
     list or dict
-        The simplified structure representation of the circuit with component values
-        attached, in the form of nested lists of dictionaries, where each dictionary has
-        the component name as the key and the component value as the value. If the
-        structure can be fully simplified to a single component, then a dictionary is
-        returned instead of a list.
+        The simplified structure representation of the circuit with component values attached,
+        in the form of nested lists of dictionaries, where each dictionary has the component
+        name as the key and the component value as the value. If the structure can be fully
+        simplified to a single component, then a dictionary is returned instead of a list.
     """
     # Base case: An element ({string: float}) cannot be simplified further.
     if isinstance(struct, dict):
@@ -203,10 +199,7 @@ def _simplify_structure_with_values(
                             val1 = final_components[ii][cc_name]
                             val2 = list(comp.values())[0]
                             final_components[ii][cc_name] = combine_components(
-                                val1,
-                                val2,
-                                component_type=comp_type,
-                                connection="series",
+                                val1, val2, component_type=comp_type, connection="series"
                             )
                             break
             else:  # P elements or parallel blocks
@@ -229,10 +222,7 @@ def _simplify_structure_with_values(
                                 val1 = final_components[ii][cc_name]
                                 val2 = list(comp.values())[0]
                                 final_components[ii][cc_name] = combine_components(
-                                    val1,
-                                    val2,
-                                    component_type=comp_type,
-                                    connection="parallel",
+                                    val1, val2, component_type=comp_type, connection="parallel"
                                 )
                                 break
                 else:  # P element
@@ -249,9 +239,8 @@ def _simplify_structure_with_values(
 
 def _get_structure_only(struct: Union[List, Dict[str, float]]) -> Union[List, str]:
     """
-    Given the structure representation of the circuit with component values attached,
-    extract the structure only. The output will the the output of
-    `ae.parser._parse_to_structure`.
+    Given the structure representation of the circuit with component values attached, extract
+    the structure only. The output will the the output of `ae.parser._parse_to_structure`.
     """
     if isinstance(struct, dict):
         return next(iter(struct))
@@ -268,9 +257,9 @@ def _get_structure_only(struct: Union[List, Dict[str, float]]) -> Union[List, st
 
 def _get_values_only(struct: Union[List, Dict[str, float]]) -> Dict[str, float]:
     """
-    Given the structure representation of the circuit with component values attached,
-    extract the values only. The output will be a flat dictionary of component names and
-    their corresponding values.
+    Given the structure representation of the circuit with component values attached, extract
+    the values only. The output will be a flat dictionary of component names and their
+    corresponding values.
     """
     out = {}
     if isinstance(struct, list):
@@ -292,17 +281,17 @@ def _move_ohmic_resistors_to_the_beginning(
     circuit: str, parameters: Optional[Dict[str, float]] = None
 ) -> Union[str, Tuple[str, Dict[str, float]]]:
     """
-    Move the the ohmic resistors to the beginning of the circuit, which is how many
-    usually present the ohmic resistors in their ECM.
+    Move the the ohmic resistors to the beginning of the circuit, which is how many usually
+    present the ohmic resistors in their ECM.
 
     Parameters
     ----------
     circuit : str
         CDC string representation of the circuit to be rearranged.
     parameters : dict, optional
-        Dictionary of parameters for the circuit, where keys are component names and
-        values are the corresponding component values. If provided, the parameters will be
-        rearranged accordingly and returned as the second element of the output tuple.
+        Dictionary of parameters for the circuit, where keys are component names and values
+        are the corresponding component values. If provided, the parameters will be rearranged
+        accordingly and returned as the second element of the output tuple.
 
     Returns
     -------
@@ -336,8 +325,8 @@ def simplify(
 ) -> Union[str, Tuple[str, Dict[str, float]]]:
     """
     Simplify the circuit by applying the following steps:
-    1. If `parameters` is provided, simplify P elements based on their Pn values and
-       update the circuit and parameters accordingly.
+    1. If `parameters` is provided, simplify P elements based on their Pn values and update
+       the circuit and parameters accordingly.
     2. Simplify the circuit structure by combining series and parallel components and
        computing the equivalent component values.
     3. Move the ohmic resistors to the beginning of the circuit.
@@ -347,12 +336,12 @@ def simplify(
     circuit : str
         CDC string representation of the circuit to be simplified.
     parameters : dict, optional
-        Dictionary of parameters for the circuit, where keys are component names and
-        values are the corresponding component values. If provided, the parameters will
-        be updated accordingly.
+        Dictionary of parameters for the circuit, where keys are component names and values
+        are the corresponding component values. If provided, the parameters will be updated
+        accordingly.
     Pn_low : float, optional
-        Threshold for replacing P with R, i.e., replace P with R when Pn < Pn_low. Only
-        used if `parameters` is provided.
+        Threshold for replacing P with R, i.e., replace P with R when Pn < Pn_low. Only used
+        if `parameters` is provided.
     Pn_high : float, optional
         Threshold for replacing P with C, i.e., replace P with C when Pn > Pn_high. Only
         used if `parameters` is provided.

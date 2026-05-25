@@ -55,9 +55,7 @@ integer_variables = [
 ]
 # Convert the search space bounds into a N-by-2 array - Sometimes it is easier to work
 # with arrays than with dictionaries.
-search_space_bounds_array = np.array(
-    [list(bounds) for bounds in search_space_bounds.values()]
-)
+search_space_bounds_array = np.array([list(bounds) for bounds in search_space_bounds.values()])
 
 
 def sample_to_config(row, base_config):
@@ -555,9 +553,7 @@ def compute_score(
     score_success_exact_rate = success_exact_count / len(eval_results)
 
     if include_exact_rate:
-        avg_score = np.mean(
-            [score_mean_reward, score_success_rate, score_success_exact_rate]
-        )
+        avg_score = np.mean([score_mean_reward, score_success_rate, score_success_exact_rate])
     else:
         avg_score = np.mean([score_mean_reward, score_success_rate])
     return avg_score, (score_mean_reward, score_success_rate, score_success_exact_rate)

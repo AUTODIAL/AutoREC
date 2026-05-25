@@ -41,7 +41,7 @@ agent:
   NN_sleep: 1000  # The number of initial data that should be gathered before the first training (should be larger than batch_size)
   buffer_capacity: 15000
   optimizer_type: adam  # or pass optimizer object directly
-  
+
   # Prioritized replay parameters
   prioritized_replay_alpha: 0.6
   prioritized_replay_eps: 1.0E-6

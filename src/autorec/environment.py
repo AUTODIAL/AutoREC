@@ -11,12 +11,16 @@ os.environ["NUMEXPR_NUM_THREADS"] = thread_count
 
 import autoeis as ae
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
 
-from autorec.utils import *
+from autorec.utils import (
+    state_encode,
+    fit_circuit_parameters_NEW,
+    parse_state_to_circuit,
+    action_validity,
+)
 from autorec.optimized_data_structures.circuit_cache import HistoryCache
 
 ec = ae.core.ec
@@ -27,8 +31,8 @@ class EIS_ECM_Env:
     Environment for AutoREC: EIS Equivalent Circuit Modeling with Reinforcement Learning.
 
     This class implements a reinforcement learning environment for discovering equivalent
-    circuit models that fit EIS data. The agent learns to construct circuit topologies
-    by mutating a gene expression programming (GEP) chromosome representation.
+    circuit models that fit EIS data. The agent learns to construct circuit topologies by
+    mutating a gene expression programming (GEP) chromosome representation.
 
     Key Concepts:
     -------------
@@ -128,9 +132,11 @@ class EIS_ECM_Env:
         ValueError
             If dataset is None (a dataset must always be provided)
         """
-        if dataset is None: 
+        if dataset is None:
             raise ValueError(
-                "EIS_ECM_ENV: A dataset must be provided to create the environment. Please use the EISDataPrep class to you have not already created the dataset with data_preparation.py"
+                "EIS_ECM_ENV: A dataset must be provided to create the environment. "
+                "Please use the EISDataPrep class to you have not already created "
+                "the dataset with data_preparation.py"
             )
         self.dataset = dataset
         self.seed = seed
@@ -149,7 +155,8 @@ class EIS_ECM_Env:
         if self.cache_enabled:
             self.cache = HistoryCache(capacity=cache_capacity, cache_type=cache_type)
             print(
-                f"✓ Circuit evaluation cache enabled: {cache_type.upper()} with capacity {cache_capacity:,}"
+                f"✓ Circuit evaluation cache enabled: {cache_type.upper()} "
+                f"with capacity {cache_capacity:,}"
             )
         else:
             self.cache = None
@@ -178,7 +185,7 @@ class EIS_ECM_Env:
         ]
         self.ACTIONS_LIST = self.all_actions_list()
 
-        # Track current EIS index 
+        # Track current EIS index
         self.current_eis_index = None
         self.encoded_state = None
         self.reset()
@@ -227,9 +234,7 @@ class EIS_ECM_Env:
                     all_actions = pd.concat(
                         [
                             all_actions,
-                            pd.DataFrame(
-                                {"action_type": f"{item}", "action_position": [pos]}
-                            ),
+                            pd.DataFrame({"action_type": f"{item}", "action_position": [pos]}),
                         ],
                         ignore_index=True,
                     )
@@ -247,9 +252,8 @@ class EIS_ECM_Env:
         2. Samples a new EIS measurement to fit (or uses specified one)
         3. Returns the initial observation
 
-        This is called at the beginning of each training episode. Each episode
-        represents one attempt to discover a circuit that fits a particular
-        EIS measurement.
+        This is called at the beginning of each training episode. Each episode represents one
+        attempt to discover a circuit that fits a particular EIS measurement.
 
         Parameters:
         -----------
@@ -267,9 +271,7 @@ class EIS_ECM_Env:
                 Initial state observation (see _get_obs() for details)
                 Contains: state, encoded_state, EIS_flatten, circuit
         """
-        start_state = self.start_state_list[
-            np.random.randint(0, len(self.start_state_list))
-        ]
+        start_state = self.start_state_list[np.random.randint(0, len(self.start_state_list))]
         self.START_STATE = start_state
 
         # self.state: str = start_state
@@ -281,7 +283,7 @@ class EIS_ECM_Env:
         observation = self._get_obs()
 
         return index, observation
-    
+
     def _update_state(
         self, action_type: str = None, action_position: int = None, new_state: str = None
     ):
@@ -317,15 +319,14 @@ class EIS_ECM_Env:
             # Complete replacement mode
             if action_type is not None or action_position is not None:
                 raise ValueError(
-                    "Cannot specify both new_state and mutation parameters (action_type/action_position)"
+                    "Cannot specify both new_state and mutation parameters "
+                    "(action_type/action_position)"
                 )
             self.state = new_state
         elif action_type is not None and action_position is not None:
             # Mutation mode
             self.state = (
-                self.state[:action_position]
-                + action_type
-                + self.state[action_position + 1 :]
+                self.state[:action_position] + action_type + self.state[action_position + 1 :]
             )
         else:
             raise ValueError(
@@ -375,7 +376,7 @@ class EIS_ECM_Env:
         self.chi_threshold = row["chi_thresh"]
         self.r2_threshold = row["r2_thresh"]
         return self.current_eis_index
-    
+
     def _get_obs(self):
         """
         Get the current observation of the environment state.
@@ -553,9 +554,9 @@ class EIS_ECM_Env:
         4. Calculates reward based on fit quality
         5. Determines if episode should terminate (good fit found)
 
-        The step function uses caching to dramatically speed up evaluations.
-        If the exact same circuit has been evaluated for this EIS measurement
-        before, it returns the cached result instantly (~1000x faster).
+        The step function uses caching to dramatically speed up evaluations. If the exact
+        same circuit has been evaluated for this EIS measurement before, it returns the
+        cached result instantly (~1000x faster).
 
         Parameters:
         -----------
@@ -665,7 +666,7 @@ class EIS_ECM_Env:
                 "terminated": terminated,
                 "validity": validity,
                 "coding": coding,
-                "param": {} if param == None else param,
+                "param": {} if param is None else param,
                 "circuit": circuit,
                 "predicted_Z": predicted_Z,
                 "metrics": metrics,
@@ -719,9 +720,7 @@ class EIS_ECM_Env:
                     metrics=result["metrics"],
                     predicted_Z=result["predicted_Z"],
                     param=result["param"],
-                    good_fit=result[
-                        "terminated"
-                    ],  # <-- Map terminated to good_fit for cache
+                    good_fit=result["terminated"],  # <-- Map terminated to good_fit for cache
                     depth_penalty=result["depth_penalty"],
                     fit_bonus=0.0,
                     fit_penalty=0.0,
@@ -743,7 +742,7 @@ class EIS_ECM_Env:
             "terminated": terminated,
             "validity": validity,
             "coding": coding,
-            "param": {} if param == None else param,
+            "param": {} if param is None else param,
             "circuit": circuit,
             "predicted_Z": predicted_Z,
             "metrics": metrics,
@@ -752,14 +751,15 @@ class EIS_ECM_Env:
             "fit_penalty": 0,
         }
 
-    # Functions for seeing the usefulness of the cache, for later evaluation of the two different caches
+    # Functions for seeing the usefulness of the cache, for later evaluation of the two
+    # different caches
     # LRU vs clock cache
     def get_cache_stats(self):
         """
         Get detailed statistics about cache performance.
 
-        This helps monitor how well the cache is working and whether it should
-        be tuned (capacity increased/decreased, different eviction policy, etc.).
+        This helps monitor how well the cache is working and whether it should be tuned
+        (capacity increased/decreased, different eviction policy, etc.).
 
         Returns:
         --------
@@ -792,11 +792,11 @@ class EIS_ECM_Env:
         """
         Print formatted cache performance statistics to console.
 
-        This is a convenience method that displays cache statistics in a
-        readable format. Useful for quick checks during training.
+        This is a convenience method that displays cache statistics in a readable format.
+        Useful for quick checks during training.
 
-        Call this periodically during training to monitor cache effectiveness.
-        If hit rate is very low, training is slower than it could be.
+        Call this periodically during training to monitor cache effectiveness. If hit rate is
+        very low, training is slower than it could be.
         """
         if self.cache_enabled:
             self.cache.print_stats()

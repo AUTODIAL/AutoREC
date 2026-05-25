@@ -25,9 +25,6 @@ from pprint import pprint
 
 import numpy as np
 import optuna
-import pandas as pd
-import seaborn as sns
-import matplotlib.pyplot as plt
 
 from tuning_utils import (
     ConfigurationHandler,
@@ -58,15 +55,11 @@ parser.add_argument(
     default="./base_config.yaml",
     help="Base configuration file to use for generating new configs",
 )
-parser.add_argument(
-    "--num-initial", type=int, default=10, help="Number of initial trials"
-)
+parser.add_argument("--num-initial", type=int, default=10, help="Number of initial trials")
 parser.add_argument(
     "--num-iterations", type=int, default=5, help="Number of iterations to run"
 )
-parser.add_argument(
-    "--batch-size", type=int, default=5, help="Batch size for each iteration"
-)
+parser.add_argument("--batch-size", type=int, default=5, help="Batch size for each iteration")
 args = parser.parse_args()
 
 
@@ -85,9 +78,7 @@ base_config_file = Path(args.base_config)
 base_sbatch_options = {"time": "72:00:00", "mem_per_cpu": "12G"}
 
 # Instantiate configuration handler
-config_handler = ConfigurationHandler(
-    base_config=base_config_file, configs_dir=configs_dir
-)
+config_handler = ConfigurationHandler(base_config=base_config_file, configs_dir=configs_dir)
 
 
 # Print out some information
@@ -137,10 +128,7 @@ study = optuna.create_study(sampler=sampler, direction="maximize")
 check_files = ["dqn_model.keras", "statistical_analysis.pkl", "eval_results.pkl"]
 
 # MAKE SURE TO INCLUDE THE ORIGINAL HYPERPARAMETER SET
-print(
-    "We make sure that the original hyperparameter set is included in "
-    "the initial trials."
-)
+print("We make sure that the original hyperparameter set is included in the initial trials.")
 config_id, config_file, config = config_handler.write_config(
     config_handler.base_config, RESULTS_DIR
 )
@@ -151,9 +139,7 @@ if not training_done:
     print("Submitting job for the original hyperparameter set...")
     sbatch_options = base_sbatch_options.copy()
     sbatch_options["job_name"] = f"hyperparam_tuning_init_{config_id}"
-    jobid = write_job_script(
-        SAMPLE_DIR, python_file, config_file, sbatch_options, submit=True
-    )
+    jobid = write_job_script(SAMPLE_DIR, python_file, config_file, sbatch_options, submit=True)
     # Block until all jobs are finished
     print("Waiting for all initial jobs to finish...")
     block_until_completed([jobid])
@@ -274,40 +260,3 @@ print(f"Configuration ID: {best_config_id}")
 pprint(best_params, sort_dicts=False)
 # pprint(best_config, sort_dicts=False)
 print(f"\nWith score: {best_trial.value:.4f}")
-
-
-# ##########################################################################################
-# # CORRELATION ANALYSIS
-# ##########################################################################################
-# print("\nPerforming correlation analysis to understand the hyperparameters...")
-# # Collect all results
-# for key in all_params:
-#     params = all_params[key]
-#     scores = all_scores[key]
-#     sample = np.append(scores, [val for val in params.values()])
-#     if key == 0:
-#         samples = sample
-#     else:
-#         samples = np.vstack((samples, sample))
-# columns = [
-#     "avg_score",
-#     "normalized_mean_reward",
-#     "success_rate",
-#     "success_exact_rate",
-# ] + list(all_params[0])
-# # Convert to a DataFrame
-# df = pd.DataFrame(samples, columns=columns)
-
-# # Plots
-# # # Samples
-# # print("Generating pairplot...")
-# # sns.pairplot(df)
-# # plt.suptitle("Pairplot of Hyperparameter Tuning Results", y=1.02)
-# # plt.savefig(RESULTS_DIR / "pairplot.png", bbox_inches="tight", dpi=300)
-# # Correlation heatmap
-# print("Generating correlation heatmap...")
-# plt.figure(figsize=(10, 8))
-# corr = df.corr()
-# sns.heatmap(corr, annot=True, fmt=".2f", vmin=-1, vmax=1, cmap="coolwarm", square=True)
-# plt.title("Correlation Heatmap of Hyperparameter Tuning Results")
-# plt.savefig(RESULTS_DIR / "correlation_heatmap.png", bbox_inches="tight", dpi=300)
