@@ -6,6 +6,13 @@ Include a concise summary of the major changes in this pull request.
 -
 -
 
+## Related issue
+
+Link the issue that this pull request addresses.
+
+- Closes #
+
+
 ## Type of change
 
 Please check all that apply:
@@ -24,11 +31,13 @@ Please check all that apply:
 - [ ] Change to runtime/environment setup
 - [ ] Other:
 
+
 ## Motivation and context
 
 Explain why this change is needed.
 
 For example, does this pull request improve AutoREC's ability to generate ECMs from EIS data, fix an issue with circuit generation or evaluation, improve DDQN training, support new data formats, or improve reproducibility, usability, or documentation?
+
 
 ## Additional dependencies introduced, if any
 
@@ -41,12 +50,14 @@ List all new dependencies and justify why they are needed.
 
 Please avoid adding dependencies for trivial functionality or dependencies that substantially complicate the AutoREC environment.
 
+
 ## TODO, if any
 
 If this is a work-in-progress, list what still needs to be done.
 
 -
 -
+
 
 ## Checklist
 
@@ -65,6 +76,7 @@ Before this pull request is merged, please check the following:
 - [ ] No unnecessary dependencies were added.
 - [ ] Existing examples or tutorials still run, or affected examples were updated.
 - [ ] Runtime-sensitive changes were checked with the AutoREC runtime setup when relevant.
+
 
 ## Additional comments
 
