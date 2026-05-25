@@ -1293,9 +1293,9 @@ class DDQN_ECM:
         """Update running statistics for episode performance."""
         statistical_analysis["episodic_cumul_reward"].append(total_reward)
 
-        if self.num_trials > 50:
-            mean_reward = np.mean(statistical_analysis["episodic_cumul_reward"][-50:])
-            statistical_analysis["episodic_mean_reward"].append(mean_reward)
+        # Calculate mean reward over the last 50 episodes for a smoothed learning curve
+        mean_reward = np.mean(statistical_analysis["episodic_cumul_reward"][-50:])
+        statistical_analysis["episodic_mean_reward"].append(mean_reward)
 
         return statistical_analysis
 
