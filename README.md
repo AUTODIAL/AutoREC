@@ -346,8 +346,8 @@ make lint
 ```
 
 Some hooks may modify files automatically, such as removing trailing whitespace,
-fixing missing final newlines, sorting imports, or formatting Python files. If
-that happens during a commit, stage the modified files and commit again:
+fixing missing final newlines, or formatting Python files. If that happens
+during a commit, stage the modified files and commit again:
 
 ```bash
 git add .
