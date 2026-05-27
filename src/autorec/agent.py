@@ -298,9 +298,12 @@ class DDQN_ECM:
         """
         Update the training environment.
 
-        Args:
-            new_training_env: New environment to use for training switch_to_it: If True,
-            immediately switch active_env to this new environment
+        Parameters
+        ----------
+        new_training_env : EIS_ECM_Env
+            New environment to use for training.
+        switch_to_it : bool
+            If True, immediately switch ``active_env`` to this new environment.
         """
         self.training_env = new_training_env
         if switch_to_it:
@@ -311,9 +314,12 @@ class DDQN_ECM:
         """
         Update the evaluation environment.
 
-        Args:
-            new_eval_env: New environment to use for evaluation
-            switch_to_it: If True, immediately switch active_env to this new environment
+        Parameters
+        ----------
+        new_eval_env : EIS_ECM_Env
+            New environment to use for evaluation.
+        switch_to_it : bool
+            If True, immediately switch ``active_env`` to this new environment.
         """
         self.eval_env = new_eval_env
         if switch_to_it:
@@ -359,8 +365,8 @@ class DDQN_ECM:
             - Each output represents Q(state, action_i)
             - Example: For HEAD=5, TAIL=6: ~40 possible actions
 
-        Sets:
-        -----
+        Attributes
+        ----------
         self.model : tf.keras.Model
             The main neural network that will be trained
             Used to select actions during training
@@ -397,12 +403,12 @@ class DDQN_ECM:
         """
         Save the trained neural network model to disk for later use.
 
-        Parameters:
-        -----------
+        Parameters
+        ----------
         filepath : str or Path
             Location to save the model file
 
-            Examples:
+            For example:
             - 'my_model.keras' (saves in current directory)
             - 'models/experiment_1/model.keras' (creates nested directories)
             - Path('results/best_model.h5') (using pathlib)
@@ -410,17 +416,17 @@ class DDQN_ECM:
         save_format : str, default='keras'
             File format for saving the model
 
-            OPTIONS:
+            Options:
             - 'keras' (recommended):
             - 'h5' (legacy)
 
-        Returns:
-        --------
+        Returns
+        -------
         None
             Prints confirmation message upon successful save
 
-        File Extension Handling:
-        ------------------------
+        File Extension Handling
+        -----------------------
         The method automatically adds the correct extension:
         - save_format='keras' → ensures '.keras' extension
         - save_format='h5' → ensures '.h5' extension
@@ -428,7 +434,7 @@ class DDQN_ECM:
         If you specify 'model' as filepath with save_format='keras', it will be saved as
         'model.keras' automatically.
 
-        Note:
+        Notes
         -----
         Only the MAIN model is saved (not the target model).
         """
@@ -453,16 +459,16 @@ class DDQN_ECM:
         - Epsilon value: agent.epsilon = saved_epsilon
         - Trial counter: start_trial = saved_trial
 
-        Parameters:
-        -----------
+        Parameters
+        ----------
         filepath : str or Path
             Location of the saved model file
 
-        Returns:
-        --------
+        Returns
+        -------
         None (Prints confirmation message upon successful load)
 
-        Note:
+        Notes
         -----
         If you're loading a model trained with different environment parameters (different
         chromosome_HEAD_len, different elements, etc.), the model architecture may not match
@@ -488,8 +494,8 @@ class DDQN_ECM:
         starting with less bias correction (focusing on learning from important samples) and
         ending with full bias correction (ensuring unbiased gradient updates).
 
-        Parameters:
-        -----------
+        Parameters
+        ----------
         trial : int
             Current training trial/episode number (0 to num_trials)
 
@@ -497,8 +503,8 @@ class DDQN_ECM:
             Total number of trials over which to increase beta
             Controls how quickly beta increases
 
-        Returns:
-        --------
+        Returns
+        -------
         float
             The beta value to use for this trial
             Range: [initial_beta, final_beta]
@@ -520,8 +526,8 @@ class DDQN_ECM:
         TD error = more surprising) are sampled more frequently because the agent can learn
         more from them.
 
-        Parameters:
-        -----------
+        Parameters
+        ----------
         history : pd.DataFrame
             The replay buffer containing all stored experiences
             Must have a 'priority' column with priority values for each experience
@@ -531,23 +537,22 @@ class DDQN_ECM:
             Higher values = more bias correction
             Should increase over training (use scheduler() method)
 
-        Returns:
-        --------
-        tuple: (samples, indices, weights)
-            samples : pd.DataFrame
-                Subset of history containing batch_size sampled experiences
-                These are the experiences that will be used for model training
+        Returns
+        -------
+        samples : pd.DataFrame
+            Subset of history containing batch_size sampled experiences.
+            These are the experiences that will be used for model training.
 
-            indices : np.ndarray
-                Array of integer indices indicating which rows were sampled
-                Used to update priorities after training (based on new TD errors)
-                Shape: (batch_size,)
+        indices : np.ndarray
+            Array of integer indices indicating which rows were sampled.
+            Used to update priorities after training (based on new TD errors).
+            Shape: (batch_size,)
 
-            weights : np.ndarray
-                Importance sampling weights for each sampled experience
-                Multiply these with TD errors during gradient computation
-                Normalized so max(weights) = 1.0
-                Shape: (batch_size,)
+        weights : np.ndarray
+            Importance sampling weights for each sampled experience.
+            Multiply these with TD errors during gradient computation.
+            Normalized so max(weights) = 1.0.
+            Shape: (batch_size,)
         """
         priority_powered_alpha = history["priority"].values ** self.prioritized_replay_alpha
         total_priority = priority_powered_alpha.sum()
@@ -575,18 +580,18 @@ class DDQN_ECM:
         """
         Identify all actions that would create invalid circuit configurations or repetitions.
 
-        Parameters:
-        -----------
+        Parameters
+        ----------
         conding_length : int
             Length of the "coding" part of the chromosome
             This is the portion that actually forms the circuit tree
             Actions beyond this position modify unused tail positions and are invalid
 
             Example: If chromosome is '+RPRRRR' and tree only uses 4 positions,
-                    conding_length = 4, so positions 4-6 are non-coding
+            conding_length = 4, so positions 4-6 are non-coding.
 
-        Returns:
-        --------
+        Returns
+        -------
         list of int
             Indices of invalid actions in the ACTIONS_LIST DataFrame
             These correspond to row numbers in self._active_env.ACTIONS_LIST
@@ -630,8 +635,8 @@ class DDQN_ECM:
         The epsilon value typically decays over training: starting high (explore a lot) and
         decreasing toward epsilon_min (exploit learned knowledge).
 
-        Parameters:
-        -----------
+        Parameters
+        ----------
         flatten_Z : np.ndarray
             Flattened, normalized EIS impedance data for the current episode (referred to as
             the combined EIS representation in the paper)
@@ -649,14 +654,13 @@ class DDQN_ECM:
                 - Exploitation: Best action from only valid actions
                 - Slower (checks validity for every action)
 
-        Returns:
-        --------
-        tuple: (action_position, action_type)
-            action_position : int
-                Which chromosome position to modify (0 to chromosome_length-1)
+        Returns
+        -------
+        action_position : int
+            Which chromosome position to modify (0 to chromosome_length-1).
 
-            action_type : str
-                Which element to place ('+', '/', 'R', 'L', 'P')
+        action_type : str
+            Which element to place ('+', '/', 'R', 'L', 'P').
         """
         ec = ae.core.ec
         ACTION_LIST = self._active_env.ACTIONS_LIST
@@ -712,11 +716,15 @@ class DDQN_ECM:
         """
         Perform one training step using DDQN with prioritized experience replay.
 
-        Args:
-            history: DataFrame containing experience replay buffer
+        Parameters
+        ----------
+        history : pd.DataFrame
+            DataFrame containing experience replay buffer.
 
-        Returns:
-            Mean loss for this training step
+        Returns
+        -------
+        float
+            Mean loss for this training step.
         """
         samples, sample_indices, weights = self._sample_experience(
             history, self.prioritized_replay_beta
@@ -1390,19 +1398,30 @@ class DDQN_ECM:
           automatically)
         - flatten_Z: to evaluate on provided impedance data (ground truth optional)
 
-        Args:
-            EIS_i: Index of the EIS measurement in dataset (if None, must provide flatten_Z)
-            flatten_Z: Flattened impedance data (if None, must provide EIS_i)
-            ground_truth_circuit: Optional ground truth circuit for comparison
-            max_actions: Maximum number of actions to try (default: self.action_cap)
-            verbose: Whether to print progress
-            get_fit_plots: Whether to save fit plots for successful evaluations
-            gif_generation: Whether to generate a circuit-evolution GIF
-            use_eval_env: Whether to run on the evaluation environment instead
-                of the training environment
+        Parameters
+        ----------
+        EIS_i : int, optional
+            Index of the EIS measurement in dataset (if None, must provide ``flatten_Z``).
+        flatten_Z : np.ndarray, optional
+            Flattened impedance data (if None, must provide ``EIS_i``).
+        ground_truth_circuit : str, optional
+            Optional ground truth circuit for comparison.
+        max_actions : int, optional
+            Maximum number of actions to try (default: ``self.action_cap``).
+        verbose : bool
+            Whether to print progress.
+        get_fit_plots : bool
+            Whether to save fit plots for successful evaluations.
+        gif_generation : bool
+            Whether to generate a circuit-evolution GIF.
+        use_eval_env : bool
+            Whether to run on the evaluation environment instead
+            of the training environment
 
-        Returns:
-            Dictionary containing evaluation results
+        Returns
+        -------
+        dict
+            Dictionary containing evaluation results.
         """
         # Switch to appropriate environment
         if use_eval_env:
@@ -1620,21 +1639,31 @@ class DDQN_ECM:
         the training environment. Row positions are selected from the active
         environment's dataset.
 
-        Args:
-            eis_indices: List of EIS row positions to evaluate. Ignored if
-                ``all_rows=True`` or ``num_samples`` is set.
-            max_actions: Maximum number of actions per EIS (default: self.action_cap)
-            verbose: Whether to print detailed progress for each EIS
-            use_eval_env: Whether to use the evaluation environment. If False,
-                use the training environment.
-            gif_generation: Generate a circuit-evolution GIF for each EIS.
-            all_rows: If True, evaluate all EIS rows in the active
-                environment's dataset. Overrides ``eis_indices``.
-            num_samples: If set, randomly sample this many EIS indices for
-                quick evaluation. Overrides ``eis_indices``.
+        Parameters
+        ----------
+        eis_indices : list[int], optional
+            List of EIS row positions to evaluate. Ignored if ``all_rows=True`` or
+            ``num_samples`` is set.
+        max_actions : int, optional
+            Maximum number of actions per EIS (default: ``self.action_cap``).
+        verbose : bool
+            Whether to print detailed progress for each EIS.
+        use_eval_env : bool
+            Whether to use the evaluation environment. If False,
+            use the training environment.
+        gif_generation : bool
+            Generate a circuit-evolution GIF for each EIS.
+        all_rows : bool
+            If True, evaluate all EIS rows in the active
+            environment's dataset. Overrides ``eis_indices``.
+        num_samples : int, optional
+            If set, randomly sample this many EIS indices for quick evaluation. Overrides
+            ``eis_indices``.
 
-        Returns:
-            DataFrame containing evaluation results for all EIS
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame containing evaluation results for all EIS.
         """
         # Switch to appropriate environment
         if use_eval_env:
@@ -1759,14 +1788,21 @@ class DDQN_ECM:
         ``use_eval_env=True`` to evaluate all rows in the evaluation environment, or
         ``use_eval_env=False`` to evaluate all rows in the training environment.
 
-        Args:
-            max_actions: Maximum number of actions per EIS (default: self.action_cap).
-            verbose: Whether to print detailed progress for each EIS.
-            use_eval_env: Whether to use the evaluation environment. If False,
-                use the training environment.
-            gif_generation: Generate a circuit-evolution GIF for each EIS.
+        Parameters
+        ----------
+        max_actions : int, optional
+            Maximum number of actions per EIS (default: ``self.action_cap``).
+        verbose : bool
+            Whether to print detailed progress for each EIS.
+        use_eval_env : bool
+            Whether to use the evaluation environment. If False,
+            use the training environment.
+        gif_generation : bool
+            Generate a circuit-evolution GIF for each EIS.
 
-        Returns:
+        Returns
+        -------
+        pd.DataFrame
             DataFrame containing evaluation results for all EIS rows.
         """
         return self.eval_batch_eis(

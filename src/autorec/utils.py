@@ -43,12 +43,18 @@ def save_evaluation_results(
     CSV is human-readable and useful for quick analysis. Pickle preserves complex data types
     such as circuits and arrays.
 
-    Args:
-        eval_df: Evaluation results DataFrame.
-        run_id: Unique identifier for this evaluation run.
-        results_save_dir: Directory where result files should be saved.
+    Parameters
+    ----------
+    eval_df : pd.DataFrame
+        Evaluation results DataFrame.
+    run_id : str
+        Unique identifier for this evaluation run.
+    results_save_dir : str or os.PathLike
+        Directory where result files should be saved.
 
-    Returns:
+    Returns
+    -------
+    tuple[Path, Path]
         Tuple of ``(csv_path, pkl_path)`` for the saved files.
     """
     results_save_dir = Path(results_save_dir)
@@ -69,12 +75,16 @@ def set_global_seed(seed: int = 42, deterministic_ops: bool = True):
     """
     Set seeds for all random number generators to ensure reproducibility.
 
-    Args:
-        seed: Random seed value
-        deterministic_ops: If True, enables deterministic operations in TensorFlow
-                          (may reduce performance but ensures reproducibility)
+    Parameters
+    ----------
+    seed : int
+        Random seed value.
+    deterministic_ops : bool
+        If True, enables deterministic operations in TensorFlow (may reduce performance but
+        ensures reproducibility).
 
-    Notes:
+    Notes
+    -----
         - Must be called BEFORE importing any modules that use randomness
         - Must be called BEFORE any random operations occur
         - Some operations (especially GPU) may still have non-deterministic behavior
@@ -313,14 +323,18 @@ def parse_state_to_circuit(state: str) -> tuple[str, int, str]:
     """
     Parse chromosome state into circuit representation.
 
-    Args:
-        state: Chromosome string (e.g., '+RPRRRR')
+    Parameters
+    ----------
+    state : str
+        Chromosome string (e.g., '+RPRRRR').
 
-    Returns:
-        tuple: (circuit, coding_length, coding)
-            - circuit: Human-readable circuit notation (e.g., 'R0-p(R1,P2)')
-            - coding_length: Length of expressed (coding) region
-            - coding: The coding portion of the chromosome
+    Returns
+    -------
+    tuple[str, int, str]
+        Tuple containing:
+        - circuit: Human-readable circuit notation (e.g., 'R0-p(R1,P2)')
+        - coding_length: Length of expressed (coding) region
+        - coding: The coding portion of the chromosome
     """
     state_karva = state.replace("/", "-")
     tree = ec.karva_to_tree(state_karva)
@@ -334,11 +348,13 @@ def karva_to_circuit(karva: str):
     """
     Convert a karva representation of a circuit into its corresponding circuit structure
 
-    Parameters:
+    Parameters
+    ----------
     - karva (str): The karva representation of the circuit: karva is the same as GEP,
       with '/' replaced by '-'.
 
-    Returns:
+    Returns
+    -------
     - circuit: The circuit structure obtained from the karva representation.
     """
     ec = ae.core.ec
@@ -356,10 +372,12 @@ def validity_check(circuit: str):
     3. Must contain at least one parallel route.
     4. Optionally check for circuit depth (commented out).
 
-    Parameters:
+    Parameters
+    ----------
     circuit (str): an string with a CDC representation of the circuit.
 
-    Returns:
+    Returns
+    -------
     validity (bool): True if the circuit is valid, False otherwise.
     """
     validity = ae.parser.validate_circuit(
@@ -749,8 +767,8 @@ def create_circuit_evolution_visualization(
     """
     Create circuit evolution visualization frames and GIF for evaluation results.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     freq : array
         Frequency data
     Z_true : array
@@ -1057,8 +1075,8 @@ def prepare_and_generate_circuit_gif(
     Extract circuit progression from action history and generate circuit evolution GIF. All
     metrics are taken directly from action_history (no recalculation).
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     _active_env : EIS_ECM_Env
         Environment containing frequency data and circuit-fitting context.
     action_history : list

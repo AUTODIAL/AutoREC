@@ -34,24 +34,24 @@ class EIS_ECM_Env:
     circuit models that fit EIS data. The agent learns to construct circuit topologies by
     mutating a gene expression programming (GEP) chromosome representation.
 
-    Key Concepts:
-    -------------
+    Key Concepts
+    ------------
     - GEP Chromosome: A string representation of circuit topology (e.g., '+RPRRRR')
     - Head: First part of chromosome that can contain any element (+, /, R, L, P, C)
     - Tail: Second part that can only contain terminal elements (R, L, P, C)
     - Actions: Mutations that change one position in the chromosome to a different element
     - Episode: One complete attempt to find a circuit that fits a given EIS measurement
 
-    Workflow:
-    ---------
+    Workflow
+    --------
     1. Environment is reset with a random starting circuit and EIS measurement
     2. Agent takes actions to mutate the circuit chromosome
     3. Each mutation is evaluated by fitting circuit parameters to the EIS data
     4. Rewards are given based on fit quality (R², chi-square test)
     5. Episode terminates when a good fit is found or agent gives up
 
-    Attributes:
-    -----------
+    Attributes
+    ----------
     _N_MAX : int
         Maximum number of child nodes per circuit element (binary tree = 2)
     _ELEMENTS : list
@@ -85,8 +85,8 @@ class EIS_ECM_Env:
         This sets up the reinforcement learning environment with a dataset of EIS
         measurements, configures the chromosome (circuit representation) parameters.
 
-        Parameters:
-        -----------
+        Parameters
+        ----------
         dataset : pd.DataFrame, required
             A DataFrame where each row contains:
             - 'Z_true': Complex impedance measurements (numpy array)
@@ -127,8 +127,8 @@ class EIS_ECM_Env:
             - 'lru': Least Recently Used (recommended for most cases)
             - 'clock': Clock/second-chance algorithm (more efficient for certain patterns)
 
-        Raises:
-        -------
+        Raises
+        ------
         ValueError
             If dataset is None (a dataset must always be provided)
         """
@@ -197,16 +197,16 @@ class EIS_ECM_Env:
         An "action" is defined as changing one position in the chromosome to a specific
         element. Not all combinations are valid due to GEP structural rules:
 
-        Rules:
-        ------
+        Rules
+        -----
         1. Position 0 (root) must be an operator ('+' or '/') - it connects the circuit
         2. Head positions (0 to HEAD-1) can be any element: +, /, R, L, P
         3. Tail positions (HEAD to end) can only be terminals: R, L, P
 
         This enforces proper tree structure where operators appear before terminals.
 
-        Returns:
-        --------
+        Returns
+        -------
         pd.DataFrame
             DataFrame with columns:
             - 'action_type': The element to place ('+', '/', 'R', 'L', 'P')
@@ -255,21 +255,18 @@ class EIS_ECM_Env:
         This is called at the beginning of each training episode. Each episode represents one
         attempt to discover a circuit that fits a particular EIS measurement.
 
-        Parameters:
-        -----------
+        Parameters
+        ----------
         EIS_i : int or None, default=None
             If provided, uses the EIS measurement at this index in the dataset
             If None, randomly samples an EIS measurement from the dataset
 
-        Returns:
-        --------
-        tuple: (index, observation)
-            index : int or pd.Index
-                The index/row number of the selected EIS measurement
-
-            observation : dict
-                Initial state observation (see _get_obs() for details)
-                Contains: state, encoded_state, EIS_flatten, circuit
+        Returns
+        -------
+        tuple[int or pd.Index, dict]
+            Tuple containing:
+            - index: The index/row number of the selected EIS measurement.
+            - observation: Initial state observation (see ``_get_obs()`` for details).
         """
         start_state = self.start_state_list[np.random.randint(0, len(self.start_state_list))]
         self.START_STATE = start_state
@@ -292,16 +289,16 @@ class EIS_ECM_Env:
 
         If called during reset, it gives the encoded state of the START_STATE.
 
-        Usage:
-        ------
+        Examples
+        --------
         # For mutations (during episodes):
         self._update_state(action_type='R', action_position=3)
 
         # For complete replacement (during reset):
         self._update_state(new_state='START_STATE)
 
-        Parameters:
-        -----------
+        Parameters
+        ----------
         action_type : str, optional
             The element to place: '+', '/', 'R', 'L', or 'P'
         action_position : int, optional
@@ -309,8 +306,8 @@ class EIS_ECM_Env:
         new_state : str, optional
             Complete new chromosome string to set
 
-        Raises:
-        -------
+        Raises
+        ------
         ValueError
             If neither mutation parameters nor new_state is provided,
             or if both are provided simultaneously
@@ -348,14 +345,14 @@ class EIS_ECM_Env:
         - Fit quality thresholds (when to consider fit "good enough")
         - Normalized data (for neural network input)
 
-        Parameters:
-        -----------
+        Parameters
+        ----------
         EIS_i : int or None
             If int: Load the EIS measurement at this specific row index
             If None: Randomly sample an EIS measurement from the dataset
 
-        Returns:
-        --------
+        Returns
+        -------
         int or pd.Index
             The index of the loaded EIS measurement
         """
@@ -388,8 +385,8 @@ class EIS_ECM_Env:
 
         The observation is what the agent's neural network receives as input.
 
-        Returns:
-        --------
+        Returns
+        -------
         dict
             Dictionary containing:
 
@@ -428,8 +425,11 @@ class EIS_ECM_Env:
         """
         Evaluate circuit by fitting to EIS data and calculating reward.
 
-        Returns:
-            dict with keys: reward, metrics, predicted_Z, param, terminated, depth_penalty
+        Returns
+        -------
+        dict
+            Dictionary with keys: reward, metrics, predicted_Z, param, terminated, and
+            depth_penalty.
         """
         try:
             # Fit circuit parameters to EIS data
@@ -494,8 +494,10 @@ class EIS_ECM_Env:
         """
         Calculate reward based on circuit fit quality.
 
-        Returns:
-            tuple: (reward, terminated, depth_penalty)
+        Returns
+        -------
+        tuple[float, bool, float]
+            Tuple of ``(reward, terminated, depth_penalty)``.
         """
         depth_penalty = 0
 
@@ -558,8 +560,8 @@ class EIS_ECM_Env:
         same circuit has been evaluated for this EIS measurement before, it returns the
         cached result instantly (~1000x faster).
 
-        Parameters:
-        -----------
+        Parameters
+        ----------
         action_type : str
             The element to place: '+', '/', 'R', 'L', or 'P'
             '+' = series connection
@@ -571,8 +573,8 @@ class EIS_ECM_Env:
         action_position : int
             Which chromosome position to modify (0 to chromosome_length-1)
 
-        Returns:
-        --------
+        Returns
+        -------
         dict
             Dictionary containing:
 
@@ -628,8 +630,8 @@ class EIS_ECM_Env:
             'fit_penalty' : float
                 Penalty for fit issues (currently unused, always 0)
 
-        Reward Engineering:
-        -------------------
+        Reward Engineering
+        ------------------
         The reward function encourages:
         1. Valid actions (no penalty)
         2. Circuits that fit the data well (high R², low chi²)
@@ -761,8 +763,8 @@ class EIS_ECM_Env:
         This helps monitor how well the cache is working and whether it should be tuned
         (capacity increased/decreased, different eviction policy, etc.).
 
-        Returns:
-        --------
+        Returns
+        -------
         dict or None
             If cache is enabled, returns dictionary with:
             - 'hits': Number of times cached result was used (fast!)
@@ -775,8 +777,8 @@ class EIS_ECM_Env:
 
             If cache is disabled, returns None
 
-        Interpretation:
-        ---------------
+        Interpretation
+        --------------
         - High hit rate (>50%): Cache is working well, major speedup
         - Low hit rate (<20%): Consider increasing capacity or different policy
         - High utilization (>80%): Cache is being fully used

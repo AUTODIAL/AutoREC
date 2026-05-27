@@ -9,9 +9,12 @@ class CircularBuffer:
 
     def __init__(self, capacity, dtypes):
         """
-        Args:
-            capacity: Maximum number of items to store
-            dtypes: List of tuples like [('EIS', 'i4'), ('state', 'U50'), ...]
+        Parameters
+        ----------
+        capacity : int
+            Maximum number of items to store.
+        dtypes : list
+            List of tuples like [('EIS', 'i4'), ('state', 'U50'), ...].
         """
         self.capacity = capacity
         self.buffer = np.zeros(capacity, dtype=dtypes)
@@ -22,7 +25,8 @@ class CircularBuffer:
         """
         Add a single experience to the buffer.
 
-        Example:
+        Examples
+        --------
             buffer.add(EIS=0, state="R-R-R", reward=0.5, ...)
         """
         # Write data to current position

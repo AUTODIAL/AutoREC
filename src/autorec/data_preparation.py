@@ -32,7 +32,8 @@ class EISDataPrep:
        flattening the frequency and Z values.
     2. Load and validate existing processed pickle/CSV files
 
-    Expectations:
+    Expectations
+    ------------
         The final dataset must have the following 6 columns with an optional column that's
         required only for evaluation.
 
@@ -49,7 +50,8 @@ class EISDataPrep:
         Eg. EIS 1: will have 80 data points and EIS n should have the same number of points as
         EIS 1.
 
-    File Requirements:
+    File Requirements
+    -----------------
     1. Pickle files
         Pickle files will be loaded directly. The expectation will be that they have all the
         data, unless the process flag is on.
@@ -103,8 +105,8 @@ class EISDataPrep:
         """
         Initialize EISDataPrep, please ensure the provided data fits the expectations below.
 
-        Parameters:
-        -----------
+        Parameters
+        ----------
         path : str or Path
             Path to either:
             - A folder containing raw CSV files (mode='process')
@@ -116,7 +118,7 @@ class EISDataPrep:
             If True, ground truth (true_circuit from folder names) is required for evaluation.
             In 'process' mode: enforces that folder structure provides circuit names
             In 'load' mode: validates that true_circuit column exists and is valid
-        eis_features: list
+        eis_features : list
             List of EIS features to include in the flatten_Z representation.
             Options include:
 
@@ -127,8 +129,8 @@ class EISDataPrep:
             * "n<feature>": The negative counterpart of any of the above features
               (e.g., "nphi" for negative phase angle).
 
-        Raises:
-        -------
+        Raises
+        ------
         ValueError
             If path is None or mode is invalid
         FileNotFoundError
@@ -194,8 +196,8 @@ class EISDataPrep:
         Calculate chi_thresh and r2_thresh by fitting the circuit.
         Only runs in 'process' mode.
 
-        Parameters:
-        -----------
+        Parameters
+        ----------
         freq : np.ndarray
             Frequency array
         Z_true : np.ndarray
@@ -205,8 +207,8 @@ class EISDataPrep:
         lower_bound_increase : float
             Multiplier for chi_thresh (should be > 1.0)
 
-        Returns:
-        --------
+        Returns
+        -------
         tuple
             (chi_thresh, r2_thresh) values
         """
@@ -313,15 +315,15 @@ class EISDataPrep:
         """
         Load a single CSV file and extract all necessary information.
 
-        Parameters:
-        -----------
+        Parameters
+        ----------
         csv_path : Path
             Path to the CSV file
         base_path : Path
             Base path of the data directory
 
-        Returns:
-        --------
+        Returns
+        -------
         dict or None
             Dictionary with processed data, or None if error occurs
         """
@@ -364,15 +366,15 @@ class EISDataPrep:
         """
         Extract circuit string from the immediate parent folder name.
 
-        Parameters:
-        -----------
+        Parameters
+        ----------
         csv_path : Path
             Full path to the CSV file
         base_path : Path
             Base path of the data directory
 
-        Returns:
-        --------
+        Returns
+        -------
         str
             Circuit string from folder name
         """
@@ -398,15 +400,15 @@ class EISDataPrep:
 
         Format: "relative/path/to/file.csv"
 
-        Parameters:
-        -----------
+        Parameters
+        ----------
         csv_path : Path
             Full path to the CSV file
         base_path : Path
             Base path of the data directory
 
-        Returns:
-        --------
+        Returns
+        -------
         str
             Unique identifier for this data source
         """
@@ -418,8 +420,8 @@ class EISDataPrep:
         Load and process all CSV files from the data folder recursively.
         Handles subfolders by extracting all CSVs and tracking with sub_id.
 
-        Returns:
-        --------
+        Returns
+        -------
         pd.DataFrame
             Processed dataset with all required columns
         """
@@ -458,8 +460,8 @@ class EISDataPrep:
         """
         Internal method to load data based on file type.
 
-        Returns:
-        --------
+        Returns
+        -------
         pd.DataFrame
             Loaded pandas DataFrame
         """
@@ -486,8 +488,8 @@ class EISDataPrep:
         Validate the loaded dataset structure.
         Checks required columns, data types, and circuit validity.
 
-        Returns:
-        --------
+        Returns
+        -------
         bool
             True if validation passes, False otherwise
         """
@@ -722,8 +724,8 @@ class EISDataPrep:
         """
         Format validation errors into a readable error message.
 
-        Returns:
-        --------
+        Returns
+        -------
         str
             Formatted error message
         """
@@ -757,13 +759,13 @@ class EISDataPrep:
         """
         Load/process data and validate.
 
-        Returns:
-        --------
+        Returns
+        -------
         pd.DataFrame
             Validated dataset
 
-        Raises:
-        -------
+        Raises
+        ------
         ValueError
             If validation fails
         """
@@ -837,8 +839,8 @@ class EISDataPrep:
         """
         Get a summary of the validation results.
 
-        Returns:
-        --------
+        Returns
+        -------
         dict
             Dictionary containing validation status, errors, and warnings
         """
@@ -860,8 +862,8 @@ class EISDataPrep:
         """
         Save the processed dataset.
 
-        Parameters:
-        -----------
+        Parameters
+        ----------
         output_path : str or Path
             Path where to save the file
         file_type : str
