@@ -296,10 +296,131 @@ AutoREC/
 `-- tutorials/                      # Step-by-step notebook tutorials
 ```
 
-
 <p align="center">
   <img src="Design.png" alt="AutoREC design overview" width="550">
 </p>
+
+## Command Line Interface
+
+AutoREC also provides a command line interface for running common workflows
+without writing a separate Python script. After installing the package, the
+`autorec` command is available in the active environment:
+
+```bash
+python -m pip install -e .
+autorec --help
+```
+
+The CLI configures the AutoREC runtime before importing TensorFlow, JAX,
+AutoEIS, or other scientific libraries. This is the recommended command-line
+entry point for preprocessing, training, evaluation, and inference workflows.
+
+### 1. Preprocess Data
+
+Use `autorec preprocess` to process raw EIS CSV files or validate an existing
+processed dataset. Raw CSV files should contain `freq`, `Z_real`, and `Z_imag`
+columns.
+
+```bash
+autorec preprocess \
+  --input tutorials/EIS_raw_demo \
+  --output data/processed_training_data.pkl \
+  --mode process \
+  --evaluation \
+  --summary
+```
+
+To validate an existing processed dataset without reprocessing raw CSV files:
+
+```bash
+autorec preprocess \
+  --input data/training_dataset.pkl \
+  --mode load \
+  --evaluation \
+  --summary
+```
+
+### 2. Train an Agent
+
+Use `autorec train` with a YAML configuration file containing `environment` and
+`agent` sections. The environment section points to the processed dataset, and
+the agent section controls training parameters and output paths.
+
+```bash
+autorec train \
+  --config default_configs/demo_environment_agent_config.yaml \
+  --model-output trained_agent/new_model.keras
+```
+
+If `--model-output` is omitted, use `--save-final-model` to save the final model
+under `<agent.save_dir>/models/`:
+
+```bash
+autorec train \
+  --config default_configs/demo_environment_agent_config.yaml \
+  --save-final-model
+```
+
+### 3. Evaluate an Agent
+
+Use `autorec evaluate` to load a trained model and evaluate generated ECMs for
+selected rows, a random sample, or the full dataset.
+
+Evaluate specific row positions:
+
+```bash
+autorec evaluate \
+  --config default_configs/demo_environment_agent_config.yaml \
+  --model trained_agent/agent_trained.keras \
+  --indices 0,4,10 \
+  --output-dir results
+```
+
+Evaluate a random sample:
+
+```bash
+autorec evaluate \
+  --config default_configs/demo_environment_agent_config.yaml \
+  --model trained_agent/agent_trained.keras \
+  --num-samples 20 \
+  --output-dir results
+```
+
+Evaluate all rows:
+
+```bash
+autorec evaluate \
+  --config default_configs/demo_environment_agent_config.yaml \
+  --model trained_agent/agent_trained.keras \
+  --all-rows \
+  --output-dir results
+```
+
+By default, evaluation uses the evaluation environment when the configuration
+defines one. Add `--use-training-env` to evaluate against the training dataset.
+
+### 4. Run Inference
+
+`autorec infer` is an alias for `autorec evaluate`. Use it when the goal is to
+apply a trained model to EIS rows and inspect the proposed ECMs rather than run
+a formal evaluation report.
+
+```bash
+autorec infer \
+  --config default_configs/demo_environment_agent_config.yaml \
+  --model trained_agent/agent_trained.keras \
+  --indices 0 \
+  --max-actions 24 \
+  --output-dir results \
+  --run-id inference_demo
+```
+
+Useful shared options:
+
+- `--threads`: control BLAS/OpenMP/NumExpr thread pools.
+- `--seed`: set the random seed for training, evaluation, and sampling.
+- `--skip-autoeis-warmup`: skip the AutoEIS/Julia warmup step.
+- `--show-tf-logs`: show TensorFlow logs that are hidden by default.
 
 ## Development Notes
 

@@ -66,6 +66,9 @@ dev = [
   "ruff>=0.6,<1",
 ]
 
+[project.scripts]
+autorec = "autorec.cli:main"
+
 [tool.setuptools]
 package-dir = { "" = "src" }
 include-package-data = true
