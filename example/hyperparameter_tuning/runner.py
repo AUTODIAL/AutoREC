@@ -291,18 +291,6 @@ pprint(best_params, sort_dicts=False)
 # pprint(best_config, sort_dicts=False)
 print(f"\nWith score: {best_trial.value:.4f}")
 
-
-# Final step: Print the best hyperparameter set found
-best_trial = study.best_trial
-print("\nBest hyperparameter set found:")
-best_params = best_trial.params
-best_config = config_handler.sample_to_config(best_params)
-best_config_id = config_handler.get_config_id(best_config)
-print(f"Configuration ID: {best_config_id}")
-pprint(best_params, sort_dicts=False)
-# pprint(best_config, sort_dicts=False)
-print(f"\nWith score: {best_trial.value:.4f}")
-
 # Export the study results
 study_df = study.trials_dataframe()
 study_df.to_csv(RESULTS_DIR / "optuna_trials.csv", index=False)
