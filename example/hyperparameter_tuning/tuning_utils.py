@@ -30,64 +30,6 @@ from autorec.parser import _simplify_P, simplify
 MODULE_SAVELIST_NAME = "default"
 PYTHON_ENV_PATH = "$HOME/autorec_env"
 
-# Hyperparameter search bounds
-search_space_bounds = {
-    # NN hyperparameters
-    "batch_size_x50": [1, 10],
-    "buffer_capacity_x1000": [1, 20],
-    "train_frequency": [1, 100],
-    "update_target_frequency_x100": [1, 50],
-    # Dynamic variables
-    "initial_epsilon": [0.5, 1.0],
-    "epsilon_decay": [0.8, 0.9999],
-    "epsilon_min": [0.0, 0.1],
-    # Prioritized replay parameters
-    "prioritized_replay_alpha": [0.5, 1.5],
-    "initial_beta": [0.01, 0.6],
-    "final_beta": [0.7, 1.3],
-}
-# Some hyperparameters are constrained to be integers
-integer_variables = [
-    "batch_size_x50",
-    "buffer_capacity_x1000",
-    "train_frequency",
-    "update_target_frequency_x100",
-]
-# Convert the search space bounds into a N-by-2 array - Sometimes it is easier to work
-# with arrays than with dictionaries.
-search_space_bounds_array = np.array([list(bounds) for bounds in search_space_bounds.values()])
-
-
-def sample_to_config(row, base_config):
-    """Convert a sample into the configuration dictionary format.
-
-    Note that the environment variables don't need to be changed.
-
-    Parameters
-    ----------
-    row : array-like
-        A single sample from the hyperparameter search space.
-    base_config : dict
-        The base configuration dictionary to modify.
-
-    Returns
-    -------
-    config : dict
-        The modified configuration dictionary with hyperparameters set.
-    """
-    config = copy.deepcopy(base_config)
-    for name, value in zip(list(search_space_bounds), row):
-        if name in integer_variables:
-            # Sometimes we also need to scale the integer variable
-            match = re.match(r"^(.*)_x(\d+)$", name)
-            if match:
-                name, scale = match.groups()
-                value = int(scale * round(value))
-            config["agent"][name] = int(round(value))
-        else:
-            config["agent"][name] = float(value)
-    return config
-
 
 class CustomLogScaler:
     def __init__(self, integer_features, continuous_features):
@@ -137,8 +79,8 @@ class ConfigurationHandler:
         self,
         base_config,
         configs_dir,
-        search_space_bounds=search_space_bounds,
-        integer_variables=integer_variables,
+        search_space_bounds,
+        integer_variables,
         basename="config",
     ):
         if isinstance(base_config, (str, Path)):

@@ -1,0 +1,44 @@
+# Hyperparameter search bounds for Optuna tuning
+
+# NN / training hyperparameters
+batch_size_x50:
+  bounds: [1, 10]
+  type: int
+
+buffer_capacity_x1000:
+  bounds: [1, 20]
+  type: int
+
+train_frequency:
+  bounds: [1, 100]
+  type: int
+
+update_target_frequency_x100:
+  bounds: [1, 50]
+  type: int
+
+# Dynamic exploration variables
+initial_epsilon:
+  bounds: [0.5, 1.0]
+  type: float
+
+epsilon_decay:
+  bounds: [0.8, 0.9999]
+  type: float
+
+epsilon_min:
+  bounds: [0.0, 0.1]
+  type: float
+
+# Prioritized replay parameters
+prioritized_replay_alpha:
+  bounds: [0.5, 1.5]
+  type: float
+
+initial_beta:
+  bounds: [0.01, 0.6]
+  type: float
+
+final_beta:
+  bounds: [0.7, 1.3]
+  type: float

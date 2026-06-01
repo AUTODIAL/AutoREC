@@ -21,6 +21,7 @@ Arguments:
 
 from pathlib import Path
 import argparse
+import yaml
 from pprint import pprint
 
 import numpy as np
@@ -62,6 +63,13 @@ parser.add_argument(
     default="./base_config.yaml",
     help="Base configuration file to use for generating new configs",
 )
+parser.add_argument(
+    "--search-space",
+    "-s",
+    type=str,
+    default="./search_space.yaml",
+    help="Search space definition file",
+)
 parser.add_argument("--num-initial", type=int, default=10, help="Number of initial trials")
 parser.add_argument(
     "--num-iterations", type=int, default=5, help="Number of iterations to run"
@@ -84,8 +92,23 @@ python_file = "main_factory.py"  # The training script to use
 base_config_file = Path(args.base_config)
 base_sbatch_options = {"time": "72:00:00", "mem_per_cpu": "12G"}
 
+# Hyperparameter search space
+search_space_file = Path(args.search_space)
+if not search_space_file.exists():
+    raise FileNotFoundError(f"Search space file {search_space_file} not found.")
+with open(search_space_file, "r") as f:
+    search_space = yaml.safe_load(f)
+search_space_bounds = {name: val["bounds"] for name, val in search_space.items()}
+integer_variables = [
+    name for name, val in search_space.items() if val["type"].lower() == "int"
+]
 # Instantiate configuration handler
-config_handler = ConfigurationHandler(base_config=base_config_file, configs_dir=configs_dir)
+config_handler = ConfigurationHandler(
+    base_config=base_config_file,
+    configs_dir=configs_dir,
+    search_space_bounds=search_space_bounds,
+    integer_variables=integer_variables,
+)
 
 
 # Print out some information
