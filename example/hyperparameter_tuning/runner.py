@@ -6,6 +6,7 @@ Usage:
     $ python runner.py \
         --target-dir ./hyperparameter_tuning_results \
         --base-config ./base_config.yaml \
+        --search-space ./search_space.yaml \
         --num-initial 5 \
         --num-iterations 10 \
         --batch-size 5 \
@@ -14,6 +15,7 @@ Usage:
 Arguments:
     --target-dir: Target directory to store results
     --base-config: Base configuration file to use for generating new configs
+    --search-space: Search space definition file
     --num-initial: Number of initial trials
     --num-iterations: Number of iterations to run
     --batch-size: Batch size for each iteration
