@@ -40,6 +40,11 @@ logs/
 # Data and experiments
 datasets/
 outputs/
+demo_output/
+default_configs/demo_output/
+example/demo_output/
+example/example_outputs/
+tutorials/demo_output/
 runs/*
 !runs/.gitkeep
 results/*
