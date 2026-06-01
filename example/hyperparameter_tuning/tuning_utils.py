@@ -188,6 +188,9 @@ class ConfigurationHandler:
                 if match:
                     orig_name, scale = match.groups()
                     value = int(round(config["agent"][orig_name] / int(scale)))
+                else:
+                    # No scaling, just convert to int
+                    value = int(config["agent"][name])
             else:
                 value = config["agent"][name]
             sample[name] = value
