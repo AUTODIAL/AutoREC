@@ -116,7 +116,7 @@ Load an existing processed dataset:
 ```python
 from autorec.data_preparation import EISDataPrep
 
-data_prep = EISDataPrep(path="PATH/training_dataset.pkl", mode='load')
+data_prep = EISDataPrep(path="PATH/data/examples/training_dataset.pkl", mode='load')
 dataset = data_prep.load()
 ```
 
@@ -205,7 +205,7 @@ ships default configuration files under `src/autorec/default_configs/`.
 Environment options:
 
 ```yaml
-dataset_path: "data/training_dataset.pkl"
+dataset_path: "data/examples/training_dataset.pkl"
 seed: 42
 chromosome_HEAD_len: 10
 cache_enabled: true
@@ -276,10 +276,15 @@ AutoREC/
 |-- environment.yml                 # Conda environment that installs this package
 |-- requirements.txt                # Pip entry point that installs from pyproject.toml
 |-- setup_env.sh                    # Convenience conda setup script
+|-- Dockerfile                      # Container image definition for CLI workflows
+|-- .dockerignore                   # Docker build-context exclusions
 |-- README.md
 |-- data/                           # Example processed datasets
 |-- default_configs/                # Example YAML configurations
 |-- example/                        # Example Python entry points
+|-- models/                         # Runtime model outputs and example models
+|-- results/                        # Runtime evaluation outputs, ignored except .gitkeep
+|-- runs/                           # Runtime training outputs, ignored except .gitkeep
 |-- scripts/
 |   `-- install_autorec_kernel_guard.py
 |-- src/
@@ -292,7 +297,6 @@ AutoREC/
 |       |-- runtime.py              # Runtime setup helpers
 |       |-- default_configs/        # Package-level default configs
 |       `-- optimized_data_structures/
-|-- trained_agent/                  # Example trained model
 `-- tutorials/                      # Step-by-step notebook tutorials
 ```
 
@@ -334,7 +338,7 @@ To validate an existing processed dataset without reprocessing raw CSV files:
 
 ```bash
 autorec preprocess \
-  --input data/training_dataset.pkl \
+  --input data/examples/training_dataset.pkl \
   --mode load \
   --evaluation \
   --summary
@@ -349,7 +353,7 @@ the agent section controls training parameters and output paths.
 ```bash
 autorec train \
   --config default_configs/demo_environment_agent_config.yaml \
-  --model-output trained_agent/new_model.keras
+  --model-output models/new_model.keras
 ```
 
 If `--model-output` is omitted, use `--save-final-model` to save the final model
@@ -371,7 +375,7 @@ Evaluate specific row positions:
 ```bash
 autorec evaluate \
   --config default_configs/demo_environment_agent_config.yaml \
-  --model trained_agent/agent_trained.keras \
+  --model models/examples/agent_trained.keras \
   --indices 0,4,10 \
   --output-dir results
 ```
@@ -381,7 +385,7 @@ Evaluate a random sample:
 ```bash
 autorec evaluate \
   --config default_configs/demo_environment_agent_config.yaml \
-  --model trained_agent/agent_trained.keras \
+  --model models/examples/agent_trained.keras \
   --num-samples 20 \
   --output-dir results
 ```
@@ -391,7 +395,7 @@ Evaluate all rows:
 ```bash
 autorec evaluate \
   --config default_configs/demo_environment_agent_config.yaml \
-  --model trained_agent/agent_trained.keras \
+  --model models/examples/agent_trained.keras \
   --all-rows \
   --output-dir results
 ```
@@ -408,7 +412,7 @@ a formal evaluation report.
 ```bash
 autorec infer \
   --config default_configs/demo_environment_agent_config.yaml \
-  --model trained_agent/agent_trained.keras \
+  --model models/examples/agent_trained.keras \
   --indices 0 \
   --max-actions 24 \
   --output-dir results \
@@ -421,6 +425,60 @@ Useful shared options:
 - `--seed`: set the random seed for training, evaluation, and sampling.
 - `--skip-autoeis-warmup`: skip the AutoEIS/Julia warmup step.
 - `--show-tf-logs`: show TensorFlow logs that are hidden by default.
+
+## Docker
+
+AutoREC includes a Dockerfile for running the CLI in a reproducible container.
+The image contains the package code and dependencies. Data, trained models, and
+run outputs should be mounted from the host rather than baked into the image.
+
+Runtime directories:
+
+- `data/`: input datasets mounted at `/app/data`
+- `models/`: promoted or exported models mounted at `/app/models`
+- `runs/`: training outputs mounted at `/app/runs`
+- `results/`: evaluation and inference outputs mounted at `/app/results`
+
+Build the image:
+
+```bash
+docker build -t autorec:latest .
+```
+
+Check the CLI:
+
+```bash
+docker run --rm autorec:latest --help
+```
+
+Run training with mounted runtime directories:
+
+```bash
+docker run --rm \
+  --workdir /app/default_configs \
+  -v "$PWD/data:/app/data" \
+  -v "$PWD/models:/app/models" \
+  -v "$PWD/runs:/app/runs" \
+  -v "$PWD/results:/app/results" \
+  autorec:latest train \
+  --config demo_environment_agent_config.yaml \
+  --model-output /app/models/new_model.keras
+```
+
+Run inference with an existing model:
+
+```bash
+docker run --rm \
+  --workdir /app/default_configs \
+  -v "$PWD/data:/app/data" \
+  -v "$PWD/models:/app/models" \
+  -v "$PWD/results:/app/results" \
+  autorec:latest infer \
+  --config demo_environment_agent_config.yaml \
+  --model /app/models/examples/agent_trained.keras \
+  --indices 0 \
+  --output-dir /app/results
+```
 
 ## Development Notes
 

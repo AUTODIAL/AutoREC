@@ -40,19 +40,25 @@ logs/
 # Data and experiments
 datasets/
 outputs/
-runs/
-results/
-models/
+runs/*
+!runs/.gitkeep
+results/*
+!results/.gitkeep
+models/*
+!models/.gitkeep
+!models/examples/
+!models/examples/agent_trained.keras
+.autorec_runtime/
 wandb/
 mlruns/
 
 # Large binary artifacts
 *.pkl
-!data/training_dataset.pkl
+!data/examples/training_dataset.pkl
 *.pickle
 *.h5
 *.keras
-!trained_agent/agent_trained.keras
+!models/examples/agent_trained.keras
 *.hdf5
 *.pt
 *.pth
