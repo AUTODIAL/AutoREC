@@ -1699,6 +1699,7 @@ class DDQN_ECM:
                         "best_metrics": result["best_metrics"],
                         "best_param": result["best_param"],
                         "total_actions": result["total_actions_taken"],
+                        "action_history": result["action_history"],
                     }
                 )
             except Exception as e:
@@ -1716,6 +1717,7 @@ class DDQN_ECM:
                         "best_metrics": None,
                         "best_param": None,
                         "total_actions": 0,
+                        "action_history": [],
                     }
                 )
 
