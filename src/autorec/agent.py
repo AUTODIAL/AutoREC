@@ -57,6 +57,7 @@ class DDQN_ECM:
         batch_size: int = 150,
         train_frequency: int = 5,
         update_target_frequency: int = 1000,
+        gradient_steps: int = 1,
         NN_sleep: int = 1000,
         buffer_capacity: int = 15000,
         optimizer_type: Union[str, tf.keras.optimizers.Optimizer] = "adam",
