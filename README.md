@@ -349,19 +349,25 @@ autorec preprocess \
 Use `autorec train` with a YAML configuration file containing `environment` and
 `agent` sections. The environment section points to the processed dataset, and
 the agent section controls training parameters and output paths.
+The demo configuration uses paths relative to `default_configs/`, so run these
+commands from that directory.
 
 ```bash
+cd default_configs
+
 autorec train \
-  --config default_configs/demo_environment_agent_config.yaml \
-  --model-output models/new_model.keras
+  --config demo_environment_agent_config.yaml \
+  --model-output ../models/new_model.keras
 ```
 
 If `--model-output` is omitted, use `--save-final-model` to save the final model
 under `<agent.save_dir>/models/`:
 
 ```bash
+cd default_configs
+
 autorec train \
-  --config default_configs/demo_environment_agent_config.yaml \
+  --config demo_environment_agent_config.yaml \
   --save-final-model
 ```
 
@@ -373,31 +379,37 @@ selected rows, a random sample, or the full dataset.
 Evaluate specific row positions:
 
 ```bash
+cd default_configs
+
 autorec evaluate \
-  --config default_configs/demo_environment_agent_config.yaml \
-  --model models/examples/agent_trained.keras \
+  --config demo_environment_agent_config.yaml \
+  --model ../models/examples/agent_trained.keras \
   --indices 0,4,10 \
-  --output-dir results
+  --output-dir ../results
 ```
 
 Evaluate a random sample:
 
 ```bash
+cd default_configs
+
 autorec evaluate \
-  --config default_configs/demo_environment_agent_config.yaml \
-  --model models/examples/agent_trained.keras \
+  --config demo_environment_agent_config.yaml \
+  --model ../models/examples/agent_trained.keras \
   --num-samples 20 \
-  --output-dir results
+  --output-dir ../results
 ```
 
 Evaluate all rows:
 
 ```bash
+cd default_configs
+
 autorec evaluate \
-  --config default_configs/demo_environment_agent_config.yaml \
-  --model models/examples/agent_trained.keras \
+  --config demo_environment_agent_config.yaml \
+  --model ../models/examples/agent_trained.keras \
   --all-rows \
-  --output-dir results
+  --output-dir ../results
 ```
 
 By default, evaluation uses the evaluation environment when the configuration
@@ -410,12 +422,14 @@ apply a trained model to EIS rows and inspect the proposed ECMs rather than run
 a formal evaluation report.
 
 ```bash
+cd default_configs
+
 autorec infer \
-  --config default_configs/demo_environment_agent_config.yaml \
-  --model models/examples/agent_trained.keras \
+  --config demo_environment_agent_config.yaml \
+  --model ../models/examples/agent_trained.keras \
   --indices 0 \
   --max-actions 24 \
-  --output-dir results \
+  --output-dir ../results \
   --run-id inference_demo
 ```
 
