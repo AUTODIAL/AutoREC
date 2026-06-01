@@ -33,6 +33,13 @@ from tuning_utils import (
     compute_score,
 )
 
+# For result visualization analysis
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import optuna.visualization.matplotlib as vis_matplotlib
+
 
 seed = 42
 np.random.seed(seed)
@@ -260,3 +267,33 @@ print(f"Configuration ID: {best_config_id}")
 pprint(best_params, sort_dicts=False)
 # pprint(best_config, sort_dicts=False)
 print(f"\nWith score: {best_trial.value:.4f}")
+
+
+# Final step: Print the best hyperparameter set found
+best_trial = study.best_trial
+print("\nBest hyperparameter set found:")
+best_params = best_trial.params
+best_config = config_handler.sample_to_config(best_params)
+best_config_id = config_handler.get_config_id(best_config)
+print(f"Configuration ID: {best_config_id}")
+pprint(best_params, sort_dicts=False)
+# pprint(best_config, sort_dicts=False)
+print(f"\nWith score: {best_trial.value:.4f}")
+
+# Export the study results
+study_df = study.trials_dataframe()
+study_df.to_csv(RESULTS_DIR / "optuna_trials.csv", index=False)
+# Visualization analysis
+print("Generating visualization analysis")
+print("- Optimization history")
+ax = vis_matplotlib.plot_optimization_history(study)
+fig = ax.figure
+fig.tight_layout()
+fig.savefig(RESULTS_DIR / "optimization_history.png", dpi=300, bbox_inches="tight")
+plt.close(fig)
+print("- Parameter importances")
+ax = vis_matplotlib.plot_param_importances(study)
+fig = ax.figure
+fig.tight_layout()
+fig.savefig(RESULTS_DIR / "param_importances.png", dpi=300, bbox_inches="tight")
+plt.close(fig)
