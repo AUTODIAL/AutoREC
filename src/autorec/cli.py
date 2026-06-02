@@ -9,6 +9,7 @@ from typing import Sequence
 
 
 def _configure_runtime(args: argparse.Namespace) -> None:
+    """Configure AutoREC runtime settings before importing heavy dependencies."""
     from autorec.runtime import configure_autorec_runtime
 
     configure_autorec_runtime(
@@ -19,6 +20,7 @@ def _configure_runtime(args: argparse.Namespace) -> None:
 
 
 def _parse_indices(raw_indices: str | None) -> list[int] | None:
+    """Parse a comma-separated CLI index list into integer row positions."""
     if raw_indices is None:
         return None
     indices = [item.strip() for item in raw_indices.split(",")]
@@ -26,6 +28,7 @@ def _parse_indices(raw_indices: str | None) -> list[int] | None:
 
 
 def _read_config_with_overrides(config_path: Path, output_dir: Path | None = None) -> dict:
+    """Read a YAML config and apply CLI overrides that should win over YAML values."""
     from autorec.factory import _yaml_reader
 
     config = _yaml_reader(config_path)
@@ -35,6 +38,7 @@ def _read_config_with_overrides(config_path: Path, output_dir: Path | None = Non
 
 
 def _run_preprocess(args: argparse.Namespace) -> int:
+    """Run the data preprocessing or dataset validation CLI command."""
     _configure_runtime(args)
 
     from autorec.data_preparation import EISDataPrep
@@ -57,6 +61,7 @@ def _run_preprocess(args: argparse.Namespace) -> int:
 
 
 def _run_train(args: argparse.Namespace) -> int:
+    """Run DDQN training from a YAML configuration."""
     _configure_runtime(args)
 
     from autorec.factory import environment_and_agent_builder
@@ -72,6 +77,7 @@ def _run_train(args: argparse.Namespace) -> int:
 
 
 def _run_evaluate(args: argparse.Namespace) -> int:
+    """Run evaluation or inference for selected EIS rows."""
     _configure_runtime(args)
 
     from autorec.factory import environment_and_agent_builder
@@ -103,6 +109,7 @@ def _run_evaluate(args: argparse.Namespace) -> int:
 
 
 def _add_runtime_args(parser: argparse.ArgumentParser) -> None:
+    """Add runtime configuration options shared by all CLI subcommands."""
     parser.add_argument(
         "--threads",
         default=1,
@@ -121,6 +128,7 @@ def _add_runtime_args(parser: argparse.ArgumentParser) -> None:
 
 
 def _add_seed_args(parser: argparse.ArgumentParser) -> None:
+    """Add reproducibility options shared by stochastic CLI subcommands."""
     parser.add_argument("--seed", type=int, default=42, help="Global random seed.")
     parser.add_argument(
         "--non-deterministic",
@@ -130,6 +138,7 @@ def _add_seed_args(parser: argparse.ArgumentParser) -> None:
 
 
 def _add_output_dir_arg(parser: argparse.ArgumentParser) -> None:
+    """Add the output directory override used by config-based commands."""
     parser.add_argument(
         "--output-dir",
         type=Path,
@@ -138,6 +147,7 @@ def _add_output_dir_arg(parser: argparse.ArgumentParser) -> None:
 
 
 def _build_parser() -> argparse.ArgumentParser:
+    """Build and return the top-level AutoREC argument parser."""
     parser = argparse.ArgumentParser(
         prog="autorec",
         description="Run AutoREC data preparation, training, and inference workflows.",
@@ -269,6 +279,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Parse CLI arguments and dispatch to the selected subcommand."""
     parser = _build_parser()
     args = parser.parse_args(argv)
     return args.func(args)
