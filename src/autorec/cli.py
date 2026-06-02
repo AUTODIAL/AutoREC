@@ -25,6 +25,15 @@ def _parse_indices(raw_indices: str | None) -> list[int] | None:
     return [int(item) for item in indices if item]
 
 
+def _read_config_with_overrides(config_path: Path, output_dir: Path | None = None) -> dict:
+    from autorec.factory import _yaml_reader
+
+    config = _yaml_reader(config_path)
+    if output_dir is not None:
+        config.setdefault("agent", {})["save_dir"] = output_dir
+    return config
+
+
 def _run_preprocess(args: argparse.Namespace) -> int:
     _configure_runtime(args)
 
@@ -50,21 +59,14 @@ def _run_preprocess(args: argparse.Namespace) -> int:
 def _run_train(args: argparse.Namespace) -> int:
     _configure_runtime(args)
 
-    from autorec.factory import _yaml_reader, environment_and_agent_builder
+    from autorec.factory import environment_and_agent_builder
     from autorec.utils import set_global_seed
 
     set_global_seed(args.seed, deterministic_ops=not args.non_deterministic)
 
-    config = _yaml_reader(args.config)
+    config = _read_config_with_overrides(args.config, args.output_dir)
     _, _, agent = environment_and_agent_builder(config)
     agent.train()
-
-    if args.model_output is not None:
-        agent.save_model(args.model_output)
-    elif args.save_final_model:
-        run_id = _datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        save_dir = Path(config["agent"].get("save_dir", "."))
-        agent.save_model(save_dir / "models" / f"ddqn_model_{run_id}.keras")
 
     return 0
 
@@ -77,7 +79,8 @@ def _run_evaluate(args: argparse.Namespace) -> int:
 
     set_global_seed(args.seed, deterministic_ops=not args.non_deterministic)
 
-    _, _, agent = environment_and_agent_builder(args.config)
+    config = _read_config_with_overrides(args.config, args.output_dir)
+    _, _, agent = environment_and_agent_builder(config)
     if args.model is not None:
         agent.load_model(args.model)
 
@@ -91,9 +94,10 @@ def _run_evaluate(args: argparse.Namespace) -> int:
         num_samples=args.num_samples,
     )
 
-    if args.output_dir is not None:
+    output_dir = args.output_dir or Path(config["agent"].get("save_dir", "."))
+    if output_dir is not None:
         run_id = args.run_id or _datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        save_evaluation_results(results, run_id, args.output_dir)
+        save_evaluation_results(results, run_id, output_dir)
 
     return 0
 
@@ -122,6 +126,14 @@ def _add_seed_args(parser: argparse.ArgumentParser) -> None:
         "--non-deterministic",
         action="store_true",
         help="Do not request deterministic TensorFlow operations.",
+    )
+
+
+def _add_output_dir_arg(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        help="Output directory for command artifacts; overrides agent.save_dir from YAML.",
     )
 
 
@@ -188,16 +200,7 @@ def _build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="YAML file containing environment and agent configuration.",
     )
-    train.add_argument(
-        "--model-output",
-        type=Path,
-        help="Optional final model output path.",
-    )
-    train.add_argument(
-        "--save-final-model",
-        action="store_true",
-        help="Save the final model under <agent.save_dir>/models when --model-output is absent.",
-    )
+    _add_output_dir_arg(train)
     _add_seed_args(train)
     _add_runtime_args(train)
     train.set_defaults(func=_run_train)
@@ -249,11 +252,6 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Generate circuit evolution GIFs during evaluation.",
     )
     evaluate.add_argument(
-        "--output-dir",
-        type=Path,
-        help="Optional directory where evaluation CSV and pickle files are saved.",
-    )
-    evaluate.add_argument(
         "--run-id",
         help="Run identifier used in saved evaluation filenames.",
     )
@@ -262,6 +260,7 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Print detailed evaluation progress for each row.",
     )
+    _add_output_dir_arg(evaluate)
     _add_seed_args(evaluate)
     _add_runtime_args(evaluate)
     evaluate.set_defaults(func=_run_evaluate)

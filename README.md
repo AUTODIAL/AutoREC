@@ -351,24 +351,15 @@ Use `autorec train` with a YAML configuration file containing `environment` and
 the agent section controls training parameters and output paths.
 The demo configuration uses paths relative to `default_configs/`, so run these
 commands from that directory.
+Use `--output-dir` to override the YAML `agent.save_dir` for training artifacts.
+If omitted, the CLI uses the `agent.save_dir` value from the config file.
 
 ```bash
 cd default_configs
 
 autorec train \
   --config demo_environment_agent_config.yaml \
-  --model-output ../models/new_model.keras
-```
-
-If `--model-output` is omitted, use `--save-final-model` to save the final model
-under `<agent.save_dir>/models/`:
-
-```bash
-cd default_configs
-
-autorec train \
-  --config demo_environment_agent_config.yaml \
-  --save-final-model
+  --output-dir ../runs/demo_train
 ```
 
 ### 3. Evaluate an Agent
@@ -385,7 +376,7 @@ autorec evaluate \
   --config demo_environment_agent_config.yaml \
   --model ../models/examples/agent_trained.keras \
   --indices 0,4,10 \
-  --output-dir ../results
+  --output-dir ../results/evaluate_demo
 ```
 
 Evaluate a random sample:
@@ -397,7 +388,7 @@ autorec evaluate \
   --config demo_environment_agent_config.yaml \
   --model ../models/examples/agent_trained.keras \
   --num-samples 20 \
-  --output-dir ../results
+  --output-dir ../results/evaluate_demo
 ```
 
 Evaluate all rows:
@@ -409,11 +400,16 @@ autorec evaluate \
   --config demo_environment_agent_config.yaml \
   --model ../models/examples/agent_trained.keras \
   --all-rows \
-  --output-dir ../results
+  --output-dir ../results/evaluate_demo
 ```
 
 By default, evaluation uses the evaluation environment when the configuration
 defines one. Add `--use-training-env` to evaluate against the training dataset.
+Use `--output-dir` to override the YAML `agent.save_dir`; this keeps
+agent-created files such as model summaries, generated circuit images, GIFs, and
+evaluation CSV/Pickle files in the same runtime output directory. If
+`--output-dir` is omitted, the CLI uses the `agent.save_dir` value from the
+config file.
 
 ### 4. Run Inference
 
@@ -429,12 +425,14 @@ autorec infer \
   --model ../models/examples/agent_trained.keras \
   --indices 0 \
   --max-actions 24 \
-  --output-dir ../results \
+  --output-dir ../results/inference_demo \
   --run-id inference_demo
 ```
 
 Useful shared options:
 
+- `--output-dir`: override `agent.save_dir` from the YAML file for training,
+  evaluation, and inference outputs.
 - `--threads`: control BLAS/OpenMP/NumExpr thread pools.
 - `--seed`: set the random seed for training, evaluation, and sampling.
 - `--skip-autoeis-warmup`: skip the AutoEIS/Julia warmup step.
@@ -476,7 +474,7 @@ docker run --rm \
   -v "$PWD/results:/app/results" \
   autorec:latest train \
   --config demo_environment_agent_config.yaml \
-  --model-output /app/models/new_model.keras
+  --output-dir /app/runs/demo_train
 ```
 
 Run inference with an existing model:
@@ -491,7 +489,7 @@ docker run --rm \
   --config demo_environment_agent_config.yaml \
   --model /app/models/examples/agent_trained.keras \
   --indices 0 \
-  --output-dir /app/results
+  --output-dir /app/results/inference_demo
 ```
 
 ## Development Notes
