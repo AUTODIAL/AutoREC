@@ -1707,6 +1707,7 @@ class DDQN_ECM:
                 results.append(
                     {
                         "EIS_i": eis_i,
+                        "environment_type": None,
                         # 'ground_truth_state': None,
                         "ground_truth_circuit": None,
                         "found_solution": False,

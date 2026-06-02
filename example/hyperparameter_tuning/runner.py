@@ -100,9 +100,19 @@ if not search_space_file.exists():
     raise FileNotFoundError(f"Search space file {search_space_file} not found.")
 with open(search_space_file, "r") as f:
     search_space = yaml.safe_load(f)
-search_space_bounds = {name: val["bounds"] for name, val in search_space.items()}
+if not isinstance(search_space, dict) or not search_space:
+    raise ValueError(
+        f"Search space file {search_space_file} must define a non-empty mapping of "
+        "parameter names to {bounds: [low, high], type: int|float}."
+    )
+for name, spec in search_space.items():
+    if not isinstance(spec, dict) or "bounds" not in spec or "type" not in spec:
+        raise ValueError(
+            f"Invalid search space entry for '{name}': expected keys 'bounds' and 'type'."
+        )
+search_space_bounds = {name: spec["bounds"] for name, spec in search_space.items()}
 integer_variables = [
-    name for name, val in search_space.items() if val["type"].lower() == "int"
+    name for name, spec in search_space.items() if str(spec["type"]).lower() == "int"
 ]
 # Instantiate configuration handler
 config_handler = ConfigurationHandler(
@@ -279,6 +289,24 @@ for iteration in range(num_iterations - 1):
     for trial, score in zip(trials, score_list):
         study.tell(trial, score)
 
+    # Export the study results
+    study_df = study.trials_dataframe()
+    study_df.to_csv(RESULTS_DIR / "optuna_trials.csv", index=False)
+    # Visualization analysis
+    print("Generating visualization analysis")
+    print("- Optimization history")
+    ax = vis_matplotlib.plot_optimization_history(study)
+    fig = ax.figure
+    fig.tight_layout()
+    fig.savefig(RESULTS_DIR / "optimization_history.png", dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    print("- Parameter importances")
+    ax = vis_matplotlib.plot_param_importances(study)
+    fig = ax.figure
+    fig.tight_layout()
+    fig.savefig(RESULTS_DIR / "param_importances.png", dpi=300, bbox_inches="tight")
+    plt.close(fig)
+
 print("Hyperparameter tuning with Optuna completed.")
 
 
@@ -292,21 +320,3 @@ print(f"Configuration ID: {best_config_id}")
 pprint(best_params, sort_dicts=False)
 # pprint(best_config, sort_dicts=False)
 print(f"\nWith score: {best_trial.value:.4f}")
-
-# Export the study results
-study_df = study.trials_dataframe()
-study_df.to_csv(RESULTS_DIR / "optuna_trials.csv", index=False)
-# Visualization analysis
-print("Generating visualization analysis")
-print("- Optimization history")
-ax = vis_matplotlib.plot_optimization_history(study)
-fig = ax.figure
-fig.tight_layout()
-fig.savefig(RESULTS_DIR / "optimization_history.png", dpi=300, bbox_inches="tight")
-plt.close(fig)
-print("- Parameter importances")
-ax = vis_matplotlib.plot_param_importances(study)
-fig = ax.figure
-fig.tight_layout()
-fig.savefig(RESULTS_DIR / "param_importances.png", dpi=300, bbox_inches="tight")
-plt.close(fig)
