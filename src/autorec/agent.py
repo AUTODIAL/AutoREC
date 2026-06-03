@@ -1341,6 +1341,7 @@ class DDQN_ECM:
         _ = plt.figure(figsize=(8, 5))
         if "loss" in NN_loss:
             plt.plot(NN_loss["loss"])
+        plt.yscale("log")  # Loss in log-scale has better visibility
         plt.xlabel("Training steps")
         plt.ylabel("NN Loss")
         plt.title("Neural Network Loss During Training")
