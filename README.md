@@ -492,6 +492,16 @@ docker run --rm \
   --output-dir /app/results/inference_demo
 ```
 
+Note: if you want to open a shell instead of the default entrypoint, override
+the entrypoint for that `docker run` command:
+
+```bash
+docker run --rm -it --entrypoint /bin/bash autorec:latest
+```
+
+This is useful for inspecting the container or running commands manually without
+changing the Dockerfile.
+
 ## Development Notes
 
 The codebase includes support for saving models and training outputs. More
