@@ -199,8 +199,11 @@ Start there if you are using the package for the first time.
 
 ## Configuration
 
-YAML Configuration examples are available in `default_configs/`. The package also
-ships default configuration files under `src/autorec/default_configs/`.
+YAML Configuration examples are available in `default_configs/`. If all
+configurations or parameters are not provided in the YAML, the factory will read
+the missing values from the default config files. The default configs are stored
+in `environment_config.yaml` and `agent_config.yaml` in the
+`src/autorec/default_configs/` folder.
 
 Environment options:
 

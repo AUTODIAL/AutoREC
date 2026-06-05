@@ -56,6 +56,11 @@ default_env_agent_config = {
 def environment_builder(args: Union[str, Path, Dict]) -> EIS_ECM_Env:
     """Build an EIS_ECM_Env environment from configuration.
 
+    Note: If all configurations or parameters are not provided in the YAML,
+    the factory will read the missing values from the default config files.
+    The default environment config is stored in environment_config.yaml in the
+    src/autorec/default_configs folder.
+
     Parameters
     ----------
     args : Union[str, Path, Dict]
@@ -90,6 +95,11 @@ def environment_and_agent_builder(
     """Build both an EIS_ECM_Env environment and a DDQN_ECM agent from a single configuration.
 
     The configuration needs to have "environment" and "agent" sections.
+
+    Note: If all configurations or parameters are not provided in the YAML,
+    the factory will read the missing values from the default config files.
+    The default configs are stored in environment_config.yaml and agent_config.yaml
+    in the src/autorec/default_configs folder.
 
     Parameters
     ----------
