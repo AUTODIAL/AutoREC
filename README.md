@@ -116,7 +116,7 @@ Load an existing processed dataset:
 ```python
 from autorec.data_preparation import EISDataPrep
 
-data_prep = EISDataPrep(path="PATH/training_dataset.pkl", mode='load')
+data_prep = EISDataPrep(path="PATH/data/examples/training_dataset.pkl", mode='load')
 dataset = data_prep.load()
 ```
 
@@ -199,13 +199,16 @@ Start there if you are using the package for the first time.
 
 ## Configuration
 
-YAML Configuration examples are available in `default_configs/`. The package also
-ships default configuration files under `src/autorec/default_configs/`.
+YAML Configuration examples are available in `default_configs/`. If all
+configurations or parameters are not provided in the YAML, the factory will read
+the missing values from the default config files. The default configs are stored
+in `environment_config.yaml` and `agent_config.yaml` in the
+`src/autorec/default_configs/` folder.
 
 Environment options:
 
 ```yaml
-dataset_path: "data/training_dataset.pkl"
+dataset_path: "data/examples/training_dataset.pkl"
 seed: 42
 chromosome_HEAD_len: 10
 cache_enabled: true
@@ -276,10 +279,15 @@ AutoREC/
 |-- environment.yml                 # Conda environment that installs this package
 |-- requirements.txt                # Pip entry point that installs from pyproject.toml
 |-- setup_env.sh                    # Convenience conda setup script
+|-- Dockerfile                      # Container image definition for CLI workflows
+|-- .dockerignore                   # Docker build-context exclusions
 |-- README.md
 |-- data/                           # Example processed datasets
 |-- default_configs/                # Example YAML configurations
 |-- example/                        # Example Python entry points
+|-- models/                         # Runtime model outputs and example models
+|-- results/                        # Runtime evaluation outputs, ignored except .gitkeep
+|-- runs/                           # Runtime training outputs, ignored except .gitkeep
 |-- scripts/
 |   `-- install_autorec_kernel_guard.py
 |-- src/
@@ -292,14 +300,210 @@ AutoREC/
 |       |-- runtime.py              # Runtime setup helpers
 |       |-- default_configs/        # Package-level default configs
 |       `-- optimized_data_structures/
-|-- trained_agent/                  # Example trained model
 `-- tutorials/                      # Step-by-step notebook tutorials
 ```
-
 
 <p align="center">
   <img src="Design.png" alt="AutoREC design overview" width="550">
 </p>
+
+## Command Line Interface
+
+AutoREC also provides a command line interface for running common workflows
+without writing a separate Python script. After installing the package, the
+`autorec` command is available in the active environment:
+
+```bash
+python -m pip install -e .
+autorec --help
+```
+
+The CLI configures the AutoREC runtime before importing TensorFlow, JAX,
+AutoEIS, or other scientific libraries. This is the recommended command-line
+entry point for preprocessing, training, evaluation, and inference workflows.
+
+### 1. Preprocess Data
+
+Use `autorec preprocess` to process raw EIS CSV files or validate an existing
+processed dataset. Raw CSV files should contain `freq`, `Z_real`, and `Z_imag`
+columns.
+
+```bash
+autorec preprocess \
+  --input tutorials/EIS_raw_demo \
+  --output data/processed_training_data.pkl \
+  --mode process \
+  --evaluation \
+  --summary
+```
+
+To validate an existing processed dataset without reprocessing raw CSV files:
+
+```bash
+autorec preprocess \
+  --input data/examples/training_dataset.pkl \
+  --mode load \
+  --evaluation \
+  --summary
+```
+
+### 2. Train an Agent
+
+Use `autorec train` with a YAML configuration file containing `environment` and
+`agent` sections. The environment section points to the processed dataset, and
+the agent section controls training parameters and output paths.
+The demo configuration uses paths relative to `default_configs/`, so run these
+commands from that directory.
+Use `--output-dir` to override the YAML `agent.save_dir` for training artifacts.
+If omitted, the CLI uses the `agent.save_dir` value from the config file.
+
+```bash
+cd default_configs
+
+autorec train \
+  --config demo_environment_agent_config.yaml \
+  --output-dir ../runs/demo_train
+```
+
+### 3. Evaluate an Agent
+
+Use `autorec evaluate` to load a trained model and evaluate generated ECMs for
+selected rows, a random sample, or the full dataset.
+
+Evaluate specific row positions:
+
+```bash
+cd default_configs
+
+autorec evaluate \
+  --config demo_environment_agent_config.yaml \
+  --model ../models/examples/agent_trained.keras \
+  --indices 0,4,10 \
+  --output-dir ../results/evaluate_demo
+```
+
+Evaluate a random sample:
+
+```bash
+cd default_configs
+
+autorec evaluate \
+  --config demo_environment_agent_config.yaml \
+  --model ../models/examples/agent_trained.keras \
+  --num-samples 20 \
+  --output-dir ../results/evaluate_demo
+```
+
+Evaluate all rows:
+
+```bash
+cd default_configs
+
+autorec evaluate \
+  --config demo_environment_agent_config.yaml \
+  --model ../models/examples/agent_trained.keras \
+  --all-rows \
+  --output-dir ../results/evaluate_demo
+```
+
+By default, evaluation uses the evaluation environment when the configuration
+defines one. Add `--use-training-env` to evaluate against the training dataset.
+Use `--output-dir` to override the YAML `agent.save_dir`; this keeps
+agent-created files such as model summaries, generated circuit images, GIFs, and
+evaluation CSV/Pickle files in the same runtime output directory. If
+`--output-dir` is omitted, the CLI uses the `agent.save_dir` value from the
+config file.
+
+### 4. Run Inference
+
+`autorec infer` is an alias for `autorec evaluate`. Use it when the goal is to
+apply a trained model to EIS rows and inspect the proposed ECMs rather than run
+a formal evaluation report.
+
+```bash
+cd default_configs
+
+autorec infer \
+  --config demo_environment_agent_config.yaml \
+  --model ../models/examples/agent_trained.keras \
+  --indices 0 \
+  --max-actions 24 \
+  --output-dir ../results/inference_demo \
+  --run-id inference_demo
+```
+
+Useful shared options:
+
+- `--output-dir`: override `agent.save_dir` from the YAML file for training,
+  evaluation, and inference outputs.
+- `--threads`: control BLAS/OpenMP/NumExpr thread pools.
+- `--seed`: set the random seed for training, evaluation, and sampling.
+- `--skip-autoeis-warmup`: skip the AutoEIS/Julia warmup step.
+- `--show-tf-logs`: show TensorFlow logs that are hidden by default.
+
+## Docker
+
+AutoREC includes a Dockerfile for running the CLI in a reproducible container.
+The image contains the package code and dependencies. Data, trained models, and
+run outputs should be mounted from the host rather than baked into the image.
+
+Runtime directories:
+
+- `data/`: input datasets mounted at `/app/data`
+- `models/`: promoted or exported models mounted at `/app/models`
+- `runs/`: training outputs mounted at `/app/runs`
+- `results/`: evaluation and inference outputs mounted at `/app/results`
+
+Build the image:
+
+```bash
+docker build -t autorec:latest .
+```
+
+Check the CLI:
+
+```bash
+docker run --rm autorec:latest --help
+```
+
+Run training with mounted runtime directories:
+
+```bash
+docker run --rm \
+  --workdir /app/default_configs \
+  -v "$PWD/data:/app/data" \
+  -v "$PWD/models:/app/models" \
+  -v "$PWD/runs:/app/runs" \
+  -v "$PWD/results:/app/results" \
+  autorec:latest train \
+  --config demo_environment_agent_config.yaml \
+  --output-dir /app/runs/demo_train
+```
+
+Run inference with an existing model:
+
+```bash
+docker run --rm \
+  --workdir /app/default_configs \
+  -v "$PWD/data:/app/data" \
+  -v "$PWD/models:/app/models" \
+  -v "$PWD/results:/app/results" \
+  autorec:latest infer \
+  --config demo_environment_agent_config.yaml \
+  --model /app/models/examples/agent_trained.keras \
+  --indices 0 \
+  --output-dir /app/results/inference_demo
+```
+
+Note: if you want to open a shell instead of the default entrypoint, override
+the entrypoint for that `docker run` command:
+
+```bash
+docker run --rm -it --entrypoint /bin/bash autorec:latest
+```
+
+This is useful for inspecting the container or running commands manually without
+changing the Dockerfile.
 
 ## Development Notes
 
