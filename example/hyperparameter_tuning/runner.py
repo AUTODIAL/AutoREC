@@ -6,6 +6,7 @@ Usage:
     $ python runner.py \
         --target-dir ./hyperparameter_tuning_results \
         --base-config ./base_config.yaml \
+        --search-space ./search_space.yaml \
         --num-initial 5 \
         --num-iterations 10 \
         --batch-size 5 \
@@ -14,6 +15,7 @@ Usage:
 Arguments:
     --target-dir: Target directory to store results
     --base-config: Base configuration file to use for generating new configs
+    --search-space: Search space definition file
     --num-initial: Number of initial trials
     --num-iterations: Number of iterations to run
     --batch-size: Batch size for each iteration
@@ -21,6 +23,7 @@ Arguments:
 
 from pathlib import Path
 import argparse
+import yaml
 from pprint import pprint
 
 import numpy as np
@@ -32,6 +35,13 @@ from tuning_utils import (
     block_until_completed,
     compute_score,
 )
+
+# For result visualization analysis
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import optuna.visualization.matplotlib as vis_matplotlib
 
 
 seed = 42
@@ -55,6 +65,13 @@ parser.add_argument(
     default="./base_config.yaml",
     help="Base configuration file to use for generating new configs",
 )
+parser.add_argument(
+    "--search-space",
+    "-s",
+    type=str,
+    default="./search_space.yaml",
+    help="Search space definition file",
+)
 parser.add_argument("--num-initial", type=int, default=10, help="Number of initial trials")
 parser.add_argument(
     "--num-iterations", type=int, default=5, help="Number of iterations to run"
@@ -77,8 +94,33 @@ python_file = "main_factory.py"  # The training script to use
 base_config_file = Path(args.base_config)
 base_sbatch_options = {"time": "72:00:00", "mem_per_cpu": "12G"}
 
+# Hyperparameter search space
+search_space_file = Path(args.search_space)
+if not search_space_file.exists():
+    raise FileNotFoundError(f"Search space file {search_space_file} not found.")
+with open(search_space_file, "r") as f:
+    search_space = yaml.safe_load(f)
+if not isinstance(search_space, dict) or not search_space:
+    raise ValueError(
+        f"Search space file {search_space_file} must define a non-empty mapping of "
+        "parameter names to {bounds: [low, high], type: int|float}."
+    )
+for name, spec in search_space.items():
+    if not isinstance(spec, dict) or "bounds" not in spec or "type" not in spec:
+        raise ValueError(
+            f"Invalid search space entry for '{name}': expected keys 'bounds' and 'type'."
+        )
+search_space_bounds = {name: spec["bounds"] for name, spec in search_space.items()}
+integer_variables = [
+    name for name, spec in search_space.items() if str(spec["type"]).lower() == "int"
+]
 # Instantiate configuration handler
-config_handler = ConfigurationHandler(base_config=base_config_file, configs_dir=configs_dir)
+config_handler = ConfigurationHandler(
+    base_config=base_config_file,
+    configs_dir=configs_dir,
+    search_space_bounds=search_space_bounds,
+    integer_variables=integer_variables,
+)
 
 
 # Print out some information
@@ -246,6 +288,24 @@ for iteration in range(num_iterations - 1):
     # Tell Optuna about the results from trials
     for trial, score in zip(trials, score_list):
         study.tell(trial, score)
+
+    # Export the study results
+    study_df = study.trials_dataframe()
+    study_df.to_csv(RESULTS_DIR / "optuna_trials.csv", index=False)
+    # Visualization analysis
+    print("Generating visualization analysis")
+    print("- Optimization history")
+    ax = vis_matplotlib.plot_optimization_history(study)
+    fig = ax.figure
+    fig.tight_layout()
+    fig.savefig(RESULTS_DIR / "optimization_history.png", dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    print("- Parameter importances")
+    ax = vis_matplotlib.plot_param_importances(study)
+    fig = ax.figure
+    fig.tight_layout()
+    fig.savefig(RESULTS_DIR / "param_importances.png", dpi=300, bbox_inches="tight")
+    plt.close(fig)
 
 print("Hyperparameter tuning with Optuna completed.")
 

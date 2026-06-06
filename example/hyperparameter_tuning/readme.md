@@ -27,6 +27,7 @@ To run the hyperparameter tuning workflow, execute:
 python runner.py \
   --target-dir ./hyperparameter_tuning_results \
   --base-config ./base_config.yaml \
+  --search-space search_space.yaml \
   --num-initial 5 \
   --num-iterations 10 \
   --batch-size 5
@@ -36,6 +37,7 @@ Arguments:
 
 - `--target-dir`: Directory where the tuning results will be saved.
 - `--base-config`: Path to the base configuration file for training the RL agent.
+- `--search-space`: Path to the YAML file defining the hyperparameter search space for tuning.
 - `--num-initial`: Number of initial random configurations to evaluate before starting the optimization process.
 - `--num-iterations`: Number of optimization iterations to perform.
 - `--batch-size`: Number of configurations to evaluate in parallel during each optimization iteration.
@@ -60,6 +62,12 @@ Arguments:
   1. Provides values for hyperparameters that are not tuned.
   2. Provides a template for the configuration files generated during tuning.
   3. Provides baseline values for the hyperparameters that are tuned and later overridden by the tuning process.
+
+- `search_space.yaml`: YAML file that defines the hyperparameter search space for tuning.
+  This file specifies the hyperparameters to be tuned and their corresponding search spaces, specified by keys:
+
+  * `bounds`: A list of two values specifying the lower and upper bounds (both inclusive) of the hyperparameter.
+  * `type`: A string specifying the type of the hyperparameter, which can be either `int` or `float`.
 
   **Note:** The tuning workflow in `runner.py` first runs training using the baseline configuration from `base_config.yaml`.
   This provides a reference point before evaluating optimized hyperparameter configurations.
