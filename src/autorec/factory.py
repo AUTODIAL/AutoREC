@@ -15,9 +15,10 @@ import pandas as pd
 from autorec.environment import EIS_ECM_Env
 from autorec.agent import DDQN_ECM
 
-# Special treatment for configurations inside AutoREC/default_configs: the dataset_path value
-# is treated as relative to the configuration file.
-_DEFAULT_CONFIGS_PATH = Path(__file__).resolve().parents[2] / "default_configs"
+# Special treatment for example configurations: dataset_path is treated as relative to
+# the configuration file instead of the current working directory.
+_DEFAULT_CONFIGS_PATH = Path(__file__).resolve().parents[2] / "example" / "default_configs"
+_DOCKER_DEFAULT_CONFIGS_PATH = Path("/app") / "default_configs"
 
 
 def environment_builder(args: Union[str, Path, Dict]) -> EIS_ECM_Env:
@@ -167,7 +168,11 @@ def _config_reader(file_path: Union[str, Path]) -> Dict:
     """Read a config file and apply default_configs path conventions."""
     config = _yaml_reader(file_path)
     config_path = Path(file_path).resolve()
-    if config_path.parent != _DEFAULT_CONFIGS_PATH.resolve():
+    default_config_paths = (
+        _DEFAULT_CONFIGS_PATH.resolve(),
+        _DOCKER_DEFAULT_CONFIGS_PATH,
+    )
+    if config_path.parent not in default_config_paths:
         return config
 
     config = config.copy()
