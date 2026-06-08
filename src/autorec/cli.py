@@ -29,9 +29,9 @@ def _parse_indices(raw_indices: str | None) -> list[int] | None:
 
 def _read_config_with_overrides(config_path: Path, output_dir: Path | None = None) -> dict:
     """Read a YAML config and apply CLI overrides that should win over YAML values."""
-    from autorec.factory import _yaml_reader
+    from autorec.factory import _config_reader
 
-    config = _yaml_reader(config_path)
+    config = _config_reader(config_path)
     if output_dir is not None:
         config.setdefault("agent", {})["save_dir"] = output_dir
     return config
