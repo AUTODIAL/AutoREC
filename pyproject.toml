@@ -52,6 +52,10 @@ dependencies = [
 
 [project.optional-dependencies]
 
+gui = [
+  "streamlit>=1.36,<2",
+]
+
 notebook = [
   "ipykernel==6.29.5",
   "ipython==8.26.0",

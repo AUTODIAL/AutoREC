@@ -441,6 +441,43 @@ Useful shared options:
 - `--skip-autoeis-warmup`: skip the AutoEIS/Julia warmup step.
 - `--show-tf-logs`: show TensorFlow logs that are hidden by default.
 
+## Graphical User Interface
+
+AutoREC includes a Streamlit graphical user interface for loading a trained
+agent and generating ECM predictions from EIS data. This is a browser-based web
+UI: run it from Python, then open the local Streamlit URL in a web browser. It
+is not packaged as a standalone desktop application.
+
+Install AutoREC with the GUI dependency:
+
+```bash
+python -m pip install -e ".[gui]"
+```
+
+Start the GUI from the repository root:
+
+```bash
+python -m streamlit run src/autorec/gui.py
+```
+
+Streamlit prints a local URL such as `http://localhost:8501`. Open that URL in
+your browser, then load the inputs:
+
+- a trained AutoREC model file, such as `models/examples/agent_trained.keras`
+- either a processed dataset pickle or a folder of raw EIS CSV files
+- an output directory for processed datasets, generated ECM tables, plots, and
+  circuit evolution GIFs
+
+For raw EIS folders, the CSV files should contain `freq`, `Z_real`, and
+`Z_imag` columns. The GUI can save the processed dataset before running
+inference.
+
+After setting the model, data, output folder, and evaluation indices, click
+`Generate ECM`. The GUI launches an evaluator worker process, displays job
+status, then shows the best circuits and results table when output is available.
+Optional controls can save and display circuit plots, fit plots, and circuit
+evolution GIF outputs.
+
 ## Docker
 
 AutoREC includes a Dockerfile for running the CLI in a reproducible container.

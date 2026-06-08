@@ -1,4 +1,4 @@
-from typing import Optional, Dict, Union, Any
+from typing import Callable, Optional, Dict, Union, Any
 from pathlib import Path
 
 import pandas as pd
@@ -662,7 +662,6 @@ class DDQN_ECM:
         action_type : str
             Which element to place ('+', '/', 'R', 'L', 'P').
         """
-        ec = ae.core.ec
         ACTION_LIST = self._active_env.ACTIONS_LIST
         if np.random.rand() <= self.epsilon:  # Explore
             if uniform is True:
@@ -672,6 +671,7 @@ class DDQN_ECM:
                 action_position = int(chosen_action["action_position"])
                 action_type = str(chosen_action["action_type"])
             else:
+                ec = ae.core.ec
                 karva = self._active_env.state.replace("/", "-")
                 tree = ec.karva_to_tree(karva)
                 conding_length = len(tree)
@@ -690,13 +690,17 @@ class DDQN_ECM:
         else:  # Exploit
             encoded_state = np.array(self._active_env.encoded_state)
             NN_state = np.concatenate((flatten_Z, encoded_state))
-            q_values = self.model.predict(NN_state[np.newaxis], verbose=0)
+            q_values = self.model(
+                tf.convert_to_tensor(NN_state[np.newaxis], dtype=tf.float32),
+                training=False,
+            ).numpy()
 
             if uniform is True:
                 # Option 1: just select the best action amonge all valid/invalid actions
                 chosen_action = ACTION_LIST.iloc[int(np.argmax(q_values[0]))]
             else:
                 # Option 2: select the best action amonge only valid actions
+                ec = ae.core.ec
                 karva = self._active_env.state.replace("/", "-")
                 tree = ec.karva_to_tree(karva)
                 conding_length = len(tree)
@@ -1390,6 +1394,7 @@ class DDQN_ECM:
         get_fit_plots: bool = True,
         gif_generation: bool = True,
         use_eval_env: bool = True,  # ADD THIS
+        progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
     ) -> Dict[str, Any]:
         """
         Evaluate the trained agent on a single EIS measurement.
@@ -1418,12 +1423,23 @@ class DDQN_ECM:
         use_eval_env : bool
             Whether to run on the evaluation environment instead
             of the training environment
+        progress_callback : callable, optional
+            Called with lightweight action progress events during evaluation.
 
         Returns
         -------
         dict
             Dictionary containing evaluation results.
         """
+
+        def notify_progress(**event: Any) -> None:
+            if progress_callback is None:
+                return
+            try:
+                progress_callback(event)
+            except Exception:
+                pass
+
         # Switch to appropriate environment
         if use_eval_env:
             self.switch_to_eval()
@@ -1479,9 +1495,23 @@ class DDQN_ECM:
             print(f"{'=' * 80}")
 
         for a in range(max_actions):
+            notify_progress(
+                phase="action_start",
+                action_number=a + 1,
+                max_actions=max_actions,
+                EIS_i=EIS_i,
+            )
             # Get greedy action (epsilon=0)
             action_position, action_type = self.eps_greedy(flatten_Z)
             prev_state = self._active_env.state
+            notify_progress(
+                phase="action_fit",
+                action_number=a + 1,
+                max_actions=max_actions,
+                action_type=action_type,
+                action_position=action_position,
+                EIS_i=EIS_i,
+            )
 
             # Take action in environment
             env_step_out = self._active_env.step(
@@ -1496,6 +1526,19 @@ class DDQN_ECM:
             metrics = env_step_out["metrics"]
             param = env_step_out["param"]
             predicted_Z = env_step_out["predicted_Z"]
+            notify_progress(
+                phase="action_complete",
+                action_number=a + 1,
+                max_actions=max_actions,
+                action_type=action_type,
+                action_position=action_position,
+                EIS_i=EIS_i,
+                reward=reward,
+                validity=validity,
+                terminated=good_fit,
+                circuit=circuit,
+                coding=coding,
+            )
 
             # Store action history
             action_history.append(

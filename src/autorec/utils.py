@@ -208,7 +208,7 @@ def plot_eval_fit(
 ):
     """Save a fit plot for a single evaluated EIS, optionally with circuit diagram."""
     save_dir = Path(save_dir)
-    (save_dir / "fit_plots").mkdir(exist_ok=True)
+    (save_dir / "fit_plots").mkdir(exist_ok=True, parents=True)
 
     if not good_fit or predicted_Z is None:
         return
