@@ -78,9 +78,6 @@ where = ["src"]
 
 [tool.setuptools_scm]
 
-[tool.setuptools.package-data]
-autorec = ["default_configs/*.yaml"]
-
 [project.urls]
 Homepage = "https://github.com/AUTODIAL/AutoREC"
 Repository = "https://github.com/AUTODIAL/AutoREC"
