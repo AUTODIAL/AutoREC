@@ -17,6 +17,7 @@ Workflow:
 import datetime
 from pathlib import Path
 import argparse
+from pprint import pprint
 
 from autorec.runtime import configure_autorec_runtime
 
@@ -33,7 +34,7 @@ from autorec.utils import save_evaluation_results, set_global_seed
 # This ensures reproducibility across numpy, tensorflow, and python random.
 set_global_seed(42, True)
 
-from autorec.factory import _yaml_reader, environment_and_agent_builder
+from autorec.factory import config_reader, environment_and_agent_builder
 
 
 # THREADING CONFIGURATION
@@ -68,7 +69,8 @@ parser.add_argument(
 args = parser.parse_args()
 
 CONFIG_FILE = Path(args.config)
-config = _yaml_reader(CONFIG_FILE)
+configs = config_reader(CONFIG_FILE)
+pprint(configs, sort_dicts=False)
 
 # Evaluation settings for this example script.
 # Training length is controlled by the YAML file's agent.num_trials value.
