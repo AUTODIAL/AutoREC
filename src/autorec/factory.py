@@ -130,7 +130,7 @@ def environment_and_agent_builder(
     print("Creating agent...")
     agent_config = config["agent"]
     if agent_config is None:
-        print("Warning: The 'agent' section is empty. Using default agent configuration.")
+        print("Warning: The 'agent' section is empty. Using DDQN_ECM constructor defaults.")
         agent_config = {}
     # Insert the environment(s) into the agent configuration
     agent_config["training_env"] = training_env
