@@ -55,9 +55,9 @@ def environment_builder(args: Union[str, Path, Dict]) -> EIS_ECM_Env:
         dataset_path = config.pop("dataset_path")
     except KeyError:
         raise KeyError(
-            "The environment configuration must include a 'dataset_path' key, i.e., "
-            "the path to the dataset file "
-            "(relative to the script that will run the environment)."
+            "The environment configuration must include a 'dataset_path' key (path to a .csv or .pkl dataset). "
+            "For regular configs, this path is resolved relative to the current working directory; "
+            "configs under example/default_configs (and /app/default_configs in Docker) are resolved relative to the config file."
         )
     dataset = _load_dataset(dataset_path)
     config["dataset"] = dataset
