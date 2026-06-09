@@ -96,7 +96,7 @@ def environment_and_agent_builder(
     if isinstance(args, (str, Path)):
         config = config_reader(args)
     elif isinstance(args, dict):
-        config = args
+        config = args.copy()
     else:
         raise TypeError("The 'args' parameter must be a str, Path, or dict.")
 
