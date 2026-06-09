@@ -17,8 +17,8 @@ from autorec.agent import DDQN_ECM
 
 # Special treatment for example configurations: dataset_path is treated as relative to
 # the configuration file instead of the current working directory.
-_DEFAULT_CONFIGS_PATH = Path(__file__).resolve().parents[2] / "example" / "default_configs"
-_DOCKER_DEFAULT_CONFIGS_PATH = Path("/app") / "default_configs"
+_DEFAULT_CONFIGS_PATH = Path(__file__).resolve().parents[2] / "configs_yaml" / "examples"
+_DOCKER_DEFAULT_CONFIGS_PATH = Path("/app") / "configs_yaml" / "examples"
 
 
 def environment_builder(args: Union[str, Path, Dict]) -> EIS_ECM_Env:
@@ -57,7 +57,7 @@ def environment_builder(args: Union[str, Path, Dict]) -> EIS_ECM_Env:
         raise KeyError(
             "The environment configuration must include a 'dataset_path' key (path to a .csv or .pkl dataset). "
             "For regular configs, this path is resolved relative to the current working directory; "
-            "configs under example/default_configs (and /app/default_configs in Docker) are resolved relative to the config file."
+            "configs under configs_yaml/examples (and /app/configs_yaml/examples in Docker) are resolved relative to the config file."
         )
     dataset = _load_dataset(dataset_path)
     config["dataset"] = dataset
@@ -165,7 +165,7 @@ def _yaml_reader(file_path: Union[str, Path]) -> Dict:
 
 
 def config_reader(file_path: Union[str, Path]) -> Dict:
-    """Read a config file and apply default_configs path conventions."""
+    """Read a config file and apply example config path conventions."""
     config = _yaml_reader(file_path)
     config_path = Path(file_path).resolve()
     default_config_paths = (

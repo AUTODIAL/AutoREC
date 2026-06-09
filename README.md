@@ -142,7 +142,7 @@ Using the YAML configuration:
 from autorec.factory import environment_and_agent_builder
 
 env, eval_env, agent = environment_and_agent_builder(
-    "example/default_configs/demo_environment_agent_config.yaml"
+    "configs_yaml/examples/demo_environment_agent_config.yaml"
 )
 
 agent.train()
@@ -199,7 +199,7 @@ Start there if you are using the package for the first time.
 
 ## Configuration
 
-YAML Configuration examples are available in `example/default_configs/`. The keys and
+YAML Configuration examples are available in `configs_yaml/examples/`. The keys and
 values in the YAML files are treated as keyword arguments for instantiating `EIS_ECM_Env`
 and `DDQN_ECM`. Thus, any required argument for those classes should be included in the
 YAML file under the appropriate section.
@@ -207,7 +207,7 @@ YAML file under the appropriate section.
 A slight difference is that the `dataset` argument for the environment is replaced by
 `dataset_path`. For normal configuration files and dictionaries, `dataset_path` is
 relative to the working directory. For the example configurations in
-`example/default_configs/`, `dataset_path` is relative to the configuration file so
+`configs_yaml/examples/`, `dataset_path` is relative to the configuration file so
 the examples can be run from the repository root. The factory loads the dataset from
 that path and passes it to the environment constructor.
 
@@ -289,8 +289,9 @@ AutoREC/
 |-- .dockerignore                   # Docker build-context exclusions
 |-- README.md
 |-- data/                           # Example processed datasets
-|-- example/                        # Example Python entry points and YAML configurations
-|   `-- default_configs/
+|-- configs_yaml/
+|   `-- examples/                   # Example YAML configurations
+|-- example/                        # Example Python entry points
 |-- models/                         # Runtime model outputs and example models
 |-- results/                        # Runtime evaluation outputs, ignored except .gitkeep
 |-- runs/                           # Runtime training outputs, ignored except .gitkeep
@@ -362,7 +363,7 @@ If omitted, the CLI uses the `agent.save_dir` value from the config file.
 
 ```bash
 autorec train \
-  --config example/default_configs/demo_environment_agent_config.yaml \
+  --config configs_yaml/examples/demo_environment_agent_config.yaml \
   --output-dir runs/demo_train
 ```
 
@@ -375,7 +376,7 @@ Evaluate specific row positions:
 
 ```bash
 autorec evaluate \
-  --config example/default_configs/demo_environment_agent_config.yaml \
+  --config configs_yaml/examples/demo_environment_agent_config.yaml \
   --model models/examples/agent_trained.keras \
   --indices 0,4,10 \
   --output-dir results/evaluate_demo
@@ -385,7 +386,7 @@ Evaluate a random sample:
 
 ```bash
 autorec evaluate \
-  --config example/default_configs/demo_environment_agent_config.yaml \
+  --config configs_yaml/examples/demo_environment_agent_config.yaml \
   --model models/examples/agent_trained.keras \
   --num-samples 20 \
   --output-dir results/evaluate_demo
@@ -395,7 +396,7 @@ Evaluate all rows:
 
 ```bash
 autorec evaluate \
-  --config example/default_configs/demo_environment_agent_config.yaml \
+  --config configs_yaml/examples/demo_environment_agent_config.yaml \
   --model models/examples/agent_trained.keras \
   --all-rows \
   --output-dir results/evaluate_demo
@@ -417,7 +418,7 @@ a formal evaluation report.
 
 ```bash
 autorec infer \
-  --config example/default_configs/demo_environment_agent_config.yaml \
+  --config configs_yaml/examples/demo_environment_agent_config.yaml \
   --model models/examples/agent_trained.keras \
   --indices 0 \
   --max-actions 24 \
@@ -464,12 +465,12 @@ Run training with mounted runtime directories:
 ```bash
 docker run --rm \
   -v "$PWD/data:/app/data" \
-  -v "$PWD/example/default_configs:/app/default_configs" \
+  -v "$PWD/configs_yaml:/app/configs_yaml" \
   -v "$PWD/models:/app/models" \
   -v "$PWD/runs:/app/runs" \
   -v "$PWD/results:/app/results" \
   autorec:latest train \
-  --config default_configs/demo_docker_environment_agent_config.yaml \
+  --config /app/configs_yaml/examples/demo_docker_environment_agent_config.yaml \
   --output-dir /app/runs/demo_train
 ```
 
@@ -478,11 +479,11 @@ Run inference with an existing model:
 ```bash
 docker run --rm \
   -v "$PWD/data:/app/data" \
-  -v "$PWD/example/default_configs:/app/default_configs" \
+  -v "$PWD/configs_yaml:/app/configs_yaml" \
   -v "$PWD/models:/app/models" \
   -v "$PWD/results:/app/results" \
   autorec:latest infer \
-  --config default_configs/demo_docker_environment_agent_config.yaml \
+  --config /app/configs_yaml/examples/demo_docker_environment_agent_config.yaml \
   --model /app/models/examples/agent_trained.keras \
   --indices 0 \
   --output-dir /app/results/inference_demo

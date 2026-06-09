@@ -17,7 +17,7 @@ RUN apt-get update \
 WORKDIR /app
 
 COPY pyproject.toml README.md LICENSE ./
-COPY example/default_configs ./default_configs
+COPY configs_yaml ./configs_yaml
 COPY src ./src
 
 RUN python -m pip install --upgrade pip setuptools wheel \

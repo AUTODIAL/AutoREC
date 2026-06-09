@@ -52,8 +52,9 @@ parser.add_argument(
     "-c",
     type=str,
     default=str(
-        Path(__file__).resolve().parent
-        / "default_configs"
+        Path(__file__).resolve().parents[1]
+        / "configs_yaml"
+        / "examples"
         / "demo_environment_agent_config.yaml"
     ),
     help="Path to the YAML configuration file for the environment and agent.",
