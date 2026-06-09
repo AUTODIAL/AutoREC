@@ -33,7 +33,9 @@ def _read_config_with_overrides(config_path: Path, output_dir: Path | None = Non
 
     config = _config_reader(config_path)
     if output_dir is not None:
-        config.setdefault("agent", {})["save_dir"] = output_dir
+        agent_config = config.get("agent") or {}
+        config["agent"] = agent_config
+        agent_config["save_dir"] = output_dir
     return config
 
 
