@@ -23,7 +23,7 @@ parser.add_argument(
     "--config",
     "-c",
     type=str,
-    default="default_configs/test_environment_agent_config.yaml",
+    default="./base_config.yaml",
     help="Path to the YAML configuration file.",
 )
 args = parser.parse_args()
