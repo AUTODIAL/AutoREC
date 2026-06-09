@@ -44,7 +44,7 @@ def environment_builder(args: Union[str, Path, Dict]) -> EIS_ECM_Env:
         An instance of the EIS_ECM_Env environment.
     """
     if isinstance(args, (str, Path)):
-        config = _config_reader(args)
+        config = config_reader(args)
     elif isinstance(args, dict):
         config = args.copy()
     else:
@@ -94,7 +94,7 @@ def environment_and_agent_builder(
         evaluation, in which the latter can be None) and the DDQN_ECM agent.
     """
     if isinstance(args, (str, Path)):
-        config = _config_reader(args)
+        config = config_reader(args)
     elif isinstance(args, dict):
         config = args
     else:
@@ -164,7 +164,7 @@ def _yaml_reader(file_path: Union[str, Path]) -> Dict:
         return yaml.safe_load(file)
 
 
-def _config_reader(file_path: Union[str, Path]) -> Dict:
+def config_reader(file_path: Union[str, Path]) -> Dict:
     """Read a config file and apply default_configs path conventions."""
     config = _yaml_reader(file_path)
     config_path = Path(file_path).resolve()
