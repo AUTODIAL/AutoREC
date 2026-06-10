@@ -167,6 +167,10 @@ def _yaml_reader(file_path: Union[str, Path]) -> Dict:
 def config_reader(file_path: Union[str, Path]) -> Dict:
     """Read a config file and apply example config path conventions."""
     config = _yaml_reader(file_path)
+    if not isinstance(config, dict):
+        raise ValueError(
+            f"Configuration file {file_path} must contain a YAML mapping at the top level."
+        )
     config_path = Path(file_path).resolve()
     default_config_paths = (
         _DEFAULT_CONFIGS_PATH.resolve(),
