@@ -6,10 +6,11 @@ redirects those paths to /tmp before any test modules import AutoREC internals.
 """
 
 import os
+import tempfile
 from pathlib import Path
 
 
-_TEST_CACHE_DIR = Path("/tmp") / "autorec_pytest_cache"
+_TEST_CACHE_DIR = Path(tempfile.gettempdir()) / "autorec_pytest_cache"
 _TEST_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 os.environ.setdefault("XDG_CACHE_HOME", str(_TEST_CACHE_DIR))
