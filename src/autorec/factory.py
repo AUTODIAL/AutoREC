@@ -8,6 +8,7 @@ evaluation environments.
 """
 
 from pathlib import Path
+import os
 from typing import Union, Dict
 import yaml
 import pandas as pd
@@ -15,10 +16,11 @@ import pandas as pd
 from autorec.environment import EIS_ECM_Env
 from autorec.agent import DDQN_ECM
 
-# Special treatment for example configurations: dataset_path is treated as relative to
-# the configuration file instead of the current working directory.
-_DEFAULT_CONFIGS_PATH = Path(__file__).resolve().parents[2] / "configs_yaml" / "examples"
-_DOCKER_DEFAULT_CONFIGS_PATH = Path("/app") / "configs_yaml" / "examples"
+
+# Define AUTOREC_ROOT environment variable, which points to the root directory of the AutoREC
+# package. This environment variable will be used by the provided example configuration files.
+AUTOREC_ROOT = Path(__file__).resolve().parents[2]
+os.environ["AUTOREC_ROOT"] = str(AUTOREC_ROOT)
 
 
 def environment_builder(args: Union[str, Path, Dict]) -> EIS_ECM_Env:
@@ -65,7 +67,8 @@ def environment_builder(args: Union[str, Path, Dict]) -> EIS_ECM_Env:
     return EIS_ECM_Env(**config)
 
 
-# It doesn't make sense to have just agent_builder, since the agent needs an environment.
+# It doesn't make sense to have just agent_builder, since the agent needs an environment
+# instance.
 def environment_and_agent_builder(
     args: Union[str, Path, Dict],
 ) -> (EIS_ECM_Env, EIS_ECM_Env, DDQN_ECM):
@@ -141,8 +144,8 @@ def environment_and_agent_builder(
     return training_env, eval_env, agent
 
 
-def _yaml_reader(file_path: Union[str, Path]) -> Dict:
-    """Read a YAML file and return its contents as a dictionary.
+def config_reader(file_path: Union[str, Path]) -> Dict:
+    """Read a YAML configuration file and return its contents as a dictionary.
 
     Parameters
     ----------
@@ -160,45 +163,10 @@ def _yaml_reader(file_path: Union[str, Path]) -> Dict:
         raise ValueError(
             "The configuration file must be a YAML file with .yaml or .yml extension."
         )
-    with open(file_path, "r") as file:
-        return yaml.safe_load(file)
+    # Expand environment variables in the file path
+    config_text = os.path.expandvars(Path(file_path).read_text())
 
-
-def config_reader(file_path: Union[str, Path]) -> Dict:
-    """Read a config file and apply example config path conventions."""
-    config = _yaml_reader(file_path)
-    if not isinstance(config, dict):
-        raise ValueError(
-            f"Configuration file {file_path} must contain a YAML mapping at the top level."
-        )
-    config_path = Path(file_path).resolve()
-    default_config_paths = (
-        _DEFAULT_CONFIGS_PATH.resolve(),
-        _DOCKER_DEFAULT_CONFIGS_PATH,
-    )
-    if config_path.parent not in default_config_paths:
-        return config
-
-    config = config.copy()
-    env_configs = []
-
-    if "environment" not in config:
-        env_configs = [config]
-    elif isinstance(config["environment"], dict):
-        env_config = config["environment"].copy()
-        config["environment"] = env_config
-        for section in ("training", "eval"):
-            if section in env_config and isinstance(env_config[section], dict):
-                env_config[section] = env_config[section].copy()
-                env_configs.append(env_config[section])
-        if not env_configs:
-            env_configs = [env_config]
-
-    for env_config in env_configs:
-        if "dataset_path" in env_config:
-            env_config["dataset_path"] = config_path.parent / env_config["dataset_path"]
-
-    return config
+    return yaml.safe_load(config_text)
 
 
 def _load_dataset(path: Union[str, Path]) -> Dict:
