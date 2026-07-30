@@ -1,4 +1,4 @@
-dataset_path: ../../data/examples/training_dataset.pkl  # Path to the dataset, can be a pickle or csv file
+dataset_path: ${AUTOREC_ROOT}/data/examples/training_dataset.pkl  # Path to the dataset, can be a pickle or csv file
 seed: 42
 chromosome_HEAD_len: 10
 # Cache configuration
