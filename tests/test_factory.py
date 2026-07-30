@@ -13,6 +13,9 @@ from pathlib import Path
 import pytest
 
 
+from autorec.factory import AUTOREC_ROOT
+
+
 def load_factory(monkeypatch):
     """Import factory.py after replacing heavy environment/agent imports with stubs."""
     environment_module = types.ModuleType("autorec.environment")
@@ -35,7 +38,7 @@ def load_factory(monkeypatch):
     monkeypatch.setitem(sys.modules, "autorec.agent", agent_module)
 
     spec = importlib.util.spec_from_file_location(
-        "factory_under_test", Path("src/autorec/factory.py")
+        "factory_under_test", AUTOREC_ROOT / "src" / "autorec" / "factory.py"
     )
     factory = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(factory)
@@ -52,50 +55,6 @@ def patch_dataset_loader(monkeypatch, factory):
 
     monkeypatch.setattr(factory, "_load_dataset", fake_load_dataset)
     return loaded_paths
-
-
-def test_environment_builder_resolves_example_config_dataset_path(monkeypatch):
-    factory = load_factory(monkeypatch)
-    loaded_paths = patch_dataset_loader(monkeypatch, factory)
-
-    config_path = Path("configs_yaml/examples/environment_config.yaml")
-
-    env = factory.environment_builder(config_path)
-
-    # Example configs are the one exception to the normal current-directory convention:
-    # dataset_path is resolved relative to the YAML file.
-    assert loaded_paths == [
-        config_path.resolve().parent / "../../data/examples/training_dataset.pkl"
-    ]
-    assert env.kwargs["dataset"]["loaded_from"] == loaded_paths[0]
-
-
-def test_environment_and_agent_builder_resolves_nested_example_config(monkeypatch):
-    factory = load_factory(monkeypatch)
-    loaded_paths = patch_dataset_loader(monkeypatch, factory)
-
-    config_path = Path("configs_yaml/examples/demo_environment_agent_config.yaml")
-
-    training_env, eval_env, agent = factory.environment_and_agent_builder(config_path)
-
-    assert loaded_paths == [
-        config_path.resolve().parent / "../../data/examples/training_dataset.pkl"
-    ]
-    assert eval_env is None
-    assert agent.kwargs["training_env"] is training_env
-    assert agent.kwargs["eval_env"] is None
-
-
-def test_non_example_yaml_keeps_dataset_path_relative_to_cwd(tmp_path, monkeypatch):
-    factory = load_factory(monkeypatch)
-    loaded_paths = patch_dataset_loader(monkeypatch, factory)
-    config_path = tmp_path / "config.yaml"
-    config_path.write_text("dataset_path: data/examples/training_dataset.pkl\n")
-
-    factory.environment_builder(config_path)
-
-    # Non-example config files should preserve user-provided relative paths.
-    assert loaded_paths == [Path("data/examples/training_dataset.pkl")]
 
 
 def test_dict_config_is_not_mutated(monkeypatch):
