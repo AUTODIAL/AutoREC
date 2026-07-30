@@ -4,8 +4,8 @@ precomputed scores that we can use to initially train Optuna.
 Usage:
 ```bash
     $ python runner.py \
-        --target-dir ./hyperparameter_tuning_results \
-        --base-config ./base_config.yaml \
+        --target-dir ./hyperparameter_tuning \
+        --base-config ${AUTOREC_ROOT}/configs_yaml/examples/environment_agent_config.yaml \
         --search-space ./search_space.yaml \
         --num-initial 5 \
         --num-iterations 10 \
@@ -35,6 +35,7 @@ from tuning_utils import (
     block_until_completed,
     compute_score,
 )
+from autorec.factory import AUTOREC_ROOT
 
 # For result visualization analysis
 import matplotlib
@@ -56,13 +57,13 @@ parser = argparse.ArgumentParser()
 parser.add_argument(
     "--target-dir",
     type=str,
-    default="./hyperparameter_tuning_results",
+    default="./hyperparameter_tuning",
     help="Target directory to store results",
 )
 parser.add_argument(
     "--base-config",
     type=str,
-    default="./base_config.yaml",
+    default=AUTOREC_ROOT / "configs_yaml" / "examples" / "environment_agent_config.yaml",
     help="Base configuration file to use for generating new configs",
 )
 parser.add_argument(
@@ -84,6 +85,7 @@ args = parser.parse_args()
 RESULTS_DIR = Path(args.target_dir)
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 configs_dir = RESULTS_DIR / "configs"
+JOB_NAME_PREFIX = RESULTS_DIR.name
 num_initial = args.num_initial
 batch_size = args.batch_size
 num_iterations = args.num_iterations
@@ -180,7 +182,7 @@ training_done = all([(SAMPLE_DIR / ff).exists() for ff in check_files])
 if not training_done:
     print("Submitting job for the original hyperparameter set...")
     sbatch_options = base_sbatch_options.copy()
-    sbatch_options["job_name"] = f"hyperparam_tuning_init_{config_id}"
+    sbatch_options["job_name"] = f"{JOB_NAME_PREFIX}_init_{config_id}"
     jobid = write_job_script(SAMPLE_DIR, python_file, config_file, sbatch_options, submit=True)
     # Block until all jobs are finished
     print("Waiting for all initial jobs to finish...")
@@ -217,7 +219,7 @@ for trial in trials:
     training_done = all([(SAMPLE_DIR / ff).exists() for ff in check_files])
     if not training_done:
         sbatch_options = base_sbatch_options.copy()
-        sbatch_options["job_name"] = f"hyperparam_tuning_init_{config_id}"
+        sbatch_options["job_name"] = f"{JOB_NAME_PREFIX}_init_{config_id}"
         jobid = write_job_script(
             SAMPLE_DIR, python_file, config_file, sbatch_options, submit=True
         )
@@ -265,7 +267,7 @@ for iteration in range(num_iterations - 1):
         training_done = all([(SAMPLE_DIR / ff).exists() for ff in check_files])
         if not training_done:
             sbatch_options = base_sbatch_options.copy()
-            sbatch_options["job_name"] = f"hyperparam_tuning_{config_id}"
+            sbatch_options["job_name"] = f"{JOB_NAME_PREFIX}_{config_id}"
             jobid = write_job_script(
                 SAMPLE_DIR, python_file, config_file, sbatch_options, submit=True
             )
