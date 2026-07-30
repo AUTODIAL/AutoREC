@@ -1,6 +1,7 @@
 """Tests for runtime setup helpers that prepare writable cache/config directories."""
 
 import os
+import sys
 from pathlib import Path
 
 from autorec.runtime import configure_autorec_runtime
@@ -22,7 +23,10 @@ def test_configure_autorec_runtime_sets_expected_environment(monkeypatch, tmp_pa
         thread_count=2, warmup_autoeis=False, suppress_tf_logs=True
     )
 
-    assert runtime_dir == tmp_path / ".cache" / "autorec_eis"
+    if sys.platform == "darwin":
+        assert runtime_dir == tmp_path / "Library" / "Caches" / "autorec_eis"
+    else:
+        assert runtime_dir == tmp_path / ".cache" / "autorec_eis"
     assert (runtime_dir / "julia_env").is_dir()
     assert (runtime_dir / "julia_depot").is_dir()
     assert (runtime_dir / "matplotlib").is_dir()
