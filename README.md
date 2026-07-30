@@ -142,7 +142,7 @@ Using the YAML configuration:
 from autorec.factory import environment_and_agent_builder
 
 env, eval_env, agent = environment_and_agent_builder(
-    "configs_yaml/examples/demo_environment_agent_config.yaml"
+    "PATH/configs_yaml/examples/demo_environment_agent_config.yaml"
 )
 
 agent.train()
@@ -204,12 +204,16 @@ values in the YAML files are treated as keyword arguments for instantiating `EIS
 and `DDQN_ECM`. Thus, any required argument for those classes should be included in the
 YAML file under the appropriate section.
 
-A slight difference is that the `dataset` argument for the environment is replaced by
-`dataset_path`. For normal configuration files and dictionaries, `dataset_path` is
-relative to the working directory. For the example configurations in
-`configs_yaml/examples/`, `dataset_path` is relative to the configuration file so
-the examples can be run from the repository root. The factory loads the dataset from
-that path and passes it to the environment constructor.
+The `dataset` argument for `EIS_ECM_Env` is handled differently. Instead of specifying
+`dataset` directly, provide a `dataset_path` to point to the processed dataset pickle
+file. The path can be specified as an absolute or path relative to wherever the script is
+run. The factory loads the dataset from this path and passes it to the environment
+constructor.
+
+> [!NOTE]
+> Configuration values may include the special environment variable
+> `${AUTOREC_ROOT}`, which refers to the root directory of the AutoREC repository.
+> The variable is expanded when the configuration file is loaded.
 
 Environment options:
 

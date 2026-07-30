@@ -34,7 +34,7 @@ from autorec.utils import save_evaluation_results, set_global_seed
 # This ensures reproducibility across numpy, tensorflow, and python random.
 set_global_seed(42, True)
 
-from autorec.factory import config_reader, environment_and_agent_builder
+from autorec.factory import AUTOREC_ROOT, config_reader, environment_and_agent_builder
 
 
 # THREADING CONFIGURATION
@@ -52,10 +52,7 @@ parser.add_argument(
     "-c",
     type=str,
     default=str(
-        Path(__file__).resolve().parents[1]
-        / "configs_yaml"
-        / "examples"
-        / "demo_environment_agent_config.yaml"
+        AUTOREC_ROOT / "configs_yaml" / "examples" / "demo_environment_agent_config.yaml"
     ),
     help="Path to the YAML configuration file for the environment and agent.",
 )
@@ -71,6 +68,7 @@ args = parser.parse_args()
 
 CONFIG_FILE = Path(args.config)
 configs = config_reader(CONFIG_FILE)
+print(f"Loaded configuration from {CONFIG_FILE}:")
 pprint(configs, sort_dicts=False)
 
 # Evaluation settings for this example script.
