@@ -9,7 +9,7 @@ environment:
 
 agent:
   # Saving the results
-  save_dir: ./demo_output
+  save_dir: /app/results
   save_start: 0
   save_frequency: 100
 
