@@ -164,7 +164,8 @@ class DDQN_ECM:
             Maximum number of experiences stored in the replay buffer.
 
         optimizer_type : Union[str, tf.keras.optimizers.Optimizer], optional
-            Optimizer used for training the neural network.
+            Optimizer used for training the neural network. Currently, only 'adam' is supported
+            as a string. Alternatively, a custom optimizer object can be provided.
 
         prioritized_replay_alpha : float, optional
             Exponent controlling how strongly sampling prioritizes large TD errors.
@@ -348,7 +349,7 @@ class DDQN_ECM:
         else:
             return "unknown"
 
-    def _setup_model(self, model, hidden_layers) -> None:
+    def _setup_model(self, model: Optional[str], hidden_layers: List[Tuple[int, str]]) -> None:
         """
         Load or create and initialize the neural network architecture for the DDQN agent.
 
@@ -360,6 +361,19 @@ class DDQN_ECM:
 
         The Double DQN (DDQN) algorithm uses two networks to reduce overestimation
         of Q-values, which leads to more stable and accurate learning.
+
+        Parameters
+        ----------
+        model : str, optional
+            Path to a pre-trained model file. If provided, the model will be loaded from disk,
+            then information about the hidden layers will be extracted from the loaded model.
+            This can be used as a starting point for further training or evaluation.
+            If not provided, a new model will be created based on the hidden_layers
+            configuration, with randomly initialized weights.
+        hidden_layers : list of tuples
+            Each tuple specifies (num_neurons, activation_function) for a hidden layer.
+            Example: [(40, 'relu'), (40, 'relu')] creates two hidden layers with 40 neurons
+            each and ReLU activation.
 
         Notes
         -----

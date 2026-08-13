@@ -376,6 +376,8 @@ autorec train \
 Use `autorec evaluate` to load a trained model and evaluate generated ECMs for
 selected rows, a random sample, or the full dataset.
 
+**Note:** The argument `--model` takes precedence over the `model` key inside the YAML configuration. If both are provided, the CLI uses the model path specified by `--model`.
+
 Evaluate specific row positions:
 
 ```bash
