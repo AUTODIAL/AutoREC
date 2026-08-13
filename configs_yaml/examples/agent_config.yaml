@@ -24,6 +24,9 @@ start_decay: 10  # the start trial to decay the epsilon
 bayesian: false  # If True, the analysis of the posterior distribution added as a bonus to the reward formulation
 
 # NN hyperparameters
+hidden_layers:  # specification of Dense NN layers
+  - [40, relu]
+  - [40, relu]
 learning_rate: 0.0005  # for optimization of the NN
 batch_size: 150  # training size for the main network
 train_frequency: 5  # train the main model every `train_frequency` steps
