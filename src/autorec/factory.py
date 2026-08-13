@@ -8,6 +8,7 @@ evaluation environments.
 """
 
 from pathlib import Path
+import os
 from typing import Union, Dict
 import yaml
 import pandas as pd
@@ -16,50 +17,23 @@ from autorec.environment import EIS_ECM_Env
 from autorec.agent import DDQN_ECM
 
 
-def _yaml_reader(file_path: Union[str, Path]) -> Dict:
-    """Read a YAML file and return its contents as a dictionary.
-
-    Parameters
-    ----------
-    file_path : Union[str, Path]
-        Path to the YAML file.
-
-    Returns
-    -------
-    Dict
-        Contents of the YAML file as a dictionary.
-    """
-    if not Path(file_path).exists():
-        raise FileNotFoundError(f"The configuration file {file_path} does not exist.")
-    if Path(file_path).suffix not in [".yaml", ".yml"]:
-        raise ValueError(
-            "The configuration file must be a YAML file with .yaml or .yml extension."
-        )
-    with open(file_path, "r") as file:
-        return yaml.safe_load(file)
-
-
-# Load default values from a YAML file, in case of missing parameters, in which case we will
-# just fill in using the defaults.
-_DEFAULT_ENV_CONFIG_PATH = (
-    Path(__file__).parent / "default_configs" / "environment_config.yaml"
-)
-_DEFAULT_AGENT_CONFIG_PATH = Path(__file__).parent / "default_configs" / "agent_config.yaml"
-default_env_config = _yaml_reader(_DEFAULT_ENV_CONFIG_PATH)
-default_agent_config = _yaml_reader(_DEFAULT_AGENT_CONFIG_PATH)
-default_env_agent_config = {
-    "environment": default_env_config,
-    "agent": default_agent_config,
-}
+# Define AUTOREC_ROOT environment variable, which points to the root directory of the AutoREC
+# package. This environment variable will be used by the provided example configuration files.
+AUTOREC_ROOT = Path(__file__).resolve().parents[2]
+os.environ["AUTOREC_ROOT"] = str(AUTOREC_ROOT)
 
 
 def environment_builder(args: Union[str, Path, Dict]) -> EIS_ECM_Env:
     """Build an EIS_ECM_Env environment from configuration.
 
-    Note: If all configurations or parameters are not provided in the YAML,
-    the factory will read the missing values from the default config files.
-    The default environment config is stored in environment_config.yaml in the
-    src/autorec/default_configs folder.
+    The configurations provided will be treated as keyword arguments for instantiating
+    EIS_ECM_Env. Thus, any required parameters for EIS_ECM_Env must be included in the
+    configuration, and any optional parameters not included will be set to their default
+    values as defined in EIS_ECM_Env.
+
+    Note: The dataset_path parameter is required, and the factory will load the dataset from
+    the specified path and include it in the environment configuration as a pd.DataFrame.
+    The dataset file must be in .csv or .pkl format.
 
     Parameters
     ----------
@@ -72,23 +46,29 @@ def environment_builder(args: Union[str, Path, Dict]) -> EIS_ECM_Env:
         An instance of the EIS_ECM_Env environment.
     """
     if isinstance(args, (str, Path)):
-        config = _yaml_reader(args)
+        config = config_reader(args)
     elif isinstance(args, dict):
-        config = args
+        config = args.copy()
     else:
         raise TypeError("The 'args' parameter must be a str, Path, or dict.")
 
-    # Insert default values for missing parameters
-    config = _insert_defaults(config, default_env_config)
     # Deal with the dataset argument
-    dataset_path = config.pop("dataset_path")
+    try:
+        dataset_path = config.pop("dataset_path")
+    except KeyError:
+        raise KeyError(
+            "The environment configuration must include a 'dataset_path' key (path to a .csv or .pkl dataset). "
+            "For regular configs, this path is resolved relative to the current working directory; "
+            "configs under configs_yaml/examples (and /app/configs_yaml/examples in Docker) are resolved relative to the config file."
+        )
     dataset = _load_dataset(dataset_path)
     config["dataset"] = dataset
 
     return EIS_ECM_Env(**config)
 
 
-# It doesn't make sense to have just agent_builder, since the agent needs an environment.
+# It doesn't make sense to have just agent_builder, since the agent needs an environment
+# instance.
 def environment_and_agent_builder(
     args: Union[str, Path, Dict],
 ) -> (EIS_ECM_Env, EIS_ECM_Env, DDQN_ECM):
@@ -96,10 +76,14 @@ def environment_and_agent_builder(
 
     The configuration needs to have "environment" and "agent" sections.
 
-    Note: If all configurations or parameters are not provided in the YAML,
-    the factory will read the missing values from the default config files.
-    The default configs are stored in environment_config.yaml and agent_config.yaml
-    in the src/autorec/default_configs folder.
+    The configurations provided will be treated as keyword arguments for instantiating
+    EIS_ECM_Env and DDQN_ECM. Thus, any required parameters for those classes must be included
+    in the configuration, and any optional parameters not included will be set to their default
+    values.
+
+    Note: The dataset_path parameter is required for the environment configuration, and the
+    factory will load the dataset from the specified path and include it in the environment
+    configuration as a pd.DataFrame. The dataset file must be in .csv or .pkl format.
 
     Parameters
     ----------
@@ -113,9 +97,9 @@ def environment_and_agent_builder(
         evaluation, in which the latter can be None) and the DDQN_ECM agent.
     """
     if isinstance(args, (str, Path)):
-        config = _yaml_reader(args)
+        config = config_reader(args)
     elif isinstance(args, dict):
-        config = args
+        config = args.copy()
     else:
         raise TypeError("The 'args' parameter must be a str, Path, or dict.")
 
@@ -148,8 +132,9 @@ def environment_and_agent_builder(
         raise KeyError("The configuration must include an 'agent' section.")
     print("Creating agent...")
     agent_config = config["agent"]
-    # Insert default values for missing parameters
-    agent_config = _insert_defaults(agent_config, default_agent_config)
+    if agent_config is None:
+        print("Warning: The 'agent' section is empty. Using DDQN_ECM constructor defaults.")
+        agent_config = {}
     # Insert the environment(s) into the agent configuration
     agent_config["training_env"] = training_env
     agent_config["eval_env"] = eval_env
@@ -159,27 +144,29 @@ def environment_and_agent_builder(
     return training_env, eval_env, agent
 
 
-def _insert_defaults(config: Dict, default_config: Dict) -> Dict:
-    """Insert default values into the configuration dictionary for any missing keys.
+def config_reader(file_path: Union[str, Path]) -> Dict:
+    """Read a YAML configuration file and return its contents as a dictionary.
 
     Parameters
     ----------
-    config : Dict
-        The configuration dictionary to be filled with defaults.
-    default_config : Dict
-        The default configuration dictionary.
+    file_path : Union[str, Path]
+        Path to the YAML file.
 
     Returns
     -------
     Dict
-        The configuration dictionary with defaults inserted.
+        Contents of the YAML file as a dictionary.
     """
-    for key, value in default_config.items():
-        if key not in config:
-            config[key] = value
-        elif isinstance(value, dict):
-            config[key] = _insert_defaults(config.get(key, {}), value)
-    return config
+    if not Path(file_path).exists():
+        raise FileNotFoundError(f"The configuration file {file_path} does not exist.")
+    if Path(file_path).suffix not in [".yaml", ".yml"]:
+        raise ValueError(
+            "The configuration file must be a YAML file with .yaml or .yml extension."
+        )
+    # Expand environment variables in the file path
+    config_text = os.path.expandvars(Path(file_path).read_text())
+
+    return yaml.safe_load(config_text)
 
 
 def _load_dataset(path: Union[str, Path]) -> Dict:

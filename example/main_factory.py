@@ -6,7 +6,7 @@ agent configuration from a YAML file instead of specifying it directly in code.
 
 Workflow:
 ---------
-1. Read YAML configuration
+1. Read YAML configuration (either from CLI or hardcoded path)
 2. Build environment and agent from configuration
 3. Train agent for the configured number of trials
 4. Save trained model
@@ -16,6 +16,8 @@ Workflow:
 
 import datetime
 from pathlib import Path
+import argparse
+from pprint import pprint
 
 from autorec.runtime import configure_autorec_runtime
 
@@ -32,7 +34,7 @@ from autorec.utils import save_evaluation_results, set_global_seed
 # This ensures reproducibility across numpy, tensorflow, and python random.
 set_global_seed(42, True)
 
-from autorec.factory import _yaml_reader, environment_and_agent_builder
+from autorec.factory import AUTOREC_ROOT, config_reader, environment_and_agent_builder
 
 
 # THREADING CONFIGURATION
@@ -44,13 +46,34 @@ from autorec.factory import _yaml_reader, environment_and_agent_builder
 # 1. CONFIGURATION
 # ============================================================================
 # All environment and agent hyperparameters come from this YAML file.
-CONFIG_FILE = "../default_configs/demo_environment_agent_config.yaml"
-config = _yaml_reader(CONFIG_FILE)
+parser = argparse.ArgumentParser(description="Run AutoREC with YAML configuration")
+parser.add_argument(
+    "--config",
+    "-c",
+    type=str,
+    default=str(
+        AUTOREC_ROOT / "configs_yaml" / "examples" / "demo_environment_agent_config.yaml"
+    ),
+    help="Path to the YAML configuration file for the environment and agent.",
+)
+parser.add_argument(
+    "--run-mode",
+    "-r",
+    type=str,
+    default="quick",
+    choices=["quick", "full"],
+    help="Evaluation mode: 'quick' for a small sample, 'full' for comprehensive evaluation.",
+)
+args = parser.parse_args()
+
+CONFIG_FILE = Path(args.config)
+configs = config_reader(CONFIG_FILE)
+print(f"Loaded configuration from {CONFIG_FILE}:")
+pprint(configs, sort_dicts=False)
 
 # Evaluation settings for this example script.
 # Training length is controlled by the YAML file's agent.num_trials value.
-RUN_MODE = "quick"
-# RUN_MODE = "full"
+RUN_MODE = args.run_mode
 
 if RUN_MODE == "quick":
     EVAL_SAMPLE_SIZE = 20  # Evaluate on 20 random EIS
@@ -58,11 +81,6 @@ elif RUN_MODE == "full":
     EVAL_SAMPLE_SIZE = 100  # More comprehensive evaluation
 else:
     raise ValueError(f"Invalid RUN_MODE: {RUN_MODE}. Use 'quick' or 'full'")
-
-# Directory structure for outputs is read from the YAML agent configuration.
-SAVE_DIR = Path(config["agent"]["save_dir"])
-MODEL_SAVE_DIR = SAVE_DIR / Path("models")  # Trained neural networks
-RESULTS_SAVE_DIR = SAVE_DIR / Path("results")  # Evaluation DataFrames
 
 # ============================================================================
 # 2. ENVIRONMENT AND AGENT SETUP
@@ -87,6 +105,11 @@ if eval_env is not None:
 # Check if a trained model already exists.
 # If yes: load it and skip training (useful for evaluation only).
 # If no: train a new model from scratch.
+
+# Directory structure for outputs.
+SAVE_DIR = agent.save_dir  # Base directory for this agent's outputs
+MODEL_SAVE_DIR = SAVE_DIR / Path("models")  # Trained neural networks
+RESULTS_SAVE_DIR = SAVE_DIR / Path("results")  # Evaluation DataFrames
 
 final_model_file = SAVE_DIR / "dqn_model.keras"
 run_id = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")

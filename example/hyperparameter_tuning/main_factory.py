@@ -10,7 +10,7 @@ configure_autorec_runtime(thread_count=1, warmup_autoeis=True, suppress_tf_logs=
 from autorec.utils import set_global_seed
 
 set_global_seed(42, True)
-from autorec.factory import environment_and_agent_builder
+from autorec.factory import AUTOREC_ROOT, environment_and_agent_builder
 
 
 print("#" * 55)
@@ -23,7 +23,7 @@ parser.add_argument(
     "--config",
     "-c",
     type=str,
-    default="default_configs/test_environment_agent_config.yaml",
+    default=AUTOREC_ROOT / "configs_yaml" / "examples" / "environment_agent_config.yaml",
     help="Path to the YAML configuration file.",
 )
 args = parser.parse_args()
