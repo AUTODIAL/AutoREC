@@ -27,6 +27,18 @@ def _parse_indices(raw_indices: str | None) -> list[int] | None:
     return [int(item) for item in indices if item]
 
 
+def _parse_optional_float(raw_value: str) -> float | None:
+    """Parse a float CLI value, allowing ``none`` or ``null`` for an unset bound."""
+    if raw_value.lower() in {"none", "null"}:
+        return None
+    try:
+        return float(raw_value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            f"Expected a number, 'none', or 'null'; got {raw_value!r}."
+        ) from exc
+
+
 def _read_config_with_overrides(config_path: Path, output_dir: Path | None = None) -> dict:
     """Read a YAML config and apply CLI overrides that should win over YAML values."""
     from autorec.factory import config_reader
@@ -49,6 +61,10 @@ def _run_preprocess(args: argparse.Namespace) -> int:
         path=args.input,
         mode=args.mode,
         evaluation=args.evaluation,
+        perform_linKK_validation=args.perform_linKK_validation,
+        tol_linKK=args.tol_linKK,
+        frequency_bounds=args.frequency_bounds,
+        frequency_npoints=args.frequency_npoints,
         eis_features=args.eis_features,
     )
     prep.load()
@@ -66,13 +82,13 @@ def _run_train(args: argparse.Namespace) -> int:
     """Run DDQN training from a YAML configuration."""
     _configure_runtime(args)
 
-    from autorec.factory import environment_and_agent_builder
+    from autorec.factory import pipeline_builder
     from autorec.utils import set_global_seed
 
     set_global_seed(args.seed, deterministic_ops=not args.non_deterministic)
 
     config = _read_config_with_overrides(args.config, args.output_dir)
-    _, _, agent = environment_and_agent_builder(config)
+    _, _, _, _, agent = pipeline_builder(config)
     agent.train()
 
     return 0
@@ -82,13 +98,13 @@ def _run_evaluate(args: argparse.Namespace) -> int:
     """Run evaluation or inference for selected EIS rows."""
     _configure_runtime(args)
 
-    from autorec.factory import environment_and_agent_builder
+    from autorec.factory import pipeline_builder
     from autorec.utils import save_evaluation_results, set_global_seed
 
     set_global_seed(args.seed, deterministic_ops=not args.non_deterministic)
 
     config = _read_config_with_overrides(args.config, args.output_dir)
-    _, _, agent = environment_and_agent_builder(config)
+    _, _, _, _, agent = pipeline_builder(config)
     if args.model is not None:
         agent.load_model(args.model)
 
@@ -187,6 +203,32 @@ def _build_parser() -> argparse.ArgumentParser:
         "--evaluation",
         action="store_true",
         help="Require ground-truth circuit labels for evaluation datasets.",
+    )
+    preprocess.add_argument(
+        "--perform-linkk-validation",
+        dest="perform_linKK_validation",
+        action="store_true",
+        help="Run lin-KK preprocessing before frequency interpolation.",
+    )
+    preprocess.add_argument(
+        "--tol-linkk",
+        dest="tol_linKK",
+        type=float,
+        default=5e-2,
+        help="Tolerance used for lin-KK preprocessing (default: 0.05).",
+    )
+    preprocess.add_argument(
+        "--frequency-bounds",
+        nargs=2,
+        type=_parse_optional_float,
+        default=(None, None),
+        metavar=("LOWER", "UPPER"),
+        help="Shared interpolation bounds; use 'none' for a data-specific minimum or maximum.",
+    )
+    preprocess.add_argument(
+        "--frequency-npoints",
+        type=int,
+        help="Number of points in each interpolated frequency grid.",
     )
     preprocess.add_argument(
         "--eis-features",
