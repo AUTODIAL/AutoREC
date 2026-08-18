@@ -27,6 +27,21 @@ def make_processed_dataset():
     )
 
 
+def write_raw_csv(path, freq, *, z_real=None, z_imag=None):
+    """Write a raw spectrum, with linear defaults for both impedance components."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    freq = np.asarray(freq, dtype=float)
+    z_real = freq if z_real is None else np.asarray(z_real, dtype=float)
+    z_imag = 2 * freq if z_imag is None else np.asarray(z_imag, dtype=float)
+    pd.DataFrame(
+        {
+            "freq": freq,
+            "Z_real": z_real,
+            "Z_imag": z_imag,
+        }
+    ).to_csv(path, index=False)
+
+
 def test_normalize_eis_returns_expected_min_max_scaled_values():
     z = np.array([1 + 10j, 2 + 20j, 3 + 40j])
 
@@ -60,6 +75,41 @@ def test_interpolate_eis_handles_unsorted_input_and_output_frequencies():
 
     np.testing.assert_allclose(interpolated.real, freq_new)
     np.testing.assert_allclose(interpolated.imag, 2 * freq_new)
+
+
+@pytest.mark.parametrize("frequency_bounds", [(10.0, 1_000.0), [10.0, 1_000.0]])
+def test_process_mode_accepts_single_frequency_bounds_pair(tmp_path, frequency_bounds):
+    raw_path = tmp_path / "raw"
+    raw_path.mkdir()
+
+    prep = EISDataPrep(
+        raw_path,
+        mode="process",
+        perform_linKK_validation=True,
+        tol_linKK=0.01,
+        frequency_bounds=frequency_bounds,
+        frequency_npoints=7,
+    )
+
+    assert prep.perform_linKK_validation is True
+    assert prep.tol_linKK == 0.01
+    assert prep.frequency_bounds == frequency_bounds
+    assert prep.frequency_npoints == 7
+
+
+@pytest.mark.parametrize(
+    "frequency_bounds",
+    [
+        (1.0, 10.0, 100.0),
+        [(1.0, 10.0), (10.0, 100.0)],
+    ],
+)
+def test_process_mode_rejects_frequency_bounds_with_wrong_shape(tmp_path, frequency_bounds):
+    raw_path = tmp_path / "raw"
+    raw_path.mkdir()
+
+    with pytest.raises(ValueError, match="frequency_bounds must be"):
+        EISDataPrep(raw_path, mode="process", frequency_bounds=frequency_bounds)
 
 
 def test_get_circuit_from_folder_uses_parent_folder_name(tmp_path):
@@ -149,18 +199,83 @@ def test_save_requires_loaded_dataset(tmp_path):
         prep.save(tmp_path / "out.pkl")
 
 
-def test_process_raw_csv_builds_processed_dataset(tmp_path, monkeypatch):
+def test_process_raw_data_rejects_folder_without_csv_files(tmp_path):
+    base_path = tmp_path / "raw"
+    base_path.mkdir()
+    prep = EISDataPrep(base_path, mode="process")
+
+    with pytest.raises(ValueError, match="No CSV files found"):
+        prep.load()
+
+
+def test_interpolation_validation_defaults_to_consistent_processed_length(tmp_path):
+    base_path = tmp_path / "raw"
+    write_raw_csv(base_path / "R0" / "first.csv", [1.0, 10.0, 100.0, 1_000.0])
+    write_raw_csv(base_path / "R1" / "second.csv", [1.0, 10.0, 100.0, 1_000.0])
+    prep = EISDataPrep(base_path, mode="process")
+    processed_data = [
+        (np.array([1.0, 10.0, 100.0]), np.ones(3, dtype=complex)),
+        (np.array([2.0, 20.0, 200.0]), np.ones(3, dtype=complex)),
+    ]
+
+    prep._validate_interpolation_parameters_after_linKK(processed_data)
+
+    assert prep.frequency_npoints == 3
+
+
+def test_interpolation_validation_requires_npoints_for_inconsistent_processed_lengths(
+    tmp_path,
+):
+    base_path = tmp_path / "raw"
+    write_raw_csv(base_path / "R0" / "first.csv", [1.0, 10.0, 100.0])
+    write_raw_csv(base_path / "R1" / "second.csv", [1.0, 10.0, 100.0, 1_000.0])
+    prep = EISDataPrep(base_path, mode="process")
+    processed_data = [
+        (np.array([1.0, 10.0, 100.0]), np.ones(3, dtype=complex)),
+        (np.array([1.0, 10.0, 100.0, 1_000.0]), np.ones(4, dtype=complex)),
+    ]
+
+    with pytest.raises(ValueError, match="specify 'frequency_npoints'"):
+        prep._validate_interpolation_parameters_after_linKK(processed_data)
+
+
+@pytest.mark.parametrize(
+    ("frequency_bounds", "processed_frequencies"),
+    [
+        ((5.0, None), ([1.0, 10.0, 100.0], [10.0, 100.0, 1_000.0])),
+        ((None, 2_000.0), ([1.0, 100.0, 3_000.0], [1.0, 100.0, 1_000.0])),
+    ],
+)
+def test_interpolation_validation_checks_shared_bounds_against_every_spectrum(
+    tmp_path, frequency_bounds, processed_frequencies
+):
+    base_path = tmp_path / "raw"
+    base_path.mkdir()
+    prep = EISDataPrep(
+        base_path,
+        mode="process",
+        frequency_bounds=frequency_bounds,
+        frequency_npoints=3,
+    )
+    processed_data = [
+        (np.array(freq), np.ones(3, dtype=complex)) for freq in processed_frequencies
+    ]
+
+    with pytest.raises(ValueError, match="Cannot do extrapolation"):
+        prep._validate_interpolation_parameters_after_linKK(processed_data)
+
+
+def test_process_raw_csv_without_linkk_interpolates_dataset(tmp_path, monkeypatch):
     base_path = tmp_path / "raw"
     csv_path = base_path / "R0-[R1,P2]" / "sample.csv"
-    csv_path.parent.mkdir(parents=True)
-    pd.DataFrame(
-        {
-            "freq": [1.0, 10.0, 100.0],
-            "Z_real": [1.0, 2.0, 3.0],
-            "Z_imag": [1.0, 2.0, 4.0],
-        }
-    ).to_csv(csv_path, index=False)
+    raw_freq = np.array([1.0, 10.0, 100.0, 1_000.0])
+    raw_impedance = raw_freq + 1j * raw_freq**2
+    write_raw_csv(csv_path, raw_freq, z_imag=raw_impedance.imag)
 
+    monkeypatch.setattr(
+        "autorec.data_preparation.ae.utils.preprocess_impedance_data",
+        lambda *args, **kwargs: pytest.fail("Lin-KK preprocessing should be disabled"),
+    )
     monkeypatch.setattr(
         EISDataPrep, "calculate_thresholds", lambda self, freq, z: (0.01, 0.95)
     )
@@ -168,14 +283,65 @@ def test_process_raw_csv_builds_processed_dataset(tmp_path, monkeypatch):
         "autorec.data_preparation.ae.parser.validate_circuit", lambda circuit: True
     )
 
-    prep = EISDataPrep(base_path, mode="process")
+    prep = EISDataPrep(
+        base_path,
+        mode="process",
+        frequency_bounds=(10.0, 1_000.0),
+        frequency_npoints=3,
+        eis_features=["ReZ", "ImZ"],
+    )
     dataset = prep.load()
 
     assert len(dataset) == 1
     row = dataset.iloc[0]
     assert row["sub_id"] == "R0-[R1,P2]/sample.csv"
     assert row["true_circuit"] == "R0-[R1,P2]"
-    np.testing.assert_allclose(row["freq"], np.array([1.0, 10.0, 100.0]))
-    np.testing.assert_allclose(row["Z_true"], np.array([1 + 1j, 2 + 2j, 3 + 4j]))
+    expected_freq = np.array([10.0, 100.0, 1_000.0])
+    np.testing.assert_allclose(row["freq"], expected_freq)
+    np.testing.assert_allclose(row["Z_true"], expected_freq + 1j * expected_freq**2)
+    assert len(row["flatten_Z"]) == 2 * len(expected_freq)
     assert row["chi_thresh"] == 0.01
     assert row["r2_thresh"] == 0.95
+
+
+def test_process_raw_csv_with_linkk_preprocesses_before_interpolation(tmp_path, monkeypatch):
+    base_path = tmp_path / "raw"
+    csv_path = base_path / "R0-[R1,P2]" / "sample.csv"
+    raw_freq = np.array([1.0, 10.0, 100.0, 1_000.0])
+    raw_impedance = raw_freq + 1j * raw_freq**2
+    write_raw_csv(csv_path, raw_freq, z_imag=raw_impedance.imag)
+    preprocess_calls = []
+
+    def fake_preprocess(freq, impedance, tol_linKK):
+        preprocess_calls.append((freq.copy(), impedance.copy(), tol_linKK))
+        return freq[1:], impedance[1:]
+
+    monkeypatch.setattr(
+        "autorec.data_preparation.ae.utils.preprocess_impedance_data", fake_preprocess
+    )
+    monkeypatch.setattr(
+        EISDataPrep, "calculate_thresholds", lambda self, freq, z: (0.01, 0.95)
+    )
+    monkeypatch.setattr(
+        "autorec.data_preparation.ae.parser.validate_circuit", lambda circuit: True
+    )
+
+    prep = EISDataPrep(
+        base_path,
+        mode="process",
+        perform_linKK_validation=True,
+        tol_linKK=0.02,
+        frequency_bounds=(10.0, 1_000.0),
+        frequency_npoints=3,
+        eis_features=["ReZ", "ImZ"],
+    )
+    dataset = prep.load()
+
+    row = dataset.iloc[0]
+    expected_freq = np.array([10.0, 100.0, 1_000.0])
+    np.testing.assert_allclose(row["freq"], expected_freq)
+    np.testing.assert_allclose(row["Z_true"], expected_freq + 1j * expected_freq**2)
+    assert len(preprocess_calls) == 1
+    np.testing.assert_allclose(preprocess_calls[0][0], raw_freq)
+    np.testing.assert_allclose(preprocess_calls[0][1], raw_impedance)
+    assert preprocess_calls[0][2] == 0.02
