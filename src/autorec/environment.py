@@ -145,7 +145,7 @@ class EIS_ECM_Env:
 
         self._all_start_states = initial_state
         self.EIS_measurement_size = len(dataset.loc[0, "Z_true"])
-        self.EIS_INPUT_SZE = len(dataset.loc[0, "flatten_Z"])
+        self.EIS_INPUT_SIZE = len(dataset.loc[0, "flatten_Z"])
         self.chromosome_HEAD_len = chromosome_HEAD_len
         self.chromosome_TAIL_len = self.chromosome_HEAD_len * (self._N_MAX - 1) + 1
         self.chromosome_len = self.chromosome_HEAD_len + self.chromosome_TAIL_len

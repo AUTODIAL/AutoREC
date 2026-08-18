@@ -384,7 +384,7 @@ class DDQN_ECM:
             len(self._active_env.ELEMENTS_EXTENDED),
             len(self._active_env.ELEMENTS),
         )
-        eis_input_len = self._active_env.EIS_INPUT_SZE
+        eis_input_len = self._active_env.EIS_INPUT_SIZE
 
         state_shape = (HEAD_len + TAIL_len) * elems_extended_len + eis_input_len
         n_actions = 2 + (HEAD_len - 1) * elems_len + (TAIL_len) * (elems_len - 2)
