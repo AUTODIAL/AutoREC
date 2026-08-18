@@ -1,7 +1,33 @@
+dataprep:
+  path: ${AUTOREC_ROOT}/data/examples/training_dataset.pkl  # Path to dataset file or folder
+  mode: load  # Use "process" to preprocess data, e.g. a folder containing .csv files
+  evaluation: false
+
+  # For lin-KK preprocessing
+  tol_linKK: 5.0E-2
+
+  # For frequency-based interpolation
+  perform_linKK_validation: false
+  frequency_bounds:
+    - null
+    - null
+  frequency_npoints: null
+
+  # EIS features to include in the flatten_Z representation
+  eis_features:
+    - ImZ
+    - phi
+    - mag
+    - nphi
+
 environment:
-  dataset_path: /app/data/examples/training_dataset.pkl  # Path to the dataset, can be a pickle or csv file
+  initial_state:
+    - +RRRRRR
+    - ++RRRRRR
+    - +++RRRRRR
   seed: 42
   chromosome_HEAD_len: 10
+
   # Cache configuration
   cache_enabled: true
   cache_capacity: 20000
@@ -9,16 +35,16 @@ environment:
 
 agent:
   # Saving the results
-  save_dir: /app/results
+  save_dir: ./
   save_start: 0
-  save_frequency: 100
+  save_frequency: 500
 
   # Simulation parameters
   action_cap: null  # After action_cap actions, start_state is seen again.
   random_seed: 42
 
   # RL parameters
-  num_trials: 50
+  num_trials: 1000
   episodes_trial: 1  # The initial state is visited num_episodes times
   gamma: 0.99  # Discount factor: close to 1 values future states highly, close to 0 values immediate states in path more
   continuous_deadloop: 2  # Performes n repetitive actions. Note that the deadloop is detected only after NN_sleep.
