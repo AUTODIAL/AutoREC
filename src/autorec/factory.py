@@ -22,7 +22,7 @@ from autorec.agent import DDQN_ECM
 # Define AUTOREC_ROOT environment variable, which points to the root directory of the AutoREC
 # package. This environment variable will be used by the provided example configuration files.
 AUTOREC_ROOT = Path(__file__).resolve().parents[2]
-os.environ["AUTOREC_ROOT"] = str(AUTOREC_ROOT)
+os.environ.setdefault("AUTOREC_ROOT", str(AUTOREC_ROOT))
 
 
 def config_reader(file_path: Union[str, Path]) -> Dict:
@@ -44,7 +44,7 @@ def config_reader(file_path: Union[str, Path]) -> Dict:
         raise ValueError(
             "The configuration file must be a YAML file with .yaml or .yml extension."
         )
-    # Expand environment variables in the file path
+    # Expand environment variables in the config file
     config_text = os.path.expandvars(Path(file_path).read_text())
 
     config = yaml.safe_load(config_text)
