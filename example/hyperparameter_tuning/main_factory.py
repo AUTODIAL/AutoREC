@@ -10,7 +10,7 @@ configure_autorec_runtime(thread_count=1, warmup_autoeis=True, suppress_tf_logs=
 from autorec.utils import set_global_seed
 
 set_global_seed(42, True)
-from autorec.factory import AUTOREC_ROOT, environment_and_agent_builder
+from autorec.factory import AUTOREC_ROOT, pipeline_builder
 
 
 print("#" * 55)
@@ -23,7 +23,7 @@ parser.add_argument(
     "--config",
     "-c",
     type=str,
-    default=AUTOREC_ROOT / "configs_yaml" / "examples" / "environment_agent_config.yaml",
+    default=AUTOREC_ROOT / "configs_yaml" / "examples" / "pipeline_config.yaml",
     help="Path to the YAML configuration file.",
 )
 args = parser.parse_args()
@@ -34,7 +34,7 @@ print("Configuration file:", CONFIG_FILE, "\n")
 print("MAIN CALCULATION - TRAIN THE AGENT")
 # Create environment and agent. We assume the data are already prepared, so we don't need
 # to call EISDataPrep.
-env, _, agent = environment_and_agent_builder(CONFIG_FILE)
+dataprep, _, env, _, agent = pipeline_builder(CONFIG_FILE)
 final_model_file = agent.save_dir / "dqn_model.keras"
 if final_model_file.exists():
     print(f"Loading existing model from {final_model_file}...")
