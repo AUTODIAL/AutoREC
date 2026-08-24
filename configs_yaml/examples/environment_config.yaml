@@ -1,0 +1,12 @@
+dataset: ${AUTOREC_ROOT}/data/examples/training_dataset.pkl  # Path to .pkl dataset file
+initial_state:
+  - +RRRRRR
+  - ++RRRRRR
+  - +++RRRRRR
+seed: 42
+chromosome_HEAD_len: 10
+
+# Cache configuration
+cache_enabled: true
+cache_capacity: 20000
+cache_type: lru  # lru or clock

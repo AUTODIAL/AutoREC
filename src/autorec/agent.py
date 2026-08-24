@@ -1,4 +1,4 @@
-from typing import Optional, Dict, Union, Any
+from typing import Optional, List, Tuple, Dict, Union, Any
 from pathlib import Path
 
 import pandas as pd
@@ -53,6 +53,8 @@ class DDQN_ECM:
         start_decay: int = 10,
         bayesian: bool = False,
         # NN hyperparameters
+        model: Optional[str] = None,
+        hidden_layers: Optional[List[Tuple[int, str]]] = None,
         learning_rate: float = 0.0005,
         batch_size: int = 150,
         train_frequency: int = 5,
@@ -137,6 +139,13 @@ class DDQN_ECM:
             If True, a Bayesian posterior-based bonus is added to the reward. This option is
             currently retained for compatibility and is not active in the reward calculation.
 
+        model : str, optional
+            Path to a pre-trained model to load. This argument takes precedence over creating
+            a new model from the hidden_layers configuration.
+
+        hidden_layers: list of tuples, optional
+            List of [num_neurons, activation_function] for each hidden layer.
+
         learning_rate : float, optional
             Learning rate used by the neural network optimizer.
 
@@ -160,7 +169,8 @@ class DDQN_ECM:
             Maximum number of experiences stored in the replay buffer.
 
         optimizer_type : Union[str, tf.keras.optimizers.Optimizer], optional
-            Optimizer used for training the neural network.
+            Optimizer used for training the neural network. Currently, only 'adam' is supported
+            as a string. Alternatively, a custom optimizer object can be provided.
 
         prioritized_replay_alpha : float, optional
             Exponent controlling how strongly sampling prioritizes large TD errors.
@@ -268,7 +278,11 @@ class DDQN_ECM:
         self.model_dir = self.save_dir / "models"
         self.model_dir.mkdir(exist_ok=True)
 
-        self._setup_model()
+        if hidden_layers is None:
+            self.hidden_layers = [[40, "relu"], [40, "relu"]]
+        else:
+            self.hidden_layers = hidden_layers
+        self._setup_model(model, self.hidden_layers)
 
         self.model.summary()
         summary_file = self.save_dir / "model_summary.txt"
@@ -304,9 +318,12 @@ class DDQN_ECM:
         """
         Update the training environment.
 
-        Args:
-            new_training_env: New environment to use for training switch_to_it: If True,
-            immediately switch active_env to this new environment
+        Parameters
+        ----------
+        new_training_env : EIS_ECM_Env
+            New environment to use for training.
+        switch_to_it : bool
+            If True, immediately switch ``active_env`` to this new environment.
         """
         self.training_env = new_training_env
         if switch_to_it:
@@ -317,9 +334,12 @@ class DDQN_ECM:
         """
         Update the evaluation environment.
 
-        Args:
-            new_eval_env: New environment to use for evaluation
-            switch_to_it: If True, immediately switch active_env to this new environment
+        Parameters
+        ----------
+        new_eval_env : EIS_ECM_Env
+            New environment to use for evaluation.
+        switch_to_it : bool
+            If True, immediately switch ``active_env`` to this new environment.
         """
         self.eval_env = new_eval_env
         if switch_to_it:
@@ -335,15 +355,36 @@ class DDQN_ECM:
         else:
             return "unknown"
 
-    def _setup_model(self) -> None:
+    def _setup_model(self, model: Optional[str], hidden_layers: List[Tuple[int, str]]) -> None:
         """
-        Create and initialize the neural network architecture for the DDQN agent.
+        Load or create and initialize the neural network architecture for the DDQN agent.
 
         This method builds two identical neural networks:
         1. Main model: Used for selecting actions and gets trained
         2. Target model: Used for calculating Q-value targets, updated less frequently
-        The target model starts with identical weights to the main model but diverges during
-        training as only the main model is updated frequently.
+        The target model starts with identical weights to the main model but
+        diverges during training as only the main model is updated frequently.
+
+        The Double DQN (DDQN) algorithm uses two networks to reduce overestimation
+        of Q-values, which leads to more stable and accurate learning.
+
+        Parameters
+        ----------
+        model : str, optional
+            Path to a pre-trained model file. If provided, the model will be loaded from disk,
+            then information about the hidden layers will be extracted from the loaded model.
+            This can be used as a starting point for further training or evaluation.
+            If not provided, a new model will be created based on the hidden_layers
+            configuration, with randomly initialized weights.
+        hidden_layers : list of tuples
+            Each tuple specifies (num_neurons, activation_function) for a hidden layer.
+            Example: [(40, 'relu'), (40, 'relu')] creates two hidden layers with 40 neurons
+            each and ReLU activation.
+
+        Notes
+        -----
+        If model is provided, loading the model from the file is prioritized over creating it
+        from the given hidden_layers configuration.
 
         Network Architecture:
         ---------------------
@@ -351,13 +392,9 @@ class DDQN_ECM:
             - Size: (chromosome_length x num_elements) + EIS_data_length
             - Combines: One-hot encoded circuit state + normalized EIS measurements
 
-        Hidden Layer 1:
-            - 40 neurons with ReLU activation
-            - Learns basic patterns in state-action relationships
-
-        Hidden Layer 2:
-            - 40 neurons with ReLU activation
-            - Learns higher-level representations
+        Hidden Layers:
+            - Each layer: Fully connected (Dense) with specified activation function
+            - Configurable number of layers and neurons via hidden_layers parameter
 
         Output Layer:
             - Size: Number of possible actions
@@ -365,8 +402,8 @@ class DDQN_ECM:
             - Each output represents Q(state, action_i)
             - Example: For HEAD=5, TAIL=6: ~40 possible actions
 
-        Sets:
-        -----
+        Attributes
+        ----------
         self.model : tf.keras.Model
             The main neural network that will be trained
             Used to select actions during training
@@ -384,31 +421,41 @@ class DDQN_ECM:
             len(self._active_env.ELEMENTS_EXTENDED),
             len(self._active_env.ELEMENTS),
         )
-        eis_input_len = self._active_env.EIS_INPUT_SZE
-
+        eis_input_len = self._active_env.EIS_INPUT_SIZE
         state_shape = (HEAD_len + TAIL_len) * elems_extended_len + eis_input_len
         n_actions = 2 + (HEAD_len - 1) * elems_len + (TAIL_len) * (elems_len - 2)
-        inputs = layers.Input(shape=(state_shape,))
-        layer1 = layers.Dense(40, activation="relu")(inputs)
-        layer2 = layers.Dense(40, activation="relu")(layer1)
-        outputs = layers.Dense(n_actions, activation="linear")(layer2)
-        print("input shape: ", inputs.shape)
-        print("output shape: ", outputs.shape)
 
-        self.model = tf.keras.Model(inputs=inputs, outputs=outputs)
-        self.target_model = tf.keras.models.clone_model(self.model)
-        self.target_model.set_weights(self.model.get_weights())
+        if model is None:
+            # Build hidden layers dynamically based on hidden_layers parameter
+            inputs = layers.Input(shape=(state_shape,))
+            x = inputs
+            for neurons, activation in hidden_layers:
+                x = layers.Dense(neurons, activation=activation)(x)
+            outputs = layers.Dense(n_actions, activation="linear")(x)
+
+            self.model = tf.keras.Model(inputs=inputs, outputs=outputs)
+            self.target_model = tf.keras.models.clone_model(self.model)
+            self.target_model.set_weights(self.model.get_weights())
+        else:
+            # Load the model file
+            self.load_model(model)
+            # Update the hidden layers attribute to reflect the loaded model's architecture
+            self.hidden_layers = [
+                (layer.units, layer.activation.__name__)
+                for layer in self.model.layers
+                if isinstance(layer, layers.Dense) and layer != self.model.layers[-1]
+            ]
 
     def save_model(self, filepath: str | Path, save_format: str = "keras") -> None:
         """
         Save the trained neural network model to disk for later use.
 
-        Parameters:
-        -----------
+        Parameters
+        ----------
         filepath : str or Path
             Location to save the model file
 
-            Examples:
+            For example:
             - 'my_model.keras' (saves in current directory)
             - 'models/experiment_1/model.keras' (creates nested directories)
             - Path('results/best_model.h5') (using pathlib)
@@ -416,17 +463,17 @@ class DDQN_ECM:
         save_format : str, default='keras'
             File format for saving the model
 
-            OPTIONS:
+            Options:
             - 'keras' (recommended):
             - 'h5' (legacy)
 
-        Returns:
-        --------
+        Returns
+        -------
         None
             Prints confirmation message upon successful save
 
-        File Extension Handling:
-        ------------------------
+        File Extension Handling
+        -----------------------
         The method automatically adds the correct extension:
         - save_format='keras' → ensures '.keras' extension
         - save_format='h5' → ensures '.h5' extension
@@ -434,7 +481,7 @@ class DDQN_ECM:
         If you specify 'model' as filepath with save_format='keras', it will be saved as
         'model.keras' automatically.
 
-        Note:
+        Notes
         -----
         Only the MAIN model is saved (not the target model).
         """
@@ -459,16 +506,16 @@ class DDQN_ECM:
         - Epsilon value: agent.epsilon = saved_epsilon
         - Trial counter: start_trial = saved_trial
 
-        Parameters:
-        -----------
+        Parameters
+        ----------
         filepath : str or Path
             Location of the saved model file
 
-        Returns:
-        --------
+        Returns
+        -------
         None (Prints confirmation message upon successful load)
 
-        Note:
+        Notes
         -----
         If you're loading a model trained with different environment parameters (different
         chromosome_HEAD_len, different elements, etc.), the model architecture may not match
@@ -494,8 +541,8 @@ class DDQN_ECM:
         starting with less bias correction (focusing on learning from important samples) and
         ending with full bias correction (ensuring unbiased gradient updates).
 
-        Parameters:
-        -----------
+        Parameters
+        ----------
         trial : int
             Current training trial/episode number (0 to num_trials)
 
@@ -503,8 +550,8 @@ class DDQN_ECM:
             Total number of trials over which to increase beta
             Controls how quickly beta increases
 
-        Returns:
-        --------
+        Returns
+        -------
         float
             The beta value to use for this trial
             Range: [initial_beta, final_beta]
@@ -526,8 +573,8 @@ class DDQN_ECM:
         TD error = more surprising) are sampled more frequently because the agent can learn
         more from them.
 
-        Parameters:
-        -----------
+        Parameters
+        ----------
         history : pd.DataFrame
             The replay buffer containing all stored experiences
             Must have a 'priority' column with priority values for each experience
@@ -537,23 +584,22 @@ class DDQN_ECM:
             Higher values = more bias correction
             Should increase over training (use scheduler() method)
 
-        Returns:
-        --------
-        tuple: (samples, indices, weights)
-            samples : pd.DataFrame
-                Subset of history containing batch_size sampled experiences
-                These are the experiences that will be used for model training
+        Returns
+        -------
+        samples : pd.DataFrame
+            Subset of history containing batch_size sampled experiences.
+            These are the experiences that will be used for model training.
 
-            indices : np.ndarray
-                Array of integer indices indicating which rows were sampled
-                Used to update priorities after training (based on new TD errors)
-                Shape: (batch_size,)
+        indices : np.ndarray
+            Array of integer indices indicating which rows were sampled.
+            Used to update priorities after training (based on new TD errors).
+            Shape: (batch_size,)
 
-            weights : np.ndarray
-                Importance sampling weights for each sampled experience
-                Multiply these with TD errors during gradient computation
-                Normalized so max(weights) = 1.0
-                Shape: (batch_size,)
+        weights : np.ndarray
+            Importance sampling weights for each sampled experience.
+            Multiply these with TD errors during gradient computation.
+            Normalized so max(weights) = 1.0.
+            Shape: (batch_size,)
         """
         priority_powered_alpha = history["priority"].values ** self.prioritized_replay_alpha
         total_priority = priority_powered_alpha.sum()
@@ -581,18 +627,18 @@ class DDQN_ECM:
         """
         Identify all actions that would create invalid circuit configurations or repetitions.
 
-        Parameters:
-        -----------
+        Parameters
+        ----------
         conding_length : int
             Length of the "coding" part of the chromosome
             This is the portion that actually forms the circuit tree
             Actions beyond this position modify unused tail positions and are invalid
 
             Example: If chromosome is '+RPRRRR' and tree only uses 4 positions,
-                    conding_length = 4, so positions 4-6 are non-coding
+            conding_length = 4, so positions 4-6 are non-coding.
 
-        Returns:
-        --------
+        Returns
+        -------
         list of int
             Indices of invalid actions in the ACTIONS_LIST DataFrame
             These correspond to row numbers in self._active_env.ACTIONS_LIST
@@ -636,8 +682,8 @@ class DDQN_ECM:
         The epsilon value typically decays over training: starting high (explore a lot) and
         decreasing toward epsilon_min (exploit learned knowledge).
 
-        Parameters:
-        -----------
+        Parameters
+        ----------
         flatten_Z : np.ndarray
             Flattened, normalized EIS impedance data for the current episode (referred to as
             the combined EIS representation in the paper)
@@ -655,14 +701,13 @@ class DDQN_ECM:
                 - Exploitation: Best action from only valid actions
                 - Slower (checks validity for every action)
 
-        Returns:
-        --------
-        tuple: (action_position, action_type)
-            action_position : int
-                Which chromosome position to modify (0 to chromosome_length-1)
+        Returns
+        -------
+        action_position : int
+            Which chromosome position to modify (0 to chromosome_length-1).
 
-            action_type : str
-                Which element to place ('+', '/', 'R', 'L', 'P')
+        action_type : str
+            Which element to place ('+', '/', 'R', 'L', 'P').
         """
         ec = ae.core.ec
         ACTION_LIST = self._active_env.ACTIONS_LIST
@@ -719,11 +764,15 @@ class DDQN_ECM:
         """
         Perform one training step using DDQN with prioritized experience replay.
 
-        Args:
-            history: DataFrame containing experience replay buffer
+        Parameters
+        ----------
+        history : pd.DataFrame
+            DataFrame containing experience replay buffer.
 
-        Returns:
-            Mean loss for this training step
+        Returns
+        -------
+        float
+            Mean loss for this training step.
         """
         samples, sample_indices, weights = self._sample_experience(
             history, self.prioritized_replay_beta
@@ -735,18 +784,6 @@ class DDQN_ECM:
         all_actions = []
 
         # Select only the 8 columns needed
-        # samples_subset = samples[
-        #     [
-        #         "EIS",
-        #         "state",
-        #         "action_type",
-        #         "action_position",
-        #         "new_state",
-        #         "reward",
-        #         "terminal_flag",
-        #         "priority",
-        #     ]
-        # ]
         samples_subset = samples[
             [
                 "EIS",
@@ -759,17 +796,6 @@ class DDQN_ECM:
                 "priority",
             ]
         ]
-
-        # for (
-        #     sample_EIS_i,
-        #     sample_state,
-        #     sample_action_type,
-        #     sample_action_position,
-        #     sample_next_state,
-        #     sample_reward,
-        #     sample_flag,
-        #     sample_priority,
-        # ) in samples_subset.itertuples(index=False):
         for (
             sample_EIS_i,
             encoded_state,
@@ -1355,6 +1381,7 @@ class DDQN_ECM:
         _ = plt.figure(figsize=(8, 5))
         if "loss" in NN_loss:
             plt.plot(NN_loss["loss"])
+        plt.yscale("log")  # Loss in log-scale has better visibility
         plt.xlabel("Training steps")
         plt.ylabel("NN Loss")
         plt.title("Neural Network Loss During Training")
@@ -1404,19 +1431,30 @@ class DDQN_ECM:
           automatically)
         - flatten_Z: to evaluate on provided impedance data (ground truth optional)
 
-        Args:
-            EIS_i: Index of the EIS measurement in dataset (if None, must provide flatten_Z)
-            flatten_Z: Flattened impedance data (if None, must provide EIS_i)
-            ground_truth_circuit: Optional ground truth circuit for comparison
-            max_actions: Maximum number of actions to try (default: self.action_cap)
-            verbose: Whether to print progress
-            get_fit_plots: Whether to save fit plots for successful evaluations
-            gif_generation: Whether to generate a circuit-evolution GIF
-            use_eval_env: Whether to run on the evaluation environment instead
-                of the training environment
+        Parameters
+        ----------
+        EIS_i : int, optional
+            Index of the EIS measurement in dataset (if None, must provide ``flatten_Z``).
+        flatten_Z : np.ndarray, optional
+            Flattened impedance data (if None, must provide ``EIS_i``).
+        ground_truth_circuit : str, optional
+            Optional ground truth circuit for comparison.
+        max_actions : int, optional
+            Maximum number of actions to try (default: ``self.action_cap``).
+        verbose : bool
+            Whether to print progress.
+        get_fit_plots : bool
+            Whether to save fit plots for successful evaluations.
+        gif_generation : bool
+            Whether to generate a circuit-evolution GIF.
+        use_eval_env : bool
+            Whether to run on the evaluation environment instead
+            of the training environment
 
-        Returns:
-            Dictionary containing evaluation results
+        Returns
+        -------
+        dict
+            Dictionary containing evaluation results.
         """
         # Switch to appropriate environment
         if use_eval_env:
@@ -1634,21 +1672,31 @@ class DDQN_ECM:
         the training environment. Row positions are selected from the active
         environment's dataset.
 
-        Args:
-            eis_indices: List of EIS row positions to evaluate. Ignored if
-                ``all_rows=True`` or ``num_samples`` is set.
-            max_actions: Maximum number of actions per EIS (default: self.action_cap)
-            verbose: Whether to print detailed progress for each EIS
-            use_eval_env: Whether to use the evaluation environment. If False,
-                use the training environment.
-            gif_generation: Generate a circuit-evolution GIF for each EIS.
-            all_rows: If True, evaluate all EIS rows in the active
-                environment's dataset. Overrides ``eis_indices``.
-            num_samples: If set, randomly sample this many EIS indices for
-                quick evaluation. Overrides ``eis_indices``.
+        Parameters
+        ----------
+        eis_indices : list[int], optional
+            List of EIS row positions to evaluate. Ignored if ``all_rows=True`` or
+            ``num_samples`` is set.
+        max_actions : int, optional
+            Maximum number of actions per EIS (default: ``self.action_cap``).
+        verbose : bool
+            Whether to print detailed progress for each EIS.
+        use_eval_env : bool
+            Whether to use the evaluation environment. If False,
+            use the training environment.
+        gif_generation : bool
+            Generate a circuit-evolution GIF for each EIS.
+        all_rows : bool
+            If True, evaluate all EIS rows in the active
+            environment's dataset. Overrides ``eis_indices``.
+        num_samples : int, optional
+            If set, randomly sample this many EIS indices for quick evaluation. Overrides
+            ``eis_indices``.
 
-        Returns:
-            DataFrame containing evaluation results for all EIS
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame containing evaluation results for all EIS.
         """
         # Switch to appropriate environment
         if use_eval_env:
@@ -1721,6 +1769,7 @@ class DDQN_ECM:
                 results.append(
                     {
                         "EIS_i": eis_i,
+                        "environment_type": None,
                         # 'ground_truth_state': None,
                         "ground_truth_circuit": None,
                         "found_solution": False,
@@ -1775,14 +1824,21 @@ class DDQN_ECM:
         ``use_eval_env=True`` to evaluate all rows in the evaluation environment, or
         ``use_eval_env=False`` to evaluate all rows in the training environment.
 
-        Args:
-            max_actions: Maximum number of actions per EIS (default: self.action_cap).
-            verbose: Whether to print detailed progress for each EIS.
-            use_eval_env: Whether to use the evaluation environment. If False,
-                use the training environment.
-            gif_generation: Generate a circuit-evolution GIF for each EIS.
+        Parameters
+        ----------
+        max_actions : int, optional
+            Maximum number of actions per EIS (default: ``self.action_cap``).
+        verbose : bool
+            Whether to print detailed progress for each EIS.
+        use_eval_env : bool
+            Whether to use the evaluation environment. If False,
+            use the training environment.
+        gif_generation : bool
+            Generate a circuit-evolution GIF for each EIS.
 
-        Returns:
+        Returns
+        -------
+        pd.DataFrame
             DataFrame containing evaluation results for all EIS rows.
         """
         return self.eval_batch_eis(

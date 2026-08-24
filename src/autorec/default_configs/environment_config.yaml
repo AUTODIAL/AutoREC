@@ -1,7 +1,0 @@
-dataset_path: ./training_dataset.pkl  # Path to the dataset, can be a pickle or csv file
-seed: 42
-chromosome_HEAD_len: 10
-# Cache configuration
-cache_enabled: true
-cache_capacity: 20000
-cache_type: lru  # lru or clock

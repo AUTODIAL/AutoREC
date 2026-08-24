@@ -4,7 +4,7 @@ precomputed scores that we can use to initially train Optuna.
 Usage:
 ```bash
     $ python runner.py \
-        --target-dir ./hyperparameter_tuning_results \
+        --target-dir ./hyperparameter_tuning \
         --base-config ./base_config.yaml \
         --search-space ./search_space.yaml \
         --num-initial 5 \
@@ -56,7 +56,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument(
     "--target-dir",
     type=str,
-    default="./hyperparameter_tuning_results",
+    default="./hyperparameter_tuning",
     help="Target directory to store results",
 )
 parser.add_argument(
@@ -84,6 +84,7 @@ args = parser.parse_args()
 RESULTS_DIR = Path(args.target_dir)
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 configs_dir = RESULTS_DIR / "configs"
+JOB_NAME_PREFIX = RESULTS_DIR.name
 num_initial = args.num_initial
 batch_size = args.batch_size
 num_iterations = args.num_iterations
@@ -100,9 +101,19 @@ if not search_space_file.exists():
     raise FileNotFoundError(f"Search space file {search_space_file} not found.")
 with open(search_space_file, "r") as f:
     search_space = yaml.safe_load(f)
-search_space_bounds = {name: val["bounds"] for name, val in search_space.items()}
+if not isinstance(search_space, dict) or not search_space:
+    raise ValueError(
+        f"Search space file {search_space_file} must define a non-empty mapping of "
+        "parameter names to {bounds: [low, high], type: int|float}."
+    )
+for name, spec in search_space.items():
+    if not isinstance(spec, dict) or "bounds" not in spec or "type" not in spec:
+        raise ValueError(
+            f"Invalid search space entry for '{name}': expected keys 'bounds' and 'type'."
+        )
+search_space_bounds = {name: spec["bounds"] for name, spec in search_space.items()}
 integer_variables = [
-    name for name, val in search_space.items() if val["type"].lower() == "int"
+    name for name, spec in search_space.items() if str(spec["type"]).lower() == "int"
 ]
 # Instantiate configuration handler
 config_handler = ConfigurationHandler(
@@ -170,7 +181,7 @@ training_done = all([(SAMPLE_DIR / ff).exists() for ff in check_files])
 if not training_done:
     print("Submitting job for the original hyperparameter set...")
     sbatch_options = base_sbatch_options.copy()
-    sbatch_options["job_name"] = f"hyperparam_tuning_init_{config_id}"
+    sbatch_options["job_name"] = f"{JOB_NAME_PREFIX}_init_{config_id}"
     jobid = write_job_script(SAMPLE_DIR, python_file, config_file, sbatch_options, submit=True)
     # Block until all jobs are finished
     print("Waiting for all initial jobs to finish...")
@@ -207,7 +218,7 @@ for trial in trials:
     training_done = all([(SAMPLE_DIR / ff).exists() for ff in check_files])
     if not training_done:
         sbatch_options = base_sbatch_options.copy()
-        sbatch_options["job_name"] = f"hyperparam_tuning_init_{config_id}"
+        sbatch_options["job_name"] = f"{JOB_NAME_PREFIX}_init_{config_id}"
         jobid = write_job_script(
             SAMPLE_DIR, python_file, config_file, sbatch_options, submit=True
         )
@@ -255,7 +266,7 @@ for iteration in range(num_iterations - 1):
         training_done = all([(SAMPLE_DIR / ff).exists() for ff in check_files])
         if not training_done:
             sbatch_options = base_sbatch_options.copy()
-            sbatch_options["job_name"] = f"hyperparam_tuning_{config_id}"
+            sbatch_options["job_name"] = f"{JOB_NAME_PREFIX}_{config_id}"
             jobid = write_job_script(
                 SAMPLE_DIR, python_file, config_file, sbatch_options, submit=True
             )
@@ -279,6 +290,24 @@ for iteration in range(num_iterations - 1):
     for trial, score in zip(trials, score_list):
         study.tell(trial, score)
 
+    # Export the study results
+    study_df = study.trials_dataframe()
+    study_df.to_csv(RESULTS_DIR / "optuna_trials.csv", index=False)
+    # Visualization analysis
+    print("Generating visualization analysis")
+    print("- Optimization history")
+    ax = vis_matplotlib.plot_optimization_history(study)
+    fig = ax.figure
+    fig.tight_layout()
+    fig.savefig(RESULTS_DIR / "optimization_history.png", dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    print("- Parameter importances")
+    ax = vis_matplotlib.plot_param_importances(study)
+    fig = ax.figure
+    fig.tight_layout()
+    fig.savefig(RESULTS_DIR / "param_importances.png", dpi=300, bbox_inches="tight")
+    plt.close(fig)
+
 print("Hyperparameter tuning with Optuna completed.")
 
 
@@ -292,21 +321,3 @@ print(f"Configuration ID: {best_config_id}")
 pprint(best_params, sort_dicts=False)
 # pprint(best_config, sort_dicts=False)
 print(f"\nWith score: {best_trial.value:.4f}")
-
-# Export the study results
-study_df = study.trials_dataframe()
-study_df.to_csv(RESULTS_DIR / "optuna_trials.csv", index=False)
-# Visualization analysis
-print("Generating visualization analysis")
-print("- Optimization history")
-ax = vis_matplotlib.plot_optimization_history(study)
-fig = ax.figure
-fig.tight_layout()
-fig.savefig(RESULTS_DIR / "optimization_history.png", dpi=300, bbox_inches="tight")
-plt.close(fig)
-print("- Parameter importances")
-ax = vis_matplotlib.plot_param_importances(study)
-fig = ax.figure
-fig.tight_layout()
-fig.savefig(RESULTS_DIR / "param_importances.png", dpi=300, bbox_inches="tight")
-plt.close(fig)

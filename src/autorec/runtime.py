@@ -24,12 +24,18 @@ def configure_autorec_runtime(
     level. This helper sets writable runtime directories, limits BLAS/OpenMP thread pools, and
     optionally initializes AutoEIS/Julia before TensorFlow/JAX are imported.
 
-    Args:
-        thread_count: Thread count used for OpenMP, MKL, OpenBLAS, and NumExpr.
-        warmup_autoeis: If True, initialize AutoEIS/Julia immediately.
-        suppress_tf_logs: If True, suppress TensorFlow INFO/WARNING logs.
+    Parameters
+    ----------
+    thread_count : int or str
+        Thread count used for OpenMP, MKL, OpenBLAS, and NumExpr.
+    warmup_autoeis : bool
+        If True, initialize AutoEIS/Julia immediately.
+    suppress_tf_logs : bool
+        If True, suppress TensorFlow INFO/WARNING logs.
 
-    Returns:
+    Returns
+    -------
+    Path
         The runtime cache directory used for JuliaCall and Matplotlib.
     """
     if sys.platform == "darwin":

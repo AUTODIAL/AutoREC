@@ -7,7 +7,7 @@ name = "autorec_eis"
 dynamic = ["version"]
 description = "Building Reinforcement Learning Agent to Generate Circuit Models for EIS spectra"
 readme = "README.md"
-requires-python = ">=3.10,<3.12"
+requires-python = ">=3.10,<3.13"
 classifiers = [
   "Programming Language :: Python :: 3.10",
   "Operating System :: OS Independent",
@@ -66,6 +66,9 @@ dev = [
   "ruff>=0.6,<1",
 ]
 
+[project.scripts]
+autorec = "autorec.cli:main"
+
 [tool.setuptools]
 package-dir = { "" = "src" }
 include-package-data = true
@@ -74,9 +77,6 @@ include-package-data = true
 where = ["src"]
 
 [tool.setuptools_scm]
-
-[tool.setuptools.package-data]
-autorec = ["default_configs/*.yaml"]
 
 [project.urls]
 Homepage = "https://github.com/AUTODIAL/AutoREC"

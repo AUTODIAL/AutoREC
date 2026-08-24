@@ -72,7 +72,7 @@ RESULTS_SAVE_DIR = SAVE_DIR / Path("results")  # Evaluation DataFrames
 # Load and prepare the EIS dataset that contains impedance measurements that the agent will learn to fit
 
 data_prepper = EISDataPrep(
-    path="../data/training_dataset.pkl",  # Pre-processed pickle file
+    path="../data/examples/training_dataset.pkl",  # Pre-processed pickle file
     evaluation=True,  # Ground truth circuits available for validation
 )
 

@@ -19,12 +19,14 @@ class ClockCache:
     chance before eviction, making it good for workloads with temporal locality (recently used
     items are likely to be used again).
 
-    Advantages over LRU:
+    Advantages over LRU
+    -------------------
     - O(1) insertion and lookup (LRU can be O(1) but with more overhead)
     - More efficient than LRU for certain access patterns
     - Better performance when items are accessed in bursts
 
-    Time Complexity:
+    Time Complexity
+    ---------------
     - Get: O(1) average, O(n) worst case (when all items have reference bit set)
     - Put: O(1) average, O(n) worst case
     """
@@ -33,8 +35,10 @@ class ClockCache:
         """
         Initialize the clock cache.
 
-        Args:
-            capacity: Maximum number of items in cache
+        Parameters
+        ----------
+        capacity : int
+            Maximum number of items in cache.
         """
         if capacity <= 0:
             raise ValueError("Cache capacity must be positive")
@@ -53,11 +57,15 @@ class ClockCache:
         """
         Retrieve item from cache.
 
-        Args:
-            key: Cache key (typically (circuit_code, EIS_index))
+        Parameters
+        ----------
+        key : tuple
+            Cache key (typically (circuit_code, EIS_index)).
 
-        Returns:
-            Cached value if found, None otherwise
+        Returns
+        -------
+        dict or None
+            Cached value if found, None otherwise.
         """
         if key in self.cache:
             self.hits += 1
@@ -71,9 +79,12 @@ class ClockCache:
         """
         Insert or update item in cache.
 
-        Args:
-            key: Cache key
-            value: Value to cache
+        Parameters
+        ----------
+        key : tuple
+            Cache key.
+        value : dict
+            Value to cache.
         """
         # If key already exists, just update it
         if key in self.cache:
@@ -123,8 +134,10 @@ class ClockCache:
         """
         Get cache statistics.
 
-        Returns:
-            Dictionary with hit rate, miss rate, and size info
+        Returns
+        -------
+        dict
+            Dictionary with hit rate, miss rate, and size info.
         """
         total = self.hits + self.misses
         hit_rate = self.hits / total if total > 0 else 0.0
@@ -154,12 +167,14 @@ class LRUCache:
     Evicts the least recently used item when the cache is full. Uses OrderedDict for O(1)
     operations.
 
-    Advantages:
+    Advantages
+    ----------
     - Simple and well-understood eviction policy
     - Excellent for workloads with temporal locality
     - Predictable behavior
 
-    Time Complexity:
+    Time Complexity
+    ---------------
     - Get: O(1)
     - Put: O(1)
     """
@@ -168,8 +183,10 @@ class LRUCache:
         """
         Initialize the LRU cache.
 
-        Args:
-            capacity: Maximum number of items in cache
+        Parameters
+        ----------
+        capacity : int
+            Maximum number of items in cache.
         """
         if capacity <= 0:
             raise ValueError("Cache capacity must be positive")
@@ -185,11 +202,15 @@ class LRUCache:
         """
         Retrieve item from cache.
 
-        Args:
-            key: Cache key (typically (circuit_code, EIS_index))
+        Parameters
+        ----------
+        key : tuple
+            Cache key (typically (circuit_code, EIS_index)).
 
-        Returns:
-            Cached value if found, None otherwise
+        Returns
+        -------
+        dict or None
+            Cached value if found, None otherwise.
         """
         if key in self.cache:
             self.hits += 1
@@ -204,9 +225,12 @@ class LRUCache:
         """
         Insert or update item in cache.
 
-        Args:
-            key: Cache key
-            value: Value to cache
+        Parameters
+        ----------
+        key : tuple
+            Cache key.
+        value : dict
+            Value to cache.
         """
         if key in self.cache:
             # Update existing item and move to end
@@ -228,8 +252,10 @@ class LRUCache:
         """
         Get cache statistics.
 
-        Returns:
-            Dictionary with hit rate, miss rate, and size info
+        Returns
+        -------
+        dict
+            Dictionary with hit rate, miss rate, and size info.
         """
         total = self.hits + self.misses
         hit_rate = self.hits / total if total > 0 else 0.0
@@ -260,7 +286,8 @@ class HistoryCache:
     operations. It handles the creation of cache keys and provides convenience methods for
     common operations.
 
-    Example:
+    Examples
+    --------
         cache = HistoryCache(capacity=10000, cache_type='lru')
 
         # Try to get cached result
@@ -286,9 +313,12 @@ class HistoryCache:
         """
         Initialize the high-level circuit evaluation cache.
 
-        Args:
-            capacity: Maximum number of circuit evaluation results to keep.
-            cache_type: Eviction policy to use. Supported values are ``"lru"`` and ``"clock"``.
+        Parameters
+        ----------
+        capacity : int
+            Maximum number of circuit evaluation results to keep.
+        cache_type : str
+            Eviction policy to use. Supported values are ``"lru"`` and ``"clock"``.
         """
         if cache_type == "lru":
             self.cache = LRUCache(capacity)
@@ -305,14 +335,21 @@ class HistoryCache:
         """
         Create cache key from circuit code, EIS index, and action.
 
-        Args:
-            circuit_code: The circuit coding string (GEP representation)
-            eis_index: Index of the EIS measurement in the dataset
-            action_type: The element that was mutated (e.g., 'R', 'P', '+')
-            action_position: Position in the chromosome where mutation occurred
+        Parameters
+        ----------
+        circuit_code : str
+            The circuit coding string (GEP representation).
+        eis_index : int
+            Index of the EIS measurement in the dataset.
+        action_type : str
+            The element that was mutated (e.g., 'R', 'P', '+').
+        action_position : int
+            Position in the chromosome where mutation occurred.
 
-        Returns:
-            Tuple key for cache lookup
+        Returns
+        -------
+        tuple
+            Tuple key for cache lookup.
         """
         return (circuit_code, eis_index, action_type, action_position)
 
@@ -322,14 +359,21 @@ class HistoryCache:
         """
         Retrieve cached circuit evaluation result.
 
-        Args:
-            circuit_code: The circuit coding string
-            eis_index: Index of the EIS measurement
-            action_type: The action element type
-            action_position: The action position
+        Parameters
+        ----------
+        circuit_code : str
+            The circuit coding string.
+        eis_index : int
+            Index of the EIS measurement.
+        action_type : str
+            The action element type.
+        action_position : int
+            The action position.
 
-        Returns:
-            Dictionary with cached results or None if not found
+        Returns
+        -------
+        dict or None
+            Dictionary with cached results or None if not found.
         """
         key = self._make_key(circuit_code, eis_index, action_type, action_position)
         return self.cache.get(key)
@@ -352,19 +396,32 @@ class HistoryCache:
         """
         Cache a circuit evaluation result.
 
-        Args:
-            circuit_code: The circuit coding string
-            eis_index: Index of the EIS measurement
-            action_type: The action element type
-            action_position: The action position
-            reward: Computed reward value
-            metrics: Dictionary of evaluation metrics
-            predicted_Z: Predicted impedance array
-            param: Fitted circuit parameters
-            good_fit: Whether this was a good fit
-            depth_penalty: Penalty for circuit depth
-            fit_bonus: Bonus for fit quality
-            fit_penalty: Penalty for fit issues
+        Parameters
+        ----------
+        circuit_code : str
+            The circuit coding string.
+        eis_index : int
+            Index of the EIS measurement.
+        action_type : str
+            The action element type.
+        action_position : int
+            The action position.
+        reward : float
+            Computed reward value.
+        metrics : dict
+            Dictionary of evaluation metrics.
+        predicted_Z : np.ndarray
+            Predicted impedance array.
+        param : dict
+            Fitted circuit parameters.
+        good_fit : bool
+            Whether this was a good fit.
+        depth_penalty : float
+            Penalty for circuit depth.
+        fit_bonus : float
+            Bonus for fit quality.
+        fit_penalty : float
+            Penalty for fit issues.
         """
         key = self._make_key(circuit_code, eis_index, action_type, action_position)
         value = {

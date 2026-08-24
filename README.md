@@ -116,7 +116,7 @@ Load an existing processed dataset:
 ```python
 from autorec.data_preparation import EISDataPrep
 
-data_prep = EISDataPrep(path="PATH/training_dataset.pkl", mode='load')
+data_prep = EISDataPrep(path="PATH/data/examples/training_dataset.pkl", mode='load')
 dataset = data_prep.load()
 ```
 
@@ -139,10 +139,10 @@ data_prep.save("processed_training_data.pkl")
 Using the YAML configuration:
 
 ```python
-from autorec.factory import environment_and_agent_builder
+from autorec.factory import pipeline_builder
 
-env, eval_env, agent = environment_and_agent_builder(
-    "PATH/demo_environment_agent_config.yaml"
+dataprep, dataprep_eval, env, env_eval, agent = pipeline_builder(
+    "PATH/configs_yaml/examples/demo_pipeline_config.yaml"
 )
 
 agent.train()
@@ -152,8 +152,8 @@ agent.save_model("PATH/final_model.keras")
 Using classes directly:
 
 ```python
-from autorec.agent import DDQN_ECM
 from autorec.environment import EIS_ECM_Env
+from autorec.agent import DDQN_ECM
 from autorec.utils import set_global_seed
 
 set_global_seed(42, deterministic_ops=True)
@@ -181,7 +181,7 @@ eval_results = agent.eval_batch_eis(
 )
 
 mean_reward = eval_results['best_reward'].mean()
-success_rate = eval_results['found_solution'].astype(int).sum() / len(eval_results) * 100
+success_rate = eval_results['found_solution'].mean()
 
 print(f"Success rate: {success_rate:.2%}")
 print(f"Mean reward: {mean_reward:.4f}")
@@ -199,13 +199,64 @@ Start there if you are using the package for the first time.
 
 ## Configuration
 
-YAML Configuration examples are available in `default_configs/`. The package also
-ships default configuration files under `src/autorec/default_configs/`.
+YAML Configuration examples are available in `configs_yaml/examples/`. The configuration
+file should consist of the following sections: `dataprep`, `environment`, and `agent`.
+Each section contains key-value pairs that correspond to the arguments of `EISDataPrep`,
+`EIS_ECM_Env`, and `DDQN_ECM` classes, respectively.
+
+There are some notes about the configuration file:
+
+1. The `dataprep` and `environment` sections can have `training` and `eval` subsections.
+   Without these subsections or if there is only `training` subsection, the same
+   configuration values are used for both training and evaluation.
+1. The `dataprep` section is optional. If it is omitted, the `dataset` argument for
+   `EIS_ECM_Env` must be provided directly in the `environment` section. If the `dataprep`
+   section is present, the `dataset` argument for `EIS_ECM_Env` will be automatically
+   replaced with the processed dataset from `dataprep`.
+1. The `dataprep` can also accept an additional argument `output` to specify the path to
+   save the processed dataset as a pickle file. If `output` is not specified, the
+   processed dataset is not exported.
+1. The `dataset` argument for `EIS_ECM_Env` can be specified as a path to a processed
+   dataset pickle file. The factory loads the dataset from this path and passes it to the
+   environment constructor.
+1. The `training_env` and `eval_env` arguments for `DDQN_ECM` should not be specified
+   directly in the configuration file. Instead, the factory creates the training and
+   evaluation environments from the `environment` section and passes them to the agent
+   constructor.
+
+> [!NOTE]
+> Configuration values may include the special environment variable
+> `${AUTOREC_ROOT}`, which refers to the root directory of the AutoREC repository.
+> The variable is expanded when the configuration file is loaded.
+
+Data preparation options:
+
+```yaml
+path: ${AUTOREC_ROOT}/data/examples/training_dataset.pkl
+mode: load
+evaluation: false
+perform_linKK_validation: false
+tol_linKK: 5.0E-2
+frequency_bounds:
+  - null
+  - null
+frequency_npoints: null
+eis_features:
+  - ImZ
+  - phi
+  - mag
+  - nphi
+output: data/processed_training_dataset.pkl
+```
 
 Environment options:
 
 ```yaml
-dataset_path: "data/training_dataset.pkl"
+dataset: "data/examples/training_dataset.pkl"
+initial_state:
+  - +RRRRRR
+  - ++RRRRRR
+  - +++RRRRRR
 seed: 42
 chromosome_HEAD_len: 10
 cache_enabled: true
@@ -216,18 +267,38 @@ cache_type: lru
 Agent options:
 
 ```yaml
-num_trials: 1000
 save_dir: "results/demo"
+save_start: 0
 save_frequency: 500
+action_cap: null
+random_seed: 42
+num_trials: 1000
+episodes_trial: 1
 gamma: 0.99
-learning_rate: 0.0005
-batch_size: 150
-buffer_capacity: 15000
+continuous_deadloop: 2
+latent_deadloop: 4
+invalid_terminals: false
 initial_epsilon: 1.0
 epsilon_min: 0.1
 epsilon_decay: 0.99968
+start_decay: 10
+bayesian: false
+hidden_layers:
+  - [40, relu]
+  - [40, relu]
+learning_rate: 0.0005
+batch_size: 150
+train_frequency: 5
+update_target_frequency: 1000
+NN_sleep: 1000
+buffer_capacity: 15000
+optimizer_type: adam
 prioritized_replay_alpha: 0.6
+prioritized_replay_eps: 1.0E-6
 initial_beta: 0.4
+beta_jump: 1.06
+start_jump: null
+anneal_fraction: null
 final_beta: 0.7
 ```
 
@@ -276,10 +347,16 @@ AutoREC/
 |-- environment.yml                 # Conda environment that installs this package
 |-- requirements.txt                # Pip entry point that installs from pyproject.toml
 |-- setup_env.sh                    # Convenience conda setup script
+|-- Dockerfile                      # Container image definition for CLI workflows
+|-- .dockerignore                   # Docker build-context exclusions
 |-- README.md
 |-- data/                           # Example processed datasets
-|-- default_configs/                # Example YAML configurations
+|-- configs_yaml/
+|   `-- examples/                   # Example YAML configurations
 |-- example/                        # Example Python entry points
+|-- models/                         # Runtime model outputs and example models
+|-- results/                        # Runtime evaluation outputs, ignored except .gitkeep
+|-- runs/                           # Runtime training outputs, ignored except .gitkeep
 |-- scripts/
 |   `-- install_autorec_kernel_guard.py
 |-- src/
@@ -288,18 +365,212 @@ AutoREC/
 |       |-- data_preparation.py     # Data loading, processing, and validation
 |       |-- environment.py          # RL environment for ECM generation
 |       |-- factory.py              # Builders for config-driven workflows
+|       |-- cli.py                  # Command-line workflow entry points
 |       |-- utils.py                # Shared utilities
 |       |-- runtime.py              # Runtime setup helpers
-|       |-- default_configs/        # Package-level default configs
 |       `-- optimized_data_structures/
-|-- trained_agent/                  # Example trained model
 `-- tutorials/                      # Step-by-step notebook tutorials
 ```
-
 
 <p align="center">
   <img src="Design.png" alt="AutoREC design overview" width="550">
 </p>
+
+## Command Line Interface
+
+AutoREC also provides a command line interface for running common workflows
+without writing a separate Python script. After installing the package, the
+`autorec` command is available in the active environment:
+
+```bash
+python -m pip install -e .
+autorec --help
+```
+
+The CLI configures the AutoREC runtime before importing TensorFlow, JAX,
+AutoEIS, or other scientific libraries. This is the recommended command-line
+entry point for preprocessing, training, evaluation, and inference workflows.
+
+### 1. Preprocess Data
+
+Use `autorec preprocess` to process raw EIS CSV files or validate an existing
+processed dataset. Raw CSV files should contain `freq`, `Z_real`, and `Z_imag`
+columns.
+
+```bash
+autorec preprocess \
+  --input tutorials/EIS_raw_demo \
+  --output data/processed_training_data.pkl \
+  --mode process \
+  --perform-linkk-validation \
+  --tol-linkk 0.05 \
+  --frequency-bounds none none \
+  --frequency-npoints 80 \
+  --evaluation \
+  --summary
+```
+
+The interpolation options are optional. For `--frequency-bounds`, use `none`
+or `null` for either bound to use that spectrum's minimum or maximum frequency.
+
+To validate an existing processed dataset without reprocessing raw CSV files:
+
+```bash
+autorec preprocess \
+  --input data/examples/training_dataset.pkl \
+  --mode load \
+  --evaluation \
+  --summary
+```
+
+### 2. Train an Agent
+
+Use `autorec train` with a pipeline YAML configuration containing `environment`
+and `agent` sections and, optionally, a `dataprep` section. Without `dataprep`,
+the environment section must point to the processed dataset. The agent section
+controls training parameters and output paths.
+Use `--output-dir` to override the YAML `agent.save_dir` for training artifacts.
+If omitted, the CLI uses the `agent.save_dir` value from the config file.
+
+```bash
+autorec train \
+  --config configs_yaml/examples/demo_pipeline_config.yaml \
+  --output-dir runs/demo_train
+```
+
+### 3. Evaluate an Agent
+
+Use `autorec evaluate` to load a trained model and evaluate generated ECMs for
+selected rows, a random sample, or the full dataset.
+
+**Note:** The argument `--model` takes precedence over the `model` key inside the YAML configuration. If both are provided, the CLI uses the model path specified by `--model`.
+
+Evaluate specific row positions:
+
+```bash
+autorec evaluate \
+  --config configs_yaml/examples/demo_pipeline_config.yaml \
+  --model models/examples/agent_trained.keras \
+  --indices 0,4,10 \
+  --output-dir results/evaluate_demo
+```
+
+Evaluate a random sample:
+
+```bash
+autorec evaluate \
+  --config configs_yaml/examples/demo_pipeline_config.yaml \
+  --model models/examples/agent_trained.keras \
+  --num-samples 20 \
+  --output-dir results/evaluate_demo
+```
+
+Evaluate all rows:
+
+```bash
+autorec evaluate \
+  --config configs_yaml/examples/demo_pipeline_config.yaml \
+  --model models/examples/agent_trained.keras \
+  --all-rows \
+  --output-dir results/evaluate_demo
+```
+
+By default, evaluation uses the evaluation environment when the configuration
+defines one. Add `--use-training-env` to evaluate against the training dataset.
+Use `--output-dir` to override the YAML `agent.save_dir`; this keeps
+agent-created files such as model summaries, generated circuit images, GIFs, and
+evaluation CSV/Pickle files in the same runtime output directory. If
+`--output-dir` is omitted, the CLI uses the `agent.save_dir` value from the
+config file.
+
+### 4. Run Inference
+
+`autorec infer` is an alias for `autorec evaluate`. Use it when the goal is to
+apply a trained model to EIS rows and inspect the proposed ECMs rather than run
+a formal evaluation report.
+
+```bash
+autorec infer \
+  --config configs_yaml/examples/demo_pipeline_config.yaml \
+  --model models/examples/agent_trained.keras \
+  --indices 0 \
+  --max-actions 24 \
+  --output-dir results/inference_demo \
+  --run-id inference_demo
+```
+
+Useful shared options:
+
+- `--output-dir`: override `agent.save_dir` from the YAML file for training,
+  evaluation, and inference outputs.
+- `--threads`: control BLAS/OpenMP/NumExpr thread pools.
+- `--seed`: set the random seed for training, evaluation, and sampling.
+- `--skip-autoeis-warmup`: skip the AutoEIS/Julia warmup step.
+- `--show-tf-logs`: show TensorFlow logs that are hidden by default.
+
+## Docker
+
+AutoREC includes a Dockerfile for running the CLI in a reproducible container.
+The image contains the package code and dependencies. Data, trained models, and
+run outputs should be mounted from the host rather than baked into the image.
+
+Runtime directories:
+
+- `data/`: input datasets mounted at `/app/data`
+- `models/`: promoted or exported models mounted at `/app/models`
+- `runs/`: training outputs mounted at `/app/runs`
+- `results/`: evaluation and inference outputs mounted at `/app/results`
+
+Build the image:
+
+```bash
+docker build -t autorec:latest .
+```
+
+Check the CLI:
+
+```bash
+docker run --rm autorec:latest --help
+```
+
+Run training with mounted runtime directories:
+
+```bash
+docker run --rm \
+  -v "$PWD/data:/app/data" \
+  -v "$PWD/configs_yaml:/app/configs_yaml" \
+  -v "$PWD/models:/app/models" \
+  -v "$PWD/runs:/app/runs" \
+  -v "$PWD/results:/app/results" \
+  autorec:latest train \
+  --config /app/configs_yaml/examples/demo_docker_pipeline_config.yaml \
+  --output-dir /app/runs/demo_train
+```
+
+Run inference with an existing model:
+
+```bash
+docker run --rm \
+  -v "$PWD/data:/app/data" \
+  -v "$PWD/configs_yaml:/app/configs_yaml" \
+  -v "$PWD/models:/app/models" \
+  -v "$PWD/results:/app/results" \
+  autorec:latest infer \
+  --config /app/configs_yaml/examples/demo_docker_pipeline_config.yaml \
+  --model /app/models/examples/agent_trained.keras \
+  --indices 0 \
+  --output-dir /app/results/inference_demo
+```
+
+Note: if you want to open a shell instead of the default entrypoint, override
+the entrypoint for that `docker run` command:
+
+```bash
+docker run --rm -it --entrypoint /bin/bash autorec:latest
+```
+
+This is useful for inspecting the container or running commands manually without
+changing the Dockerfile.
 
 ## Development Notes
 
