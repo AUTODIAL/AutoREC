@@ -21,6 +21,12 @@ dataprep:
     - nphi
 
 environment:
+  elements:
+    - "+"
+    - "/"
+    - R
+    - L
+    - P
   initial_state:
     - +RRRRRR
     - ++RRRRRR
