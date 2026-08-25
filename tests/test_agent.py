@@ -7,6 +7,7 @@ Keras networks or running training. Focused architecture tests use small real Ke
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import pytest
 
 from autorec import agent as agent_module
@@ -80,6 +81,7 @@ def test_agent_initializes_defaults_and_writes_summary(light_agent, tmp_path):
     assert agent.start_jump == 4
     assert agent.anneal_fraction == pytest.approx(0.595)
     assert agent.prioritized_replay_beta == 0.2
+    assert agent.gradient_steps == 1
     assert agent.hidden_layers == [[40, "relu"], [40, "relu"]]
     assert agent.model_setup == (None, [[40, "relu"], [40, "relu"]])
     assert agent.model_dir == tmp_path / "models"
@@ -95,10 +97,85 @@ def test_agent_forwards_custom_model_configuration(light_agent, tmp_path):
         save_dir=tmp_path,
         model=str(model_path),
         hidden_layers=hidden_layers,
+        gradient_steps=3,
     )
 
     assert agent.hidden_layers is hidden_layers
+    assert agent.gradient_steps == 3
     assert agent.model_setup == (str(model_path), hidden_layers)
+
+
+@pytest.mark.parametrize(
+    ("gradient_steps", "exception", "message"),
+    [
+        (0, ValueError, "at least 1"),
+        (-1, ValueError, "at least 1"),
+        (1.5, TypeError, "must be an integer"),
+        (True, TypeError, "must be an integer"),
+    ],
+)
+def test_agent_rejects_invalid_gradient_steps(
+    light_agent, tmp_path, gradient_steps, exception, message
+):
+    with pytest.raises(exception, match=message):
+        light_agent(
+            training_env=DummyEnv(),
+            save_dir=tmp_path,
+            gradient_steps=gradient_steps,
+        )
+
+
+def test_train_model_resamples_and_performs_requested_gradient_steps():
+    agent = object.__new__(agent_module.DDQN_ECM)
+    agent.batch_size = 1
+    agent.gamma = 0.99
+    agent.prioritized_replay_beta = 0.4
+    agent.prioritized_replay_eps = 1e-6
+
+    inputs = agent_module.layers.Input(shape=(2,))
+    outputs = agent_module.layers.Dense(
+        1, kernel_initializer="zeros", bias_initializer="zeros"
+    )(inputs)
+    agent.model = agent_module.tf.keras.Model(inputs=inputs, outputs=outputs)
+    agent.target_model = agent_module.tf.keras.models.clone_model(agent.model)
+    agent.target_model.set_weights(agent.model.get_weights())
+    agent.optimizer = agent_module.tf.keras.optimizers.SGD(learning_rate=0.1)
+
+    agent._active_env = type(
+        "TrainingEnv",
+        (),
+        {
+            "dataset": pd.DataFrame({"flatten_Z": [np.array([1.0])]}),
+            "ACTIONS_LIST": pd.DataFrame([{"action_type": "R", "action_position": 0}]),
+        },
+    )()
+    history = pd.DataFrame(
+        {
+            "EIS": [0],
+            "encoded_state": [np.array([0.0])],
+            "action_type": ["R"],
+            "action_position": [0],
+            "encoded_new_state": [np.array([0.0])],
+            "reward": [1.0],
+            "terminal_flag": [1],
+            "priority": [1.0],
+        }
+    )
+    sample_count = 0
+
+    def sample_experience(replay, beta):
+        nonlocal sample_count
+        sample_count += 1
+        return replay, np.array([0]), np.ones(1)
+
+    agent._sample_experience = sample_experience
+
+    loss = agent._train_model(gradient_steps=3, history=history)
+
+    assert sample_count == 3
+    assert agent.optimizer.iterations.numpy() == 3
+    assert np.isfinite(loss)
+    assert history.loc[0, "priority"] != 1.0
 
 
 def test_agent_switches_between_training_and_eval_envs(light_agent, tmp_path):
