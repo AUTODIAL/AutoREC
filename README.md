@@ -158,7 +158,12 @@ from autorec.utils import set_global_seed
 
 set_global_seed(42, deterministic_ops=True)
 
-env = EIS_ECM_Env(dataset=dataset, seed=42, cache_enabled=True)
+env = EIS_ECM_Env(
+    dataset=dataset,
+    elements=["+", "/", "R", "L", "P"],
+    seed=42,
+    cache_enabled=True,
+)
 
 agent = DDQN_ECM(
     training_env=env,
@@ -253,6 +258,12 @@ Environment options:
 
 ```yaml
 dataset: "data/examples/training_dataset.pkl"
+elements:
+  - "+"
+  - "/"
+  - R
+  - L
+  - P
 initial_state:
   - +RRRRRR
   - ++RRRRRR
@@ -263,6 +274,11 @@ cache_enabled: true
 cache_capacity: 20000
 cache_type: lru
 ```
+
+The `elements` list controls the environment's state encoding and action space. Use the same
+elements in the same order when evaluating or continuing training with a saved model. Both
+the resistor (`R`) and at least one topology operator (`+` or `/`) are required; `L`, `C`,
+and `P` are optional.
 
 Agent options:
 
