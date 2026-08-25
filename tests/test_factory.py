@@ -130,11 +130,12 @@ def test_dataprep_builder_loads_data_exports_output_and_preserves_config(
 def test_environment_builder_accepts_dataframe_and_preserves_config(monkeypatch):
     factory = load_factory(monkeypatch)
     dataset = pd.DataFrame({"sample": [1]})
-    config = {"dataset": dataset, "seed": 42}
+    config = {"dataset": dataset, "elements": ["+", "R", "P"], "seed": 42}
 
     env = factory.environment_builder(config)
 
     assert env.dataset is dataset
+    assert env.kwargs["elements"] == ["+", "R", "P"]
     assert env.kwargs["seed"] == 42
     assert config["dataset"] is dataset
 
