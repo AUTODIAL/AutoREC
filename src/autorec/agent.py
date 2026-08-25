@@ -5,6 +5,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 import time
+from copy import deepcopy
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras import layers
@@ -142,8 +143,8 @@ class DDQN_ECM:
             Path to a pre-trained model to load. This argument takes precedence over creating
             a new model from the hidden_layers configuration.
 
-        hidden_layers: list of tuples, optional
-            List of [num_neurons, activation_function] for each hidden layer.
+        hidden_layers: list of (int, str), optional
+            List of (num_neurons, activation_function) for each hidden layer.
 
         learning_rate : float, optional
             Learning rate used by the neural network optimizer.
@@ -199,7 +200,7 @@ class DDQN_ECM:
 
         # Store circuit chromosome parameters as private (read-only via properties)
         self.random_seed = random_seed
-        tf.random.set_seed(42)
+        tf.random.set_seed(self.random_seed)
 
         # Store regular parameters
         self.action_cap = (
@@ -213,7 +214,7 @@ class DDQN_ECM:
         self.num_trials = num_trials
         self.gamma = gamma
 
-        self.continieous_deadloop = continuous_deadloop
+        self.continuous_deadloop = continuous_deadloop
         self.latent_deadloop = latent_deadloop
         # self.convergence_check: bool = convergence_check
         self.invalid_terminals = invalid_terminals
@@ -273,10 +274,11 @@ class DDQN_ECM:
         self.model_dir.mkdir(exist_ok=True)
 
         if hidden_layers is None:
-            self.hidden_layers = [[40, "relu"], [40, "relu"]]
+            self.hidden_layers = [(40, "relu"), (40, "relu")]
         else:
             self.hidden_layers = hidden_layers
         self._setup_model(model, self.hidden_layers)
+        self.model_name = self.save_dir / "dqn_model.keras" if model is None else Path(model)
 
         self.model.summary()
         summary_file = self.save_dir / "model_summary.txt"
@@ -370,7 +372,7 @@ class DDQN_ECM:
             This can be used as a starting point for further training or evaluation.
             If not provided, a new model will be created based on the hidden_layers
             configuration, with randomly initialized weights.
-        hidden_layers : list of tuples
+        hidden_layers : list of [int, str]
             Each tuple specifies (num_neurons, activation_function) for a hidden layer.
             Example: [(40, 'relu'), (40, 'relu')] creates two hidden layers with 40 neurons
             each and ReLU activation.
@@ -411,13 +413,10 @@ class DDQN_ECM:
             self._active_env.chromosome_HEAD_len,
             self._active_env.chromosome_TAIL_len,
         )
-        elems_extended_len, elems_len = (
-            len(self._active_env.ELEMENTS_EXTENDED),
-            len(self._active_env.ELEMENTS),
-        )
+        elems_extended_len = len(self._active_env.ELEMENTS_EXTENDED)
         eis_input_len = self._active_env.EIS_INPUT_SIZE
         state_shape = (HEAD_len + TAIL_len) * elems_extended_len + eis_input_len
-        n_actions = 2 + (HEAD_len - 1) * elems_len + (TAIL_len) * (elems_len - 2)
+        n_actions = len(self._active_env.ACTIONS_LIST)
 
         if model is None:
             # Build hidden layers dynamically based on hidden_layers parameter
@@ -434,11 +433,13 @@ class DDQN_ECM:
             # Load the model file
             self.load_model(model)
             # Update the hidden layers attribute to reflect the loaded model's architecture
-            self.hidden_layers = [
-                (layer.units, layer.activation.__name__)
-                for layer in self.model.layers
-                if isinstance(layer, layers.Dense) and layer != self.model.layers[-1]
-            ]
+            self.hidden_layers = deepcopy(
+                [
+                    (layer.units, layer.activation.__name__)
+                    for layer in self.model.layers
+                    if isinstance(layer, layers.Dense) and layer != self.model.layers[-1]
+                ]
+            )
 
     def save_model(self, filepath: str | Path, save_format: str = "keras") -> None:
         """
@@ -969,7 +970,7 @@ class DDQN_ECM:
         final_time = time.time()
         print(f"Training took {(final_time - initial_time) / 60:.2f} minutes")
 
-        self.model.save(self.save_dir / "dqn_model.keras")
+        self.model.save(self.model_name)
         success_rate.to_csv(self.save_dir / "success_rate.csv")
         NN_loss.to_csv(self.save_dir / "NN_loss.csv")
         terminal_states.to_csv(self.save_dir / "terminal_states.csv")
@@ -1233,7 +1234,7 @@ class DDQN_ECM:
         state_count = sum(1 for h in episode_history if h["new_state"] == current_state)
 
         # Trigger deadloop flag if thresholds exceeded
-        deadloop_flag = len(deadloop_chain) >= self.continieous_deadloop or (
+        deadloop_flag = len(deadloop_chain) >= self.continuous_deadloop or (
             state_count >= self.latent_deadloop and episode > self.NN_sleep
         )
 
@@ -1834,3 +1835,45 @@ class DDQN_ECM:
             gif_generation=gif_generation,
             all_rows=True,
         )
+
+    @property
+    def metadata(self) -> dict:
+        """Return metadata about the agent and its training configuration."""
+        return {
+            "training_env": self.training_env.metadata,
+            "eval_env": self.eval_env.metadata,
+            "save_dir": str(self.save_dir),
+            "save_start": self._save_start,
+            "save_frequency": self._save_frequency,
+            "action_cap": self.action_cap,
+            "random_seed": self.random_seed,
+            "episodes_trial": self.episodes_trial,
+            "num_trials": self.num_trials,
+            "gamma": self.gamma,
+            "continuous_deadloop": self.continuous_deadloop,
+            "latent_deadloop": self.latent_deadloop,
+            "invalid_terminals": self.invalid_terminals,
+            "initial_epsilon": self.initial_epsilon,
+            "epsilon_min": self.epsilon_min,
+            "epsilon_decay": self.epsilon_decay,
+            "start_decay": self.start_decay,
+            "bayesian": self.bayesian,
+            "model": str(self.model_name),
+            "hidden_layers": self.hidden_layers,
+            "learning_rate": self.learning_rate,
+            "batch_size": self.batch_size,
+            "train_frequency": self.train_frequency,
+            "update_target_frequency": self.update_target_frequency,
+            "NN_sleep": self.NN_sleep,
+            "buffer_capacity": self.buffer_capacity,
+            "optimizer_type": self.optimizer_type
+            if isinstance(self.optimizer_type, str)
+            else self.optimizer_type.__class__.__name__,
+            "prioritized_replay_alpha": self.prioritized_replay_alpha,
+            "prioritized_replay_eps": self.prioritized_replay_eps,
+            "initial_beta": self.initial_beta,
+            "beta_jump": self.beta_jump,
+            "start_jump": self.start_jump,
+            "anneal_fraction": self.anneal_fraction,
+            "final_beta": self.final_beta,
+        }
