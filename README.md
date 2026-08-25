@@ -165,6 +165,7 @@ agent = DDQN_ECM(
     num_trials=1000,
     save_dir="demo_output",
     random_seed=42,
+    gradient_steps=1,
 )
 
 agent.train()
@@ -289,6 +290,7 @@ hidden_layers:
 learning_rate: 0.0005
 batch_size: 150
 train_frequency: 5
+gradient_steps: 1
 update_target_frequency: 1000
 NN_sleep: 1000
 buffer_capacity: 15000
@@ -307,6 +309,9 @@ Training recommendations:
 - Start with the provided default configuration.
 - Increase `num_trials` for diverse datasets or more complex ECM families.
 - Reduce `num_trials` for small demonstrations or narrowly defined circuit sets.
+- Keep `gradient_steps: 1` as a baseline. Increasing it samples additional replay mini-batches
+  and applies one optimizer update per batch, increasing training cost and potentially
+  destabilizing learning if set too high.
 - Keep caching enabled unless memory use becomes a problem.
 
 ## How AutoREC Works
@@ -329,7 +334,8 @@ Training loop:
 2. The DDQN agent chooses an action that mutates one chromosome position.
 3. The environment converts the chromosome to a circuit and fits it to the EIS data.
 4. Rewards are computed from fit quality metrics such as R2 and chi-square as well as circuit complexity.
-5. The agent stores the transition in prioritized replay and updates its policy.
+5. The agent stores the transition in prioritized replay. At each `train_frequency` interval,
+   it samples and updates `gradient_steps` replay mini-batches.
 6. The process continues until a valid solution is found or the action budget is reached.
 
 The trained agent can then propose ECM topologies for new EIS spectra and report
