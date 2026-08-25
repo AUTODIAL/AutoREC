@@ -66,6 +66,7 @@ agent:
   learning_rate: 0.0005  # for optimization of the NN
   batch_size: 150  # training size for the main network
   train_frequency: 5  # train the main model every `train_frequency` steps
+  gradient_steps: 1  # replay mini-batches sampled and updated per training event
   update_target_frequency: 1000  # Frequency to update target network
   NN_sleep: 1000  # The number of initial data that should be gathered before the first training (should be larger than batch_size)
   buffer_capacity: 15000
