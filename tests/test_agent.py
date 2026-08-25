@@ -20,6 +20,22 @@ class DummyEnv:
     EIS_INPUT_SIZE = 4
     ELEMENTS_EXTENDED = ["+", "/", "R", "L", "P", "X"]
     ELEMENTS = ["+", "/", "R", "L", "P"]
+    ACTIONS_LIST = list(range(16))
+
+    def __init__(self, name="training"):
+        self.name = name
+
+    @property
+    def metadata(self):
+        return {"name": self.name}
+
+
+class OneOperatorDummyEnv(DummyEnv):
+    """Environment dimensions for an action space containing one operator."""
+
+    ELEMENTS_EXTENDED = ["+", "R", "L", "P", "X"]
+    ELEMENTS = ["+", "R", "L", "P"]
+    ACTIONS_LIST = list(range(14))
 
 
 class DummyModel:
@@ -80,8 +96,9 @@ def test_agent_initializes_defaults_and_writes_summary(light_agent, tmp_path):
     assert agent.start_jump == 4
     assert agent.anneal_fraction == pytest.approx(0.595)
     assert agent.prioritized_replay_beta == 0.2
-    assert agent.hidden_layers == [[40, "relu"], [40, "relu"]]
-    assert agent.model_setup == (None, [[40, "relu"], [40, "relu"]])
+    assert agent.hidden_layers == [(40, "relu"), (40, "relu")]
+    assert agent.model_setup == (None, [(40, "relu"), (40, "relu")])
+    assert agent.model_name == tmp_path / "dqn_model.keras"
     assert agent.model_dir == tmp_path / "models"
     assert (tmp_path / "model_summary.txt").read_text() == "dummy model\n"
 
@@ -173,6 +190,100 @@ def test_agent_builds_requested_hidden_layers(tmp_path):
         agent.target_model.get_weights(), agent.model.get_weights(), strict=True
     ):
         np.testing.assert_array_equal(target_weight, model_weight)
+
+
+def test_agent_output_size_matches_one_operator_action_list(tmp_path):
+    env = OneOperatorDummyEnv()
+
+    agent = agent_module.DDQN_ECM(
+        training_env=env,
+        save_dir=tmp_path,
+        hidden_layers=[(8, "relu")],
+        optimizer_type=object(),
+    )
+
+    assert agent.model.input_shape == (None, 29)
+    assert agent.model.output_shape == (None, len(env.ACTIONS_LIST))
+
+
+def test_agent_metadata_records_configuration(light_agent, tmp_path):
+    training_env = DummyEnv("training")
+    eval_env = DummyEnv("evaluation")
+    model_path = tmp_path / "input.keras"
+    optimizer = object()
+    agent = light_agent(
+        training_env=training_env,
+        eval_env=eval_env,
+        save_dir=tmp_path,
+        save_start=3,
+        save_frequency=20,
+        action_cap=11,
+        random_seed=7,
+        episodes_trial=2,
+        num_trials=100,
+        gamma=0.8,
+        continuous_deadloop=3,
+        latent_deadloop=6,
+        invalid_terminals=True,
+        initial_epsilon=0.9,
+        epsilon_min=0.05,
+        epsilon_decay=0.99,
+        start_decay=4,
+        bayesian=True,
+        model=model_path,
+        hidden_layers=[(12, "tanh")],
+        learning_rate=0.001,
+        batch_size=32,
+        train_frequency=2,
+        update_target_frequency=50,
+        NN_sleep=40,
+        buffer_capacity=500,
+        optimizer_type=optimizer,
+        prioritized_replay_alpha=0.7,
+        prioritized_replay_eps=1e-5,
+        initial_beta=0.3,
+        beta_jump=1.02,
+        start_jump=10,
+        anneal_fraction=0.4,
+        final_beta=0.9,
+    )
+
+    assert agent.metadata == {
+        "training_env": {"name": "training"},
+        "eval_env": {"name": "evaluation"},
+        "save_dir": str(tmp_path),
+        "save_start": 3,
+        "save_frequency": 20,
+        "action_cap": 11,
+        "random_seed": 7,
+        "episodes_trial": 2,
+        "num_trials": 100,
+        "gamma": 0.8,
+        "continuous_deadloop": 3,
+        "latent_deadloop": 6,
+        "invalid_terminals": True,
+        "initial_epsilon": 0.9,
+        "epsilon_min": 0.05,
+        "epsilon_decay": 0.99,
+        "start_decay": 4,
+        "bayesian": True,
+        "model": str(model_path),
+        "hidden_layers": [(12, "tanh")],
+        "learning_rate": 0.001,
+        "batch_size": 32,
+        "train_frequency": 2,
+        "update_target_frequency": 50,
+        "NN_sleep": 40,
+        "buffer_capacity": 500,
+        "optimizer_type": "object",
+        "prioritized_replay_alpha": 0.7,
+        "prioritized_replay_eps": 1e-5,
+        "initial_beta": 0.3,
+        "beta_jump": 1.02,
+        "start_jump": 10,
+        "anneal_fraction": 0.4,
+        "final_beta": 0.9,
+    }
 
 
 def test_model_file_takes_precedence_over_hidden_layers(tmp_path):
