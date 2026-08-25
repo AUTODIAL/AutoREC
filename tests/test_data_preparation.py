@@ -13,9 +13,9 @@ import pytest
 from autorec.data_preparation import EISDataPrep
 
 
-def make_processed_dataset():
+def make_processed_dataset(metadata=None):
     """Return a minimal processed dataset that satisfies load-mode validation."""
-    return pd.DataFrame(
+    dataset = pd.DataFrame(
         {
             "sub_id": ["sample.csv"],
             "freq": [np.array([1.0, 10.0, 100.0])],
@@ -25,6 +25,9 @@ def make_processed_dataset():
             "r2_thresh": [0.95],
         }
     )
+    if metadata is not None:
+        dataset["metadata"] = [metadata]
+    return dataset
 
 
 def write_raw_csv(path, freq, *, z_real=None, z_imag=None):
@@ -142,8 +145,18 @@ def test_create_sub_id_returns_path_relative_to_base(tmp_path):
     assert prep.create_sub_id(csv_path, base_path) == "R0/sample.csv"
 
 
-def test_load_mode_reads_pickle_dataframe(tmp_path):
-    dataset = make_processed_dataset()
+def test_load_mode_reads_pickle_metadata_and_updates_attributes(tmp_path):
+    metadata = {
+        "path": "raw/source",
+        "mode": "process",
+        "evaluation": True,
+        "perform_linKK_validation": True,
+        "tol_linKK": 0.01,
+        "frequency_bounds": (10.0, 1_000.0),
+        "frequency_npoints": 3,
+        "eis_features": ["ReZ", "ImZ"],
+    }
+    dataset = make_processed_dataset(metadata=metadata)
     pkl_path = tmp_path / "dataset.pkl"
     dataset.to_pickle(pkl_path)
 
@@ -151,6 +164,11 @@ def test_load_mode_reads_pickle_dataframe(tmp_path):
     loaded = prep.load()
 
     pd.testing.assert_frame_equal(loaded, dataset)
+    assert prep.perform_linKK_validation is True
+    assert prep.tol_linKK == 0.01
+    assert prep.frequency_bounds == (10.0, 1_000.0)
+    assert prep.frequency_npoints == 3
+    assert prep.eis_features == ["ReZ", "ImZ"]
 
 
 def test_load_mode_rejects_pickle_that_is_not_dataframe(tmp_path):
@@ -302,6 +320,16 @@ def test_process_raw_csv_without_linkk_interpolates_dataset(tmp_path, monkeypatc
     assert len(row["flatten_Z"]) == 2 * len(expected_freq)
     assert row["chi_thresh"] == 0.01
     assert row["r2_thresh"] == 0.95
+    assert row["metadata"] == {
+        "path": str(base_path),
+        "mode": "process",
+        "evaluation": False,
+        "perform_linKK_validation": False,
+        "tol_linKK": 0.05,
+        "frequency_bounds": (10.0, 1_000.0),
+        "frequency_npoints": 3,
+        "eis_features": ["ReZ", "ImZ"],
+    }
 
 
 def test_process_raw_csv_with_linkk_preprocesses_before_interpolation(tmp_path, monkeypatch):
@@ -345,3 +373,5 @@ def test_process_raw_csv_with_linkk_preprocesses_before_interpolation(tmp_path, 
     np.testing.assert_allclose(preprocess_calls[0][0], raw_freq)
     np.testing.assert_allclose(preprocess_calls[0][1], raw_impedance)
     assert preprocess_calls[0][2] == 0.02
+    assert row["metadata"]["perform_linKK_validation"] is True
+    assert row["metadata"]["tol_linKK"] == 0.02
