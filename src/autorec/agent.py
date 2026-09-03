@@ -1,4 +1,4 @@
-from typing import Optional, Dict, Union, Any
+from typing import Optional, Dict, Union, Any, Sequence
 from pathlib import Path
 
 import pandas as pd
@@ -7,7 +7,6 @@ from tqdm import tqdm
 import time
 import numpy as np
 import tensorflow as tf
-from tensorflow.keras import layers
 
 import autoeis as ae
 from autorec.environment import EIS_ECM_Env
@@ -17,7 +16,16 @@ from autorec.utils import (
     plot_eval_fit,
     prepare_and_generate_circuit_gif,
 )
+from autorec.factory import create_model, get_model_config
+from autorec.factory import create_optimizer, get_optimizer_config
 from autorec.optimized_data_structures.circular_buffer import CircularBuffer
+
+
+default_hidden_layers = [
+    {"type": "Dense", "units": 40, "activation": "relu"},
+    {"type": "Dense", "units": 40, "activation": "relu"},
+]
+default_optimizer_config = {"type": "Adam", "learning_rate": 0.0005}
 
 
 class DDQN_ECM:
@@ -53,13 +61,15 @@ class DDQN_ECM:
         start_decay: int = 10,
         bayesian: bool = False,
         # NN hyperparameters
-        learning_rate: float = 0.0005,
+        model: Optional[str] = None,
+        hidden_layers: Optional[Sequence[dict[str, Any]]] = None,
         batch_size: int = 150,
         train_frequency: int = 5,
         update_target_frequency: int = 1000,
+        gradient_steps: int = 1,
         NN_sleep: int = 1000,
         buffer_capacity: int = 15000,
-        optimizer_type: Union[str, tf.keras.optimizers.Optimizer] = "adam",
+        optimizer: Optional[Union[dict, tf.keras.optimizers.Optimizer]] = None,
         # Prioritized replay parameters
         prioritized_replay_alpha: float = 0.6,
         prioritized_replay_eps: float = 1e-6,
@@ -136,8 +146,14 @@ class DDQN_ECM:
             If True, a Bayesian posterior-based bonus is added to the reward. This option is
             currently retained for compatibility and is not active in the reward calculation.
 
-        learning_rate : float, optional
-            Learning rate used by the neural network optimizer.
+        model : str, optional
+            Path to a pre-trained model to load. This argument takes precedence over creating
+            a new model from the hidden_layers configuration.
+
+        hidden_layers: sequence of dicts, optional
+            Each dict specifies a hidden layer configuration with keys 'type' to specify the
+            layer type (e.g., 'Dense') and other keyword arguments like 'units' and
+            'activation'.
 
         batch_size : int, optional
             Mini-batch size used during neural network training.
@@ -148,14 +164,22 @@ class DDQN_ECM:
         update_target_frequency : int, optional
             Frequency (in steps) for updating the target network.
 
+        gradient_steps : int, optional
+            Number of replay mini-batches to sample and optimizer updates to perform each time
+            the model is trained. Must be a positive integer.
+
         NN_sleep : int, optional
             Number of initial transitions collected before training begins.
 
         buffer_capacity : int, optional
             Maximum number of experiences stored in the replay buffer.
 
-        optimizer_type : Union[str, tf.keras.optimizers.Optimizer], optional
-            Optimizer used for training the neural network.
+        optimizer: Union[dict, tf.keras.optimizers.Optimizer], optional
+            Optimizer configuration dictionary or a pre-initialized Keras optimizer object.
+            If a dictionary is provided, it must include a "type" key specifying the optimizer
+            type (e.g., "Adam") and any additional keyword arguments for the optimizer (e.g.,
+            "learning_rate"). The learning rate can be a numeric value or a nested dictionary
+            configuring a Keras learning-rate schedule.
 
         prioritized_replay_alpha : float, optional
             Exponent controlling how strongly sampling prioritizes large TD errors.
@@ -189,7 +213,7 @@ class DDQN_ECM:
 
         # Store circuit chromosome parameters as private (read-only via properties)
         self.random_seed = random_seed
-        tf.random.set_seed(42)
+        tf.random.set_seed(self.random_seed)
 
         # Store regular parameters
         self.action_cap = (
@@ -203,7 +227,7 @@ class DDQN_ECM:
         self.num_trials = num_trials
         self.gamma = gamma
 
-        self.continieous_deadloop = continuous_deadloop
+        self.continuous_deadloop = continuous_deadloop
         self.latent_deadloop = latent_deadloop
         # self.convergence_check: bool = convergence_check
         self.invalid_terminals = invalid_terminals
@@ -216,13 +240,16 @@ class DDQN_ECM:
         # self.decay_fraction: float = decay_fraction
 
         # NN hyperparameters
-        self.learning_rate = learning_rate
         self.batch_size = batch_size
         self.train_frequency = train_frequency
         self.update_target_frequency = update_target_frequency
+        if isinstance(gradient_steps, bool) or not isinstance(gradient_steps, int):
+            raise TypeError("gradient_steps must be an integer.")
+        if gradient_steps < 1:
+            raise ValueError("gradient_steps must be at least 1.")
+        self.gradient_steps = gradient_steps
         self.NN_sleep = NN_sleep  # The number of initial data that should be gathered before the first training (should be larger than batch_size)
         self.buffer_capacity = buffer_capacity
-        self.optimizer_type = optimizer_type
 
         # Prioritized replay parameters
         self.prioritized_replay_alpha = prioritized_replay_alpha
@@ -243,13 +270,19 @@ class DDQN_ECM:
         )
 
         # Create optimizer
-        if isinstance(self.optimizer_type, str):
-            if self.optimizer_type == "adam":
-                self.optimizer = tf.keras.optimizers.Adam(learning_rate=self.learning_rate)
-            else:
-                raise ValueError(f"Unsupported optimizer type: {self.optimizer_type}")
-        else:  # User passed optimizer object directly
-            self.optimizer = self.optimizer_type
+        if optimizer is None:
+            optimizer = default_optimizer_config
+        if isinstance(optimizer, dict):
+            # Use the factory function to create the optimizer from configuration dictionary
+            self.optimizer = create_optimizer(optimizer)
+        elif isinstance(optimizer, tf.keras.optimizers.Optimizer):
+            self.optimizer = optimizer
+        else:
+            raise TypeError(
+                "Optimizer must be either a configuration dictionary or "
+                "a Keras optimizer object."
+            )
+        self.optimizer_config = get_optimizer_config(self.optimizer)
 
         self.bayesian = bayesian
         # self.adaptive_reward = adaptive_reward
@@ -262,7 +295,12 @@ class DDQN_ECM:
         self.model_dir = self.save_dir / "models"
         self.model_dir.mkdir(exist_ok=True)
 
-        self._setup_model()
+        if hidden_layers is None:
+            self.hidden_layers = [config.copy() for config in default_hidden_layers]
+        else:
+            self.hidden_layers = hidden_layers
+        self._setup_model(model, self.hidden_layers)
+        self.model_name = self.save_dir / "dqn_model.keras" if model is None else Path(model)
 
         self.model.summary()
         summary_file = self.save_dir / "model_summary.txt"
@@ -335,15 +373,38 @@ class DDQN_ECM:
         else:
             return "unknown"
 
-    def _setup_model(self) -> None:
+    def _setup_model(
+        self, model: Optional[str], hidden_layers: Sequence[dict[str, Any]]
+    ) -> None:
         """
-        Create and initialize the neural network architecture for the DDQN agent.
+        Load or create and initialize the neural network architecture for the DDQN agent.
 
         This method builds two identical neural networks:
         1. Main model: Used for selecting actions and gets trained
         2. Target model: Used for calculating Q-value targets, updated less frequently
-        The target model starts with identical weights to the main model but diverges during
-        training as only the main model is updated frequently.
+        The target model starts with identical weights to the main model but
+        diverges during training as only the main model is updated frequently.
+
+        The Double DQN (DDQN) algorithm uses two networks to reduce overestimation
+        of Q-values, which leads to more stable and accurate learning.
+
+        Parameters
+        ----------
+        model : str, optional
+            Path to a pre-trained model file. If provided, the model will be loaded from disk,
+            then information about the hidden layers will be extracted from the loaded model.
+            This can be used as a starting point for further training or evaluation.
+            If not provided, a new model will be created based on the hidden_layers
+            configuration, with randomly initialized weights.
+        hidden_layers : sequence of dicts
+            Each dict specifies a hidden layer configuration with keys 'type' to specify the
+            layer type (e.g., 'Dense') and other keyword arguments like 'units' and
+            'activation'. This is only used if model is None.
+
+        Notes
+        -----
+        If model is provided, loading the model from the file is prioritized over creating it
+        from the given hidden_layers configuration.
 
         Network Architecture:
         ---------------------
@@ -351,13 +412,9 @@ class DDQN_ECM:
             - Size: (chromosome_length x num_elements) + EIS_data_length
             - Combines: One-hot encoded circuit state + normalized EIS measurements
 
-        Hidden Layer 1:
-            - 40 neurons with ReLU activation
-            - Learns basic patterns in state-action relationships
-
-        Hidden Layer 2:
-            - 40 neurons with ReLU activation
-            - Learns higher-level representations
+        Hidden Layers:
+            - A sequential stack of built-in Keras layers configured by hidden_layers
+            - Each configuration uses a layer "type" and that layer's constructor arguments
 
         Output Layer:
             - Size: Number of possible actions
@@ -380,24 +437,22 @@ class DDQN_ECM:
             self._active_env.chromosome_HEAD_len,
             self._active_env.chromosome_TAIL_len,
         )
-        elems_extended_len, elems_len = (
-            len(self._active_env.ELEMENTS_EXTENDED),
-            len(self._active_env.ELEMENTS),
-        )
-        eis_input_len = self._active_env.EIS_INPUT_SZE
-
+        elems_extended_len = len(self._active_env.ELEMENTS_EXTENDED)
+        eis_input_len = self._active_env.EIS_INPUT_SIZE
         state_shape = (HEAD_len + TAIL_len) * elems_extended_len + eis_input_len
-        n_actions = 2 + (HEAD_len - 1) * elems_len + (TAIL_len) * (elems_len - 2)
-        inputs = layers.Input(shape=(state_shape,))
-        layer1 = layers.Dense(40, activation="relu")(inputs)
-        layer2 = layers.Dense(40, activation="relu")(layer1)
-        outputs = layers.Dense(n_actions, activation="linear")(layer2)
-        print("input shape: ", inputs.shape)
-        print("output shape: ", outputs.shape)
+        n_actions = len(self._active_env.ACTIONS_LIST)
 
-        self.model = tf.keras.Model(inputs=inputs, outputs=outputs)
-        self.target_model = tf.keras.models.clone_model(self.model)
-        self.target_model.set_weights(self.model.get_weights())
+        if model is None:
+            input_layer = {"type": "InputLayer", "shape": (state_shape,)}
+            output_layer = {"type": "Dense", "units": n_actions, "activation": "linear"}
+            self.model = create_model(
+                input_layer, hidden_layers, output_layer, name="DDQN_Model"
+            )
+            self.target_model = tf.keras.models.clone_model(self.model)
+            self.target_model.set_weights(self.model.get_weights())
+        else:
+            # Load the model file
+            self.load_model(model)
 
     def save_model(self, filepath: str | Path, save_format: str = "keras") -> None:
         """
@@ -458,6 +513,7 @@ class DDQN_ECM:
         - Replay buffer: history = pd.read_pickle('replay_buffer.pkl')
         - Epsilon value: agent.epsilon = saved_epsilon
         - Trial counter: start_trial = saved_trial
+        - Optimizer state and iteration, including learning-rate schedule progress
 
         Parameters
         ----------
@@ -481,8 +537,11 @@ class DDQN_ECM:
             raise FileNotFoundError(f"Model file not found: {filepath}")
 
         self.model = tf.keras.models.load_model(filepath)
+        # Update the target model
         self.target_model = tf.keras.models.clone_model(self.model)
         self.target_model.set_weights(self.model.get_weights())
+        # Update the hidden layers to reflect the loaded model's architecture
+        self.hidden_layers = get_model_config(self.model)
         print(f"✓ Model loaded from: {filepath}")
 
     def scheduler(self, trial: int, schedule_timesteps: float) -> float:
@@ -711,6 +770,7 @@ class DDQN_ECM:
 
     def _train_model(
         self,
+        gradient_steps: int,
         history,
     ):
         """
@@ -718,129 +778,113 @@ class DDQN_ECM:
 
         Parameters
         ----------
+        gradient_steps : int
+            Number of replay mini-batches to sample and optimizer updates to perform.
+
         history : pd.DataFrame
             DataFrame containing experience replay buffer.
 
         Returns
         -------
         float
-            Mean loss for this training step.
+            Mean mini-batch loss across all optimizer updates in this training step.
         """
-        samples, sample_indices, weights = self._sample_experience(
-            history, self.prioritized_replay_beta
-        )
-        all_states = []
-        all_next_state = []
-        all_rewards = []
-        all_flags = []
-        all_actions = []
+        losses = []
+        for _ in range(gradient_steps):
+            samples, sample_indices, weights = self._sample_experience(
+                history, self.prioritized_replay_beta
+            )
+            all_states = []
+            all_next_state = []
+            all_rewards = []
+            all_flags = []
+            all_actions = []
 
-        # Select only the 8 columns needed
-        # samples_subset = samples[
-        #     [
-        #         "EIS",
-        #         "state",
-        #         "action_type",
-        #         "action_position",
-        #         "new_state",
-        #         "reward",
-        #         "terminal_flag",
-        #         "priority",
-        #     ]
-        # ]
-        samples_subset = samples[
-            [
-                "EIS",
-                "encoded_state",
-                "action_type",
-                "action_position",
-                "encoded_new_state",
-                "reward",
-                "terminal_flag",
-                "priority",
+            # Select only the 8 columns needed
+            samples_subset = samples[
+                [
+                    "EIS",
+                    "encoded_state",
+                    "action_type",
+                    "action_position",
+                    "encoded_new_state",
+                    "reward",
+                    "terminal_flag",
+                    "priority",
+                ]
             ]
-        ]
+            for (
+                sample_EIS_i,
+                encoded_state,
+                sample_action_type,
+                sample_action_position,
+                encoded_next_state,
+                sample_reward,
+                sample_flag,
+                sample_priority,
+            ) in samples_subset.itertuples(index=False):
+                sample_action = (sample_action_type, sample_action_position)
+                sample_flatten_Z = self._active_env.dataset.iloc[sample_EIS_i]["flatten_Z"]
 
-        # for (
-        #     sample_EIS_i,
-        #     sample_state,
-        #     sample_action_type,
-        #     sample_action_position,
-        #     sample_next_state,
-        #     sample_reward,
-        #     sample_flag,
-        #     sample_priority,
-        # ) in samples_subset.itertuples(index=False):
-        for (
-            sample_EIS_i,
-            encoded_state,
-            sample_action_type,
-            sample_action_position,
-            encoded_next_state,
-            sample_reward,
-            sample_flag,
-            sample_priority,
-        ) in samples_subset.itertuples(index=False):
-            sample_action = (sample_action_type, sample_action_position)
-            sample_flatten_Z = self._active_env.dataset.iloc[sample_EIS_i]["flatten_Z"]
+                # Use pre-encoded states from buffer
+                NN_state = np.concatenate((sample_flatten_Z, encoded_state))
+                NN_next_state = np.concatenate((sample_flatten_Z, encoded_next_state))
 
-            # Use pre-encoded states from buffer
-            NN_state = np.concatenate((sample_flatten_Z, encoded_state))
-            NN_next_state = np.concatenate((sample_flatten_Z, encoded_next_state))
+                all_states.append(NN_state)
+                all_next_state.append(NN_next_state)
+                all_rewards.append(sample_reward)
+                all_flags.append(sample_flag)
+                all_actions.append(sample_action)
 
-            all_states.append(NN_state)
-            all_next_state.append(NN_next_state)
-            all_rewards.append(sample_reward)
-            all_flags.append(sample_flag)
-            all_actions.append(sample_action)
+            # NOTE: This part is for the target Q-value
+            # Use the main model for finding the next best action
+            next_q_values_main = self.model.predict(np.array(all_next_state), verbose=0)
+            next_actions = np.argmax(next_q_values_main, axis=1)
 
-        # NOTE: This part is for the target Q-value
-        # Use the main model for finding the next best action
-        next_q_values_main = self.model.predict(np.array(all_next_state), verbose=0)
-        next_actions = np.argmax(next_q_values_main, axis=1)
+            # Use the target model for predicting the Q-values of the best next action
+            next_q_values = self.target_model.predict(np.array(all_next_state), verbose=0)
+            max_next_q_values = next_q_values[np.arange(self.batch_size), next_actions]
 
-        # Use the target model for predicting the Q-values of the best next action
-        next_q_values = self.target_model.predict(np.array(all_next_state), verbose=0)
-        max_next_q_values = next_q_values[np.arange(self.batch_size), next_actions]
+            # Calculate target Q-values
+            target_q_values = (
+                np.array(all_rewards)
+                + (1 - np.array(all_flags)) * self.gamma * max_next_q_values
+            )
 
-        # Calculate target Q-values
-        target_q_values = (
-            np.array(all_rewards) + (1 - np.array(all_flags)) * self.gamma * max_next_q_values
-        )
+            # NOTE: This part is for Predicted Q-value and loss calculation (Predicted Q-value
+            # is also know as Selected Q-value as it is the Q-value for the selected/sampled
+            # action of that state)
+            # find action indices (labels)
+            action_indices = []
+            counter = 0
+            ACTIONS_LIST = self._active_env.ACTIONS_LIST
+            for action in all_actions:
+                indices = ACTIONS_LIST.loc[
+                    (ACTIONS_LIST["action_type"] == action[0])
+                    & (ACTIONS_LIST["action_position"] == action[1])
+                ].index
+                action_indices.append([counter, indices[0]])
+                counter += 1
 
-        # NOTE: This part is for Predicted Q-value and loss calculation (Predicted Q-value is
-        # also know as Selected Q-value as it is the Q-value for the selected/sampled action
-        # of that state)
-        # find action indices (labels)
-        action_indices = []
-        counter = 0
-        ACTIONS_LIST = self._active_env.ACTIONS_LIST
-        for action in all_actions:
-            indices = ACTIONS_LIST.loc[
-                (ACTIONS_LIST["action_type"] == action[0])
-                & (ACTIONS_LIST["action_position"] == action[1])
-            ].index
-            action_indices.append([counter, indices[0]])
-            counter += 1
+            # Gradient descent step to update the main model
+            with tf.GradientTape() as tape:
+                q_values = self.model(np.array(all_states))
+                selected_q_values = tf.gather_nd(q_values, action_indices)
+                loss = weights * tf.square(target_q_values - selected_q_values)
+                loss_mean = tf.reduce_mean(loss)
+            grads = tape.gradient(loss_mean, self.model.trainable_variables)
+            self.optimizer.apply_gradients(zip(grads, self.model.trainable_variables))
+            losses.append(loss_mean.numpy())
 
-        with tf.GradientTape() as tape:
+            # Calculate the loss and then calculate/update the priority for PER
             q_values = self.model(np.array(all_states))
             selected_q_values = tf.gather_nd(q_values, action_indices)
-            loss = weights * tf.square(target_q_values - selected_q_values)
-            loss_mean = tf.reduce_mean(loss)
 
-        grads = tape.gradient(loss_mean, self.model.trainable_variables)
-        self.optimizer.apply_gradients(zip(grads, self.model.trainable_variables))
+            td_errors = np.abs(target_q_values - selected_q_values.numpy())
+            priority = (td_errors + self.prioritized_replay_eps).astype(np.float32)
+            history.loc[sample_indices, "priority"] = priority
 
-        # Calculate the loss and then calculate/update the priority for PER
-        q_values = self.model(np.array(all_states))
-        selected_q_values = tf.gather_nd(q_values, action_indices)
-
-        td_errors = np.abs(target_q_values - selected_q_values.numpy())
-        priority = (td_errors + self.prioritized_replay_eps).astype(np.float32)
-        history.loc[sample_indices, "priority"] = priority
-
-        return loss_mean.numpy()
+        return np.mean(losses)
 
     def train(self):
         """Main training loop across all trials."""
@@ -915,6 +959,7 @@ class DDQN_ECM:
                     t,
                     e,
                     flatten_Z,
+                    self.gradient_steps,
                     buffer,
                     terminal_states,
                     iteration,
@@ -951,7 +996,7 @@ class DDQN_ECM:
         final_time = time.time()
         print(f"Training took {(final_time - initial_time) / 60:.2f} minutes")
 
-        self.model.save(self.save_dir / "dqn_model.keras")
+        self.model.save(self.model_name)
         success_rate.to_csv(self.save_dir / "success_rate.csv")
         NN_loss.to_csv(self.save_dir / "NN_loss.csv")
         terminal_states.to_csv(self.save_dir / "terminal_states.csv")
@@ -974,6 +1019,7 @@ class DDQN_ECM:
         trial,
         episode,
         flatten_Z,
+        gradient_steps,
         buffer,
         terminal_states,
         iteration,
@@ -998,6 +1044,7 @@ class DDQN_ECM:
                 deadloop_chain,
                 episode,
                 EIS_i,
+                gradient_steps,
                 buffer,
                 iteration,
                 target_freq,
@@ -1045,6 +1092,7 @@ class DDQN_ECM:
         deadloop_chain,
         episode,
         EIS_i,
+        gradient_steps,
         buffer,
         iteration,
         target_freq,
@@ -1106,7 +1154,7 @@ class DDQN_ECM:
 
         # # Check and perform training
         # NOTE: not moved to episode training
-        loss, memory = self._check_and_train(buffer, iteration, memory)
+        loss, memory = self._check_and_train(gradient_steps, buffer, iteration, memory)
 
         # # Update target network if needed
         # NOTE: not Moved to episode training
@@ -1155,7 +1203,7 @@ class DDQN_ECM:
             "loss": loss,
         }
 
-    def _check_and_train(self, buffer, iteration, memory):
+    def _check_and_train(self, gradient_steps, buffer, iteration, memory):
         """Check if training is needed and perform training step."""
         loss = None
         run_training = (iteration == self.NN_sleep) or (
@@ -1164,7 +1212,7 @@ class DDQN_ECM:
 
         if run_training:
             history_buffer_df = buffer.to_dataframe()
-            loss = self._train_model(history_buffer_df)
+            loss = self._train_model(gradient_steps, history_buffer_df)
             memory = 0
             # Update buffer priorities
             for idx in range(len(history_buffer_df)):
@@ -1215,7 +1263,7 @@ class DDQN_ECM:
         state_count = sum(1 for h in episode_history if h["new_state"] == current_state)
 
         # Trigger deadloop flag if thresholds exceeded
-        deadloop_flag = len(deadloop_chain) >= self.continieous_deadloop or (
+        deadloop_flag = len(deadloop_chain) >= self.continuous_deadloop or (
             state_count >= self.latent_deadloop and episode > self.NN_sleep
         )
 
@@ -1816,3 +1864,42 @@ class DDQN_ECM:
             gif_generation=gif_generation,
             all_rows=True,
         )
+
+    @property
+    def metadata(self) -> dict:
+        """Return metadata about the agent and its training configuration."""
+        return {
+            "training_env": self.training_env.metadata,
+            "eval_env": self.eval_env.metadata,
+            "save_dir": str(self.save_dir),
+            "save_start": self._save_start,
+            "save_frequency": self._save_frequency,
+            "action_cap": self.action_cap,
+            "random_seed": self.random_seed,
+            "episodes_trial": self.episodes_trial,
+            "num_trials": self.num_trials,
+            "gamma": self.gamma,
+            "continuous_deadloop": self.continuous_deadloop,
+            "latent_deadloop": self.latent_deadloop,
+            "invalid_terminals": self.invalid_terminals,
+            "initial_epsilon": self.initial_epsilon,
+            "epsilon_min": self.epsilon_min,
+            "epsilon_decay": self.epsilon_decay,
+            "start_decay": self.start_decay,
+            "bayesian": self.bayesian,
+            "model": str(self.model_name),
+            "hidden_layers": self.hidden_layers,
+            "batch_size": self.batch_size,
+            "train_frequency": self.train_frequency,
+            "update_target_frequency": self.update_target_frequency,
+            "NN_sleep": self.NN_sleep,
+            "buffer_capacity": self.buffer_capacity,
+            "optimizer": self.optimizer_config,
+            "prioritized_replay_alpha": self.prioritized_replay_alpha,
+            "prioritized_replay_eps": self.prioritized_replay_eps,
+            "initial_beta": self.initial_beta,
+            "beta_jump": self.beta_jump,
+            "start_jump": self.start_jump,
+            "anneal_fraction": self.anneal_fraction,
+            "final_beta": self.final_beta,
+        }
