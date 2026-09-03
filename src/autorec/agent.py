@@ -1,4 +1,4 @@
-from typing import Optional, Dict, Union, Any
+from typing import Optional, Dict, Union, Any, Sequence
 from pathlib import Path
 
 import pandas as pd
@@ -7,7 +7,6 @@ from tqdm import tqdm
 import time
 import numpy as np
 import tensorflow as tf
-from tensorflow.keras import layers
 
 import autoeis as ae
 from autorec.environment import EIS_ECM_Env
@@ -17,7 +16,14 @@ from autorec.utils import (
     plot_eval_fit,
     prepare_and_generate_circuit_gif,
 )
+from autorec.factory.model import create_model, get_model_config
 from autorec.optimized_data_structures.circular_buffer import CircularBuffer
+
+
+default_hidden_layers = [
+    {"type": "Dense", "units": 40, "activation": "relu"},
+    {"type": "Dense", "units": 40, "activation": "relu"},
+]
 
 
 class DDQN_ECM:
@@ -53,6 +59,8 @@ class DDQN_ECM:
         start_decay: int = 10,
         bayesian: bool = False,
         # NN hyperparameters
+        model: Optional[str] = None,
+        hidden_layers: Optional[Sequence[dict[str, Any]]] = None,
         learning_rate: float = 0.0005,
         batch_size: int = 150,
         train_frequency: int = 5,
@@ -136,6 +144,15 @@ class DDQN_ECM:
             If True, a Bayesian posterior-based bonus is added to the reward. This option is
             currently retained for compatibility and is not active in the reward calculation.
 
+        model : str, optional
+            Path to a pre-trained model to load. This argument takes precedence over creating
+            a new model from the hidden_layers configuration.
+
+        hidden_layers: sequence of dicts, optional
+            Each dict specifies a hidden layer configuration with keys 'type' to specify the
+            layer type (e.g., 'Dense') and other keyword arguments like 'units' and
+            'activation'.
+
         learning_rate : float, optional
             Learning rate used by the neural network optimizer.
 
@@ -155,7 +172,8 @@ class DDQN_ECM:
             Maximum number of experiences stored in the replay buffer.
 
         optimizer_type : Union[str, tf.keras.optimizers.Optimizer], optional
-            Optimizer used for training the neural network.
+            Optimizer used for training the neural network. Currently, only 'adam' is supported
+            as a string. Alternatively, a custom optimizer object can be provided.
 
         prioritized_replay_alpha : float, optional
             Exponent controlling how strongly sampling prioritizes large TD errors.
@@ -189,7 +207,7 @@ class DDQN_ECM:
 
         # Store circuit chromosome parameters as private (read-only via properties)
         self.random_seed = random_seed
-        tf.random.set_seed(42)
+        tf.random.set_seed(self.random_seed)
 
         # Store regular parameters
         self.action_cap = (
@@ -203,7 +221,7 @@ class DDQN_ECM:
         self.num_trials = num_trials
         self.gamma = gamma
 
-        self.continieous_deadloop = continuous_deadloop
+        self.continuous_deadloop = continuous_deadloop
         self.latent_deadloop = latent_deadloop
         # self.convergence_check: bool = convergence_check
         self.invalid_terminals = invalid_terminals
@@ -262,7 +280,12 @@ class DDQN_ECM:
         self.model_dir = self.save_dir / "models"
         self.model_dir.mkdir(exist_ok=True)
 
-        self._setup_model()
+        if hidden_layers is None:
+            self.hidden_layers = [config.copy() for config in default_hidden_layers]
+        else:
+            self.hidden_layers = hidden_layers
+        self._setup_model(model, self.hidden_layers)
+        self.model_name = self.save_dir / "dqn_model.keras" if model is None else Path(model)
 
         self.model.summary()
         summary_file = self.save_dir / "model_summary.txt"
@@ -335,15 +358,38 @@ class DDQN_ECM:
         else:
             return "unknown"
 
-    def _setup_model(self) -> None:
+    def _setup_model(
+        self, model: Optional[str], hidden_layers: Sequence[dict[str, Any]]
+    ) -> None:
         """
-        Create and initialize the neural network architecture for the DDQN agent.
+        Load or create and initialize the neural network architecture for the DDQN agent.
 
         This method builds two identical neural networks:
         1. Main model: Used for selecting actions and gets trained
         2. Target model: Used for calculating Q-value targets, updated less frequently
-        The target model starts with identical weights to the main model but diverges during
-        training as only the main model is updated frequently.
+        The target model starts with identical weights to the main model but
+        diverges during training as only the main model is updated frequently.
+
+        The Double DQN (DDQN) algorithm uses two networks to reduce overestimation
+        of Q-values, which leads to more stable and accurate learning.
+
+        Parameters
+        ----------
+        model : str, optional
+            Path to a pre-trained model file. If provided, the model will be loaded from disk,
+            then information about the hidden layers will be extracted from the loaded model.
+            This can be used as a starting point for further training or evaluation.
+            If not provided, a new model will be created based on the hidden_layers
+            configuration, with randomly initialized weights.
+        hidden_layers : sequence of dicts
+            Each dict specifies a hidden layer configuration with keys 'type' to specify the
+            layer type (e.g., 'Dense') and other keyword arguments like 'units' and
+            'activation'. This is only used if model is None.
+
+        Notes
+        -----
+        If model is provided, loading the model from the file is prioritized over creating it
+        from the given hidden_layers configuration.
 
         Network Architecture:
         ---------------------
@@ -351,13 +397,9 @@ class DDQN_ECM:
             - Size: (chromosome_length x num_elements) + EIS_data_length
             - Combines: One-hot encoded circuit state + normalized EIS measurements
 
-        Hidden Layer 1:
-            - 40 neurons with ReLU activation
-            - Learns basic patterns in state-action relationships
-
-        Hidden Layer 2:
-            - 40 neurons with ReLU activation
-            - Learns higher-level representations
+        Hidden Layers:
+            - A sequential stack of built-in Keras layers configured by hidden_layers
+            - Each configuration uses a layer "type" and that layer's constructor arguments
 
         Output Layer:
             - Size: Number of possible actions
@@ -380,24 +422,22 @@ class DDQN_ECM:
             self._active_env.chromosome_HEAD_len,
             self._active_env.chromosome_TAIL_len,
         )
-        elems_extended_len, elems_len = (
-            len(self._active_env.ELEMENTS_EXTENDED),
-            len(self._active_env.ELEMENTS),
-        )
-        eis_input_len = self._active_env.EIS_INPUT_SZE
-
+        elems_extended_len = len(self._active_env.ELEMENTS_EXTENDED)
+        eis_input_len = self._active_env.EIS_INPUT_SIZE
         state_shape = (HEAD_len + TAIL_len) * elems_extended_len + eis_input_len
-        n_actions = 2 + (HEAD_len - 1) * elems_len + (TAIL_len) * (elems_len - 2)
-        inputs = layers.Input(shape=(state_shape,))
-        layer1 = layers.Dense(40, activation="relu")(inputs)
-        layer2 = layers.Dense(40, activation="relu")(layer1)
-        outputs = layers.Dense(n_actions, activation="linear")(layer2)
-        print("input shape: ", inputs.shape)
-        print("output shape: ", outputs.shape)
+        n_actions = len(self._active_env.ACTIONS_LIST)
 
-        self.model = tf.keras.Model(inputs=inputs, outputs=outputs)
-        self.target_model = tf.keras.models.clone_model(self.model)
-        self.target_model.set_weights(self.model.get_weights())
+        if model is None:
+            input_layer = {"type": "InputLayer", "shape": (state_shape,)}
+            output_layer = {"type": "Dense", "units": n_actions, "activation": "linear"}
+            self.model = create_model(
+                input_layer, hidden_layers, output_layer, name="DDQN_Model"
+            )
+            self.target_model = tf.keras.models.clone_model(self.model)
+            self.target_model.set_weights(self.model.get_weights())
+        else:
+            # Load the model file
+            self.load_model(model)
 
     def save_model(self, filepath: str | Path, save_format: str = "keras") -> None:
         """
@@ -481,8 +521,11 @@ class DDQN_ECM:
             raise FileNotFoundError(f"Model file not found: {filepath}")
 
         self.model = tf.keras.models.load_model(filepath)
+        # Update the target model
         self.target_model = tf.keras.models.clone_model(self.model)
         self.target_model.set_weights(self.model.get_weights())
+        # Update the hidden layers to reflect the loaded model's architecture
+        self.hidden_layers = get_model_config(self.model)
         print(f"✓ Model loaded from: {filepath}")
 
     def scheduler(self, trial: int, schedule_timesteps: float) -> float:
@@ -736,18 +779,6 @@ class DDQN_ECM:
         all_actions = []
 
         # Select only the 8 columns needed
-        # samples_subset = samples[
-        #     [
-        #         "EIS",
-        #         "state",
-        #         "action_type",
-        #         "action_position",
-        #         "new_state",
-        #         "reward",
-        #         "terminal_flag",
-        #         "priority",
-        #     ]
-        # ]
         samples_subset = samples[
             [
                 "EIS",
@@ -760,17 +791,6 @@ class DDQN_ECM:
                 "priority",
             ]
         ]
-
-        # for (
-        #     sample_EIS_i,
-        #     sample_state,
-        #     sample_action_type,
-        #     sample_action_position,
-        #     sample_next_state,
-        #     sample_reward,
-        #     sample_flag,
-        #     sample_priority,
-        # ) in samples_subset.itertuples(index=False):
         for (
             sample_EIS_i,
             encoded_state,
@@ -951,7 +971,7 @@ class DDQN_ECM:
         final_time = time.time()
         print(f"Training took {(final_time - initial_time) / 60:.2f} minutes")
 
-        self.model.save(self.save_dir / "dqn_model.keras")
+        self.model.save(self.model_name)
         success_rate.to_csv(self.save_dir / "success_rate.csv")
         NN_loss.to_csv(self.save_dir / "NN_loss.csv")
         terminal_states.to_csv(self.save_dir / "terminal_states.csv")
@@ -1215,7 +1235,7 @@ class DDQN_ECM:
         state_count = sum(1 for h in episode_history if h["new_state"] == current_state)
 
         # Trigger deadloop flag if thresholds exceeded
-        deadloop_flag = len(deadloop_chain) >= self.continieous_deadloop or (
+        deadloop_flag = len(deadloop_chain) >= self.continuous_deadloop or (
             state_count >= self.latent_deadloop and episode > self.NN_sleep
         )
 
@@ -1816,3 +1836,45 @@ class DDQN_ECM:
             gif_generation=gif_generation,
             all_rows=True,
         )
+
+    @property
+    def metadata(self) -> dict:
+        """Return metadata about the agent and its training configuration."""
+        return {
+            "training_env": self.training_env.metadata,
+            "eval_env": self.eval_env.metadata,
+            "save_dir": str(self.save_dir),
+            "save_start": self._save_start,
+            "save_frequency": self._save_frequency,
+            "action_cap": self.action_cap,
+            "random_seed": self.random_seed,
+            "episodes_trial": self.episodes_trial,
+            "num_trials": self.num_trials,
+            "gamma": self.gamma,
+            "continuous_deadloop": self.continuous_deadloop,
+            "latent_deadloop": self.latent_deadloop,
+            "invalid_terminals": self.invalid_terminals,
+            "initial_epsilon": self.initial_epsilon,
+            "epsilon_min": self.epsilon_min,
+            "epsilon_decay": self.epsilon_decay,
+            "start_decay": self.start_decay,
+            "bayesian": self.bayesian,
+            "model": str(self.model_name),
+            "hidden_layers": self.hidden_layers,
+            "learning_rate": self.learning_rate,
+            "batch_size": self.batch_size,
+            "train_frequency": self.train_frequency,
+            "update_target_frequency": self.update_target_frequency,
+            "NN_sleep": self.NN_sleep,
+            "buffer_capacity": self.buffer_capacity,
+            "optimizer_type": self.optimizer_type
+            if isinstance(self.optimizer_type, str)
+            else self.optimizer_type.__class__.__name__,
+            "prioritized_replay_alpha": self.prioritized_replay_alpha,
+            "prioritized_replay_eps": self.prioritized_replay_eps,
+            "initial_beta": self.initial_beta,
+            "beta_jump": self.beta_jump,
+            "start_jump": self.start_jump,
+            "anneal_fraction": self.anneal_fraction,
+            "final_beta": self.final_beta,
+        }
