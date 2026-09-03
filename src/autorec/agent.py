@@ -16,7 +16,8 @@ from autorec.utils import (
     plot_eval_fit,
     prepare_and_generate_circuit_gif,
 )
-from autorec.factory.model import create_model, get_model_config
+from autorec.factory import create_model, get_model_config
+from autorec.factory import create_optimizer, get_optimizer_config
 from autorec.optimized_data_structures.circular_buffer import CircularBuffer
 
 
@@ -24,6 +25,7 @@ default_hidden_layers = [
     {"type": "Dense", "units": 40, "activation": "relu"},
     {"type": "Dense", "units": 40, "activation": "relu"},
 ]
+default_optimizer_config = {"type": "Adam", "learning_rate": 0.0005}
 
 
 class DDQN_ECM:
@@ -61,13 +63,12 @@ class DDQN_ECM:
         # NN hyperparameters
         model: Optional[str] = None,
         hidden_layers: Optional[Sequence[dict[str, Any]]] = None,
-        learning_rate: float = 0.0005,
         batch_size: int = 150,
         train_frequency: int = 5,
         update_target_frequency: int = 1000,
         NN_sleep: int = 1000,
         buffer_capacity: int = 15000,
-        optimizer_type: Union[str, tf.keras.optimizers.Optimizer] = "adam",
+        optimizer: Optional[Union[dict, tf.keras.optimizers.Optimizer]] = None,
         # Prioritized replay parameters
         prioritized_replay_alpha: float = 0.6,
         prioritized_replay_eps: float = 1e-6,
@@ -153,9 +154,6 @@ class DDQN_ECM:
             layer type (e.g., 'Dense') and other keyword arguments like 'units' and
             'activation'.
 
-        learning_rate : float, optional
-            Learning rate used by the neural network optimizer.
-
         batch_size : int, optional
             Mini-batch size used during neural network training.
 
@@ -171,9 +169,11 @@ class DDQN_ECM:
         buffer_capacity : int, optional
             Maximum number of experiences stored in the replay buffer.
 
-        optimizer_type : Union[str, tf.keras.optimizers.Optimizer], optional
-            Optimizer used for training the neural network. Currently, only 'adam' is supported
-            as a string. Alternatively, a custom optimizer object can be provided.
+        optimizer: Union[dict, tf.keras.optimizers.Optimizer], optional
+            Optimizer configuration dictionary or a pre-initialized Keras optimizer object.
+            If a dictionary is provided, it must include a "type" key specifying the optimizer
+            type (e.g., "Adam") and any additional keyword arguments for the optimizer (e.g.,
+            "learning_rate").
 
         prioritized_replay_alpha : float, optional
             Exponent controlling how strongly sampling prioritizes large TD errors.
@@ -234,13 +234,11 @@ class DDQN_ECM:
         # self.decay_fraction: float = decay_fraction
 
         # NN hyperparameters
-        self.learning_rate = learning_rate
         self.batch_size = batch_size
         self.train_frequency = train_frequency
         self.update_target_frequency = update_target_frequency
         self.NN_sleep = NN_sleep  # The number of initial data that should be gathered before the first training (should be larger than batch_size)
         self.buffer_capacity = buffer_capacity
-        self.optimizer_type = optimizer_type
 
         # Prioritized replay parameters
         self.prioritized_replay_alpha = prioritized_replay_alpha
@@ -261,13 +259,19 @@ class DDQN_ECM:
         )
 
         # Create optimizer
-        if isinstance(self.optimizer_type, str):
-            if self.optimizer_type == "adam":
-                self.optimizer = tf.keras.optimizers.Adam(learning_rate=self.learning_rate)
-            else:
-                raise ValueError(f"Unsupported optimizer type: {self.optimizer_type}")
-        else:  # User passed optimizer object directly
-            self.optimizer = self.optimizer_type
+        if optimizer is None:
+            optimizer = default_optimizer_config
+        if isinstance(optimizer, dict):
+            # Use the factory function to create the optimizer from configuration dictionary
+            self.optimizer = create_optimizer(optimizer)
+        elif isinstance(optimizer, tf.keras.optimizers.Optimizer):
+            self.optimizer = optimizer
+        else:
+            raise TypeError(
+                "Optimizer must be either a configuration dictionary or "
+                "a Keras optimizer object."
+            )
+        self.optimizer_config = get_optimizer_config(self.optimizer)
 
         self.bayesian = bayesian
         # self.adaptive_reward = adaptive_reward
@@ -1861,15 +1865,12 @@ class DDQN_ECM:
             "bayesian": self.bayesian,
             "model": str(self.model_name),
             "hidden_layers": self.hidden_layers,
-            "learning_rate": self.learning_rate,
             "batch_size": self.batch_size,
             "train_frequency": self.train_frequency,
             "update_target_frequency": self.update_target_frequency,
             "NN_sleep": self.NN_sleep,
             "buffer_capacity": self.buffer_capacity,
-            "optimizer_type": self.optimizer_type
-            if isinstance(self.optimizer_type, str)
-            else self.optimizer_type.__class__.__name__,
+            "optimizer": self.optimizer_config,
             "prioritized_replay_alpha": self.prioritized_replay_alpha,
             "prioritized_replay_eps": self.prioritized_replay_eps,
             "initial_beta": self.initial_beta,
