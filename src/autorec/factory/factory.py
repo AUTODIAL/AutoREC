@@ -9,18 +9,20 @@ evaluation environments.
 
 from pathlib import Path
 import os
-from typing import Union, Dict
+from typing import TYPE_CHECKING, Dict, Union
 import yaml
 import pandas as pd
 
 from autorec.environment import EIS_ECM_Env
-from autorec.agent import DDQN_ECM
+
+if TYPE_CHECKING:
+    from autorec.agent import DDQN_ECM
 
 
 # Define AUTOREC_ROOT environment variable, which points to the root directory of the AutoREC
 # package. This environment variable will be used by the provided example configuration files.
-AUTOREC_ROOT = Path(__file__).resolve().parents[2]
-os.environ["AUTOREC_ROOT"] = str(AUTOREC_ROOT)
+AUTOREC_ROOT = Path(__file__).resolve().parents[3]
+os.environ.setdefault("AUTOREC_ROOT", str(AUTOREC_ROOT))
 
 
 def environment_builder(args: Union[str, Path, Dict]) -> EIS_ECM_Env:
@@ -57,9 +59,8 @@ def environment_builder(args: Union[str, Path, Dict]) -> EIS_ECM_Env:
         dataset_path = config.pop("dataset_path")
     except KeyError:
         raise KeyError(
-            "The environment configuration must include a 'dataset_path' key (path to a .csv or .pkl dataset). "
-            "For regular configs, this path is resolved relative to the current working directory; "
-            "configs under configs_yaml/examples (and /app/configs_yaml/examples in Docker) are resolved relative to the config file."
+            "The environment configuration must include a 'dataset_path' key "
+            "(path to a .csv or .pkl dataset). "
         )
     dataset = _load_dataset(dataset_path)
     config["dataset"] = dataset
@@ -71,7 +72,7 @@ def environment_builder(args: Union[str, Path, Dict]) -> EIS_ECM_Env:
 # instance.
 def environment_and_agent_builder(
     args: Union[str, Path, Dict],
-) -> (EIS_ECM_Env, EIS_ECM_Env, DDQN_ECM):
+) -> tuple[EIS_ECM_Env, EIS_ECM_Env | None, "DDQN_ECM"]:
     """Build both an EIS_ECM_Env environment and a DDQN_ECM agent from a single configuration.
 
     The configuration needs to have "environment" and "agent" sections.
@@ -96,6 +97,10 @@ def environment_and_agent_builder(
         A tuple containing two instances of the EIS_ECM_Env environments (for training and
         evaluation, in which the latter can be None) and the DDQN_ECM agent.
     """
+    # Import lazily so autorec.agent can use the sibling model module without
+    # creating a circular import through this package's public re-exports.
+    from autorec.agent import DDQN_ECM
+
     if isinstance(args, (str, Path)):
         config = config_reader(args)
     elif isinstance(args, dict):
@@ -135,6 +140,8 @@ def environment_and_agent_builder(
     if agent_config is None:
         print("Warning: The 'agent' section is empty. Using DDQN_ECM constructor defaults.")
         agent_config = {}
+    else:
+        agent_config = agent_config.copy()
     # Insert the environment(s) into the agent configuration
     agent_config["training_env"] = training_env
     agent_config["eval_env"] = eval_env
@@ -163,7 +170,7 @@ def config_reader(file_path: Union[str, Path]) -> Dict:
         raise ValueError(
             "The configuration file must be a YAML file with .yaml or .yml extension."
         )
-    # Expand environment variables in the file path
+    # Expand environment variables in the config file
     config_text = os.path.expandvars(Path(file_path).read_text())
 
     return yaml.safe_load(config_text)
