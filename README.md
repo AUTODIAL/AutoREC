@@ -318,6 +318,20 @@ anneal_fraction: null
 final_beta: 0.7
 ```
 
+`hidden_layers` accepts a sequence of built-in Keras layer configurations. Each item needs a
+`type` matching a class in `tf.keras.layers`; the remaining keys are passed to that layer's
+constructor. AutoREC supplies the input layer and the linear Q-value output layer. For example:
+
+```yaml
+hidden_layers:
+  - type: Dense
+    units: 64
+    activation: relu
+  - type: Dropout
+    rate: 0.2
+  - type: LayerNormalization
+```
+
 Training recommendations:
 
 - Start with the provided default configuration.
@@ -380,8 +394,10 @@ AutoREC/
 |       |-- agent.py                # DDQN agent and evaluation helpers
 |       |-- data_preparation.py     # Data loading, processing, and validation
 |       |-- environment.py          # RL environment for ECM generation
-|       |-- factory.py              # Builders for config-driven workflows
-|       |-- cli.py                  # Command-line workflow entry points
+|       |-- factory/                # Config-driven builders and model construction
+|       |   |-- __init__.py
+|       |   |-- factory.py          # Environment and agent factory
+|       |   `-- model.py            # Keras model construction from config
 |       |-- utils.py                # Shared utilities
 |       |-- runtime.py              # Runtime setup helpers
 |       `-- optimized_data_structures/

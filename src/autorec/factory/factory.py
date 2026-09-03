@@ -7,21 +7,25 @@ configuration is used to construct ``DDQN_ECM`` instances with the requested tra
 evaluation environments.
 """
 
+from __future__ import annotations
+
 from pathlib import Path
 import os
 from copy import deepcopy
-from typing import Union, Dict, Tuple
+from typing import TYPE_CHECKING, Dict, Union, Tuple
 import yaml
 import pandas as pd
 
 from autorec.data_preparation import EISDataPrep
 from autorec.environment import EIS_ECM_Env
-from autorec.agent import DDQN_ECM
+
+if TYPE_CHECKING:
+    from autorec.agent import DDQN_ECM
 
 
 # Define AUTOREC_ROOT environment variable, which points to the root directory of the AutoREC
 # package. This environment variable will be used by the provided example configuration files.
-AUTOREC_ROOT = Path(__file__).resolve().parents[2]
+AUTOREC_ROOT = Path(__file__).resolve().parents[3]
 os.environ.setdefault("AUTOREC_ROOT", str(AUTOREC_ROOT))
 
 
@@ -166,6 +170,10 @@ def agent_builder(args: Dict) -> DDQN_ECM:
     DDQN_ECM
         An instance of the DDQN_ECM agent.
     """
+    # Import lazily so autorec.agent can import the sibling model module without creating a
+    # circular import through this package's public re-exports.
+    from autorec.agent import DDQN_ECM
+
     config = args.copy()
     return DDQN_ECM(**config)
 

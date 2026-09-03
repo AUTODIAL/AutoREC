@@ -51,7 +51,7 @@ def load_factory(monkeypatch):
     monkeypatch.setitem(sys.modules, "autorec.agent", agent_module)
 
     spec = importlib.util.spec_from_file_location(
-        "factory_under_test", AUTOREC_ROOT / "src" / "autorec" / "factory.py"
+        "factory_under_test", AUTOREC_ROOT / "src" / "autorec" / "factory" / "factory.py"
     )
     factory = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(factory)
@@ -281,3 +281,45 @@ def test_validate_pipeline_config_rejects_invalid_structure(
 
     with pytest.raises(error_type, match=message):
         factory._validate_pipeline_config(config)
+
+
+def test_yaml_pipeline_forwards_generic_hidden_layer_configs(monkeypatch, tmp_path):
+    factory = load_factory(monkeypatch)
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """dataprep:
+  path: training.pkl
+  mode: load
+environment:
+  seed: 42
+agent:
+  hidden_layers:
+    - type: Dense
+      units: 24
+      activation: relu
+    - type: Dropout
+      rate: 0.2
+"""
+    )
+
+    _, _, _, _, agent = factory.pipeline_builder(config_path)
+
+    assert agent.kwargs["hidden_layers"] == [
+        {"type": "Dense", "units": 24, "activation": "relu"},
+        {"type": "Dropout", "rate": 0.2},
+    ]
+
+
+def test_pipeline_builder_does_not_mutate_generic_agent_config(monkeypatch):
+    factory = load_factory(monkeypatch)
+    dataset = pd.DataFrame({"sample": [1]})
+    hidden_layers = [{"type": "Dropout", "rate": 0.2}]
+    config = {
+        "environment": {"dataset": dataset},
+        "agent": {"hidden_layers": hidden_layers},
+    }
+
+    _, _, _, _, agent = factory.pipeline_builder(config)
+
+    assert agent.kwargs["hidden_layers"] == hidden_layers
+    assert config["agent"] == {"hidden_layers": hidden_layers}
