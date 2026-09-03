@@ -300,8 +300,12 @@ epsilon_decay: 0.99968
 start_decay: 10
 bayesian: false
 hidden_layers:
-  - [40, relu]
-  - [40, relu]
+  - type: Dense
+    units: 40
+    activation: relu
+  - type: Dense
+    units: 40
+    activation: relu
 learning_rate: 0.0005
 batch_size: 150
 train_frequency: 5
