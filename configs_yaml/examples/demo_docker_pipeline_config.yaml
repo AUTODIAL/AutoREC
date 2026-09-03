@@ -73,13 +73,14 @@ agent:
     - type: Dense
       units: 40
       activation: relu
-  learning_rate: 0.0005  # for optimization of the NN
+  optimizer:  # Built-in Keras optimizer configuration
+    type: Adam
+    learning_rate: 0.0005
   batch_size: 150  # training size for the main network
   train_frequency: 5  # train the main model every `train_frequency` steps
   update_target_frequency: 1000  # Frequency to update target network
   NN_sleep: 1000  # The number of initial data that should be gathered before the first training (should be larger than batch_size)
   buffer_capacity: 15000
-  optimizer_type: adam  # or pass optimizer object directly
 
   # Prioritized replay parameters
   prioritized_replay_alpha: 0.6
