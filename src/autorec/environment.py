@@ -54,7 +54,7 @@ class EIS_ECM_Env:
     ----------
     _N_MAX : int
         Maximum number of child nodes per circuit element (binary tree = 2)
-    _ELEMENTS : list
+    ELEMENTS : list
         Available circuit elements: ['+', '/', 'R', 'L', 'P']
         '+' = series connection, '/' = parallel connection
         'R' = resistor, 'L' = inductor, 'P' = constant phase element
@@ -64,13 +64,11 @@ class EIS_ECM_Env:
 
     # Constant declaration
     _N_MAX = 2
-    ELEMENTS = ["+", "/", "R", "L", "P"]
-    # ELEMENTS = ['+', '/', 'R', 'L', 'P', 'C']
-    ELEMENTS_EXTENDED = ELEMENTS + ["X"]
 
     def __init__(
         self,
         dataset: pd.DataFrame = None,
+        elements: list[str] = ["+", "/", "R", "L", "P"],
         initial_state: list[str] = ["+RRRRRR", "++RRRRRR", "+++RRRRRR"],
         seed: int = 42,
         chromosome_HEAD_len: int = 10,
@@ -95,6 +93,13 @@ class EIS_ECM_Env:
             - 'true_circuit': The actual circuit that generated the data (for reference)
             - 'chi_thresh': Chi-square threshold for determining good fit
             - 'r2_thresh': R² threshold for determining good fit
+
+        elements : list[str], default=['+', '/', 'R', 'L', 'P']
+            List of circuit elements available for constructing circuits.
+            Available circuit elements: ['+', '/', 'R', 'L', 'P']
+            '+' = series connection, '/' = parallel connection
+            'R' = resistor, 'L' = inductor, 'P' = constant phase element
+            At least one operator ('+' or '/') and the resistor ('R') are required.
 
         seed : int, default=42
             Random seed for reproducibility. Controls:
@@ -139,19 +144,54 @@ class EIS_ECM_Env:
                 "the dataset with data_preparation.py"
             )
         self.dataset = dataset
-        self.seed = seed
 
+        # Available circuit elements for GEP chromosome representation
+        for el in elements:
+            if el not in ["+", "/", "R", "L", "P"]:
+                raise ValueError(
+                    f"Invalid element '{el}' in elements list. "
+                    "Allowed elements are: '+', '/', 'R', 'L', 'P'"
+                )
+        if "R" not in elements:
+            # Ensure that R is always included for valid circuits, because latter methods
+            # assume that R is allowed. If R is not present, the circuit cannot be validly
+            # evaluated.
+            raise ValueError("Circuit elements must include 'R' (resistor) for valid circuits")
+        if "+" not in elements and "/" not in elements:
+            # Ensure that the ECM is not limited to a single circuit element.
+            raise ValueError(
+                "Circuit elements must include at least one operator: "
+                "'+' (series) or '/' (parallel)"
+            )
+        self.ELEMENTS = elements
+        self.ELEMENTS_EXTENDED = self.ELEMENTS + ["X"]
+        self._operator = [element for element in self.ELEMENTS if element in ["+", "/"]]
+        self._terminal = [element for element in self.ELEMENTS if element in ["R", "L", "P"]]
+
+        # Random seed for reproducibility
+        self.seed = seed
         np.random.seed(self.seed)
 
+        # Initial state - Make sure all elements in initial_state are valid
+        for state in initial_state:
+            for el in state:
+                if el not in self.ELEMENTS:
+                    raise ValueError(
+                        f"Invalid element '{el}' in initial_state. "
+                        f"Allowed elements are: {self.ELEMENTS}"
+                    )
         self._all_start_states = initial_state
-        self.EIS_measurement_size = len(dataset.loc[0, "Z_true"])
-        self.EIS_INPUT_SZE = len(dataset.loc[0, "flatten_Z"])
+
+        self.EIS_measurement_size = len(dataset.iloc[0]["Z_true"])
+        self.EIS_INPUT_SIZE = len(dataset.iloc[0]["flatten_Z"])
         self.chromosome_HEAD_len = chromosome_HEAD_len
         self.chromosome_TAIL_len = self.chromosome_HEAD_len * (self._N_MAX - 1) + 1
         self.chromosome_len = self.chromosome_HEAD_len + self.chromosome_TAIL_len
 
         # Initialize cache
         self.cache_enabled = cache_enabled
+        self.cache_capacity = cache_capacity
+        self.cache_type = cache_type
         if self.cache_enabled:
             self.cache = HistoryCache(capacity=cache_capacity, cache_type=cache_type)
             print(
@@ -217,7 +257,7 @@ class EIS_ECM_Env:
         for pos in range(self.chromosome_HEAD_len + self.chromosome_TAIL_len):
             if pos < self.chromosome_HEAD_len:
                 for item in self.ELEMENTS:
-                    if pos == 0 and (item not in ["+", "/"]):
+                    if pos == 0 and (item not in self._operator):
                         continue
                     else:
                         all_actions = pd.concat(
@@ -230,7 +270,7 @@ class EIS_ECM_Env:
                             ignore_index=True,
                         )
             else:
-                for item in self.ELEMENTS[2:]:
+                for item in self._terminal:
                     all_actions = pd.concat(
                         [
                             all_actions,
@@ -822,3 +862,27 @@ class EIS_ECM_Env:
             print("Cache cleared")
         else:
             print("Cache is disabled")
+
+    @property
+    def metadata(self) -> dict:
+        """
+        Return metadata about the environment.
+
+        The returned values capture the dataset preparation metadata and the
+        constructor settings needed to reproduce the environment configuration.
+
+        Returns
+        -------
+        dict
+            Dictionary containing environment metadata.
+        """
+        return {
+            "dataset": self.dataset["metadata"].iloc[0],
+            "elements": self.ELEMENTS,
+            "initial_state": self._all_start_states,
+            "seed": self.seed,
+            "chromosome_HEAD_len": self.chromosome_HEAD_len,
+            "cache_enabled": self.cache_enabled,
+            "cache_capacity": self.cache_capacity,
+            "cache_type": self.cache_type,
+        }
