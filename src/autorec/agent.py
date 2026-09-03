@@ -173,7 +173,8 @@ class DDQN_ECM:
             Optimizer configuration dictionary or a pre-initialized Keras optimizer object.
             If a dictionary is provided, it must include a "type" key specifying the optimizer
             type (e.g., "Adam") and any additional keyword arguments for the optimizer (e.g.,
-            "learning_rate").
+            "learning_rate"). The learning rate can be a numeric value or a nested dictionary
+            configuring a Keras learning-rate schedule.
 
         prioritized_replay_alpha : float, optional
             Exponent controlling how strongly sampling prioritizes large TD errors.
@@ -502,6 +503,7 @@ class DDQN_ECM:
         - Replay buffer: history = pd.read_pickle('replay_buffer.pkl')
         - Epsilon value: agent.epsilon = saved_epsilon
         - Trial counter: start_trial = saved_trial
+        - Optimizer state and iteration, including learning-rate schedule progress
 
         Parameters
         ----------

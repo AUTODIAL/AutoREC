@@ -5,7 +5,12 @@ from autorec.factory.environment import environment_builder
 from autorec.factory.agent import agent_builder
 from autorec.factory.pipeline import pipeline_builder
 from autorec.factory.model import create_model, get_model_config
-from autorec.factory.optimizer import create_optimizer, get_optimizer_config
+from autorec.factory.optimizer import (
+    create_lr_schedule,
+    create_optimizer,
+    get_lr_schedule_config,
+    get_optimizer_config,
+)
 from autorec.factory.utils import AUTOREC_ROOT, config_reader
 
 __all__ = [
@@ -19,4 +24,6 @@ __all__ = [
     "get_model_config",
     "create_optimizer",
     "get_optimizer_config",
+    "create_lr_schedule",
+    "get_lr_schedule_config",
 ]
