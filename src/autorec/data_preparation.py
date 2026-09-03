@@ -83,6 +83,7 @@ class EISDataPrep:
         "flatten_Z",
         "chi_thresh",
         "r2_thresh",
+        "metadata",
     ]
 
     EVAL_REQUIRED_COLUMNS = [
@@ -430,6 +431,7 @@ class EISDataPrep:
                 "flatten_Z": flatten_Z,
                 "chi_thresh": chi_thresh,
                 "r2_thresh": r2_thresh,
+                "metadata": self.metadata,
             }
 
         except Exception as e:
@@ -631,6 +633,22 @@ class EISDataPrep:
                     f"EISDataPrep: Pickle file does not contain a pandas DataFrame. "
                     f"Found type: {type(data)}"
                 )
+
+            # Update metadata
+            if "metadata" in data.columns:
+                # Update attributes from metadata
+                print("Metadata found in pickle file. Updating attributes accordingly.")
+                metadata = data["metadata"].iloc[0]
+                self.perform_linKK_validation = metadata.get("perform_linKK_validation", False)
+                self.tol_linKK = metadata.get("tol_linKK", 5e-2)
+                self.frequency_bounds = metadata.get("frequency_bounds", (None, None))
+                self.frequency_npoints = metadata.get("frequency_npoints", None)
+                self.eis_features = metadata.get("eis_features", ["ImZ", "phi", "mag", "nphi"])
+            else:
+                # If metadata is missing, then just leave it as None
+                print("Warning: Pickle file does not contain metadata.")
+                data["metadata"] = [None] * len(data)
+
             return data
 
         if self.file_type == "csv":
@@ -1040,6 +1058,20 @@ class EISDataPrep:
             print(f"Dataset saved to {output_path}")
         else:
             raise ValueError(f"Unsupported file_type: {file_type}")
+
+    @property
+    def metadata(self) -> dict:
+        """Get metadata about the data preparation process."""
+        return {
+            "path": str(self.path),
+            "mode": self.mode,
+            "evaluation": self.evaluation,
+            "perform_linKK_validation": self.perform_linKK_validation,
+            "tol_linKK": self.tol_linKK,
+            "frequency_bounds": self.frequency_bounds,
+            "frequency_npoints": self.frequency_npoints,
+            "eis_features": self.eis_features,
+        }
 
 
 # ==================== USAGE EXAMPLES ====================

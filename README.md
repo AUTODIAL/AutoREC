@@ -158,7 +158,12 @@ from autorec.utils import set_global_seed
 
 set_global_seed(42, deterministic_ops=True)
 
-env = EIS_ECM_Env(dataset=dataset, seed=42, cache_enabled=True)
+env = EIS_ECM_Env(
+    dataset=dataset,
+    elements=["+", "/", "R", "L", "P"],
+    seed=42,
+    cache_enabled=True,
+)
 
 agent = DDQN_ECM(
     training_env=env,
@@ -254,6 +259,12 @@ Environment options:
 
 ```yaml
 dataset: "data/examples/training_dataset.pkl"
+elements:
+  - "+"
+  - "/"
+  - R
+  - L
+  - P
 initial_state:
   - +RRRRRR
   - ++RRRRRR
@@ -264,6 +275,11 @@ cache_enabled: true
 cache_capacity: 20000
 cache_type: lru
 ```
+
+The `elements` list controls the environment's state encoding and action space. Use the same
+elements in the same order when evaluating or continuing training with a saved model. Both
+the resistor (`R`) and at least one topology operator (`+` or `/`) are required; `L`, `C`,
+and `P` are optional.
 
 Agent options:
 
@@ -285,16 +301,21 @@ epsilon_decay: 0.99968
 start_decay: 10
 bayesian: false
 hidden_layers:
-  - [40, relu]
-  - [40, relu]
-learning_rate: 0.0005
+  - type: Dense
+    units: 40
+    activation: relu
+  - type: Dense
+    units: 40
+    activation: relu
+optimizer:
+  type: Adam
+  learning_rate: 0.0005
 batch_size: 150
 train_frequency: 5
 gradient_steps: 1
 update_target_frequency: 1000
 NN_sleep: 1000
 buffer_capacity: 15000
-optimizer_type: adam
 prioritized_replay_alpha: 0.6
 prioritized_replay_eps: 1.0E-6
 initial_beta: 0.4
@@ -302,6 +323,36 @@ beta_jump: 1.06
 start_jump: null
 anneal_fraction: null
 final_beta: 0.7
+```
+
+`hidden_layers` accepts a sequence of built-in Keras layer configurations. Each item needs a
+`type` matching a class in `tf.keras.layers`; the remaining keys are passed to that layer's
+constructor. AutoREC supplies the input layer and the linear Q-value output layer. For example:
+
+```yaml
+hidden_layers:
+  - type: Dense
+    units: 64
+    activation: relu
+  - type: Dropout
+    rate: 0.2
+  - type: LayerNormalization
+```
+
+`optimizer` accepts a configuration for a built-in Keras optimizer, with `learning_rate` set
+to either a number or a nested built-in Keras schedule configuration. Optimizer and schedule
+types are case-sensitive and must match their Keras class names. A pre-initialized optimizer
+object can also be supplied when constructing `DDQN_ECM` directly. For example:
+
+```yaml
+optimizer:
+  type: Adam
+  learning_rate:
+    type: ExponentialDecay
+    initial_learning_rate: 0.0005
+    decay_steps: 1000
+    decay_rate: 0.96
+    staircase: true
 ```
 
 Training recommendations:
@@ -370,8 +421,15 @@ AutoREC/
 |       |-- agent.py                # DDQN agent and evaluation helpers
 |       |-- data_preparation.py     # Data loading, processing, and validation
 |       |-- environment.py          # RL environment for ECM generation
-|       |-- factory.py              # Builders for config-driven workflows
-|       |-- cli.py                  # Command-line workflow entry points
+|       |-- factory/                # Config-driven builders and model construction
+|       |   |-- __init__.py
+|       |   |-- agent.py            # Agent builder
+|       |   |-- dataprep.py         # Data-preparation builder
+|       |   |-- environment.py      # Environment builder
+|       |   |-- model.py            # Keras model construction from config
+|       |   |-- optimizer.py        # Keras optimizer construction from config
+|       |   |-- pipeline.py         # Complete pipeline builder
+|       |   `-- utils.py            # Configuration loading helpers
 |       |-- utils.py                # Shared utilities
 |       |-- runtime.py              # Runtime setup helpers
 |       `-- optimized_data_structures/

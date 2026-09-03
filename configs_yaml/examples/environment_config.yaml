@@ -1,4 +1,10 @@
 dataset: ${AUTOREC_ROOT}/data/examples/training_dataset.pkl  # Path to .pkl dataset file
+elements:
+  - "+"
+  - "/"
+  - R
+  - L
+  - P
 initial_state:
   - +RRRRRR
   - ++RRRRRR

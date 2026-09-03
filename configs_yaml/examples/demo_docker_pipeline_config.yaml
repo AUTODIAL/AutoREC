@@ -21,6 +21,12 @@ dataprep:
     - nphi
 
 environment:
+  elements:
+    - "+"
+    - "/"
+    - R
+    - L
+    - P
   initial_state:
     - +RRRRRR
     - ++RRRRRR
@@ -60,17 +66,22 @@ agent:
   bayesian: false  # If True, the analysis of the posterior distribution added as a bonus to the reward formulation
 
   # NN hyperparameters
-  hidden_layers:  # specification of Dense NN layers
-    - [40, relu]
-    - [40, relu]
-  learning_rate: 0.0005  # for optimization of the NN
+  hidden_layers:  # Sequential Keras layer configurations
+    - type: Dense
+      units: 40
+      activation: relu
+    - type: Dense
+      units: 40
+      activation: relu
+  optimizer:  # Built-in Keras optimizer configuration
+    type: Adam
+    learning_rate: 0.0005
   batch_size: 150  # training size for the main network
   train_frequency: 5  # train the main model every `train_frequency` steps
   gradient_steps: 1  # replay mini-batches sampled and updated per training event
   update_target_frequency: 1000  # Frequency to update target network
   NN_sleep: 1000  # The number of initial data that should be gathered before the first training (should be larger than batch_size)
   buffer_capacity: 15000
-  optimizer_type: adam  # or pass optimizer object directly
 
   # Prioritized replay parameters
   prioritized_replay_alpha: 0.6
