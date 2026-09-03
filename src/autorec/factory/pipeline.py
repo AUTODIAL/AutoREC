@@ -1,181 +1,18 @@
-"""
-Factory helpers for building AutoREC environments and agents from configuration.
-
-Configurations can be provided as YAML file paths or dictionaries. Environment configuration
-is merged with package defaults, datasets are loaded into pandas DataFrames, and agent
-configuration is used to construct ``DDQN_ECM`` instances with the requested training and
-evaluation environments.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
-import os
 from copy import deepcopy
-from typing import TYPE_CHECKING, Dict, Union, Tuple
-import yaml
-import pandas as pd
+from typing import TYPE_CHECKING, Dict, Union
 
-from autorec.data_preparation import EISDataPrep
-from autorec.environment import EIS_ECM_Env
+from autorec.factory.utils import config_reader
+from autorec.factory.dataprep import dataprep_builder
+from autorec.factory.environment import environment_builder
+from autorec.factory.agent import agent_builder
 
 if TYPE_CHECKING:
+    from autorec.data_preparation import EISDataPrep
+    from autorec.environment import EIS_ECM_Env
     from autorec.agent import DDQN_ECM
-
-
-# Define AUTOREC_ROOT environment variable, which points to the root directory of the AutoREC
-# package. This environment variable will be used by the provided example configuration files.
-AUTOREC_ROOT = Path(__file__).resolve().parents[3]
-os.environ.setdefault("AUTOREC_ROOT", str(AUTOREC_ROOT))
-
-
-def config_reader(file_path: Union[str, Path]) -> Dict:
-    """Read a YAML configuration file and return its contents as a dictionary.
-
-    Parameters
-    ----------
-    file_path : Union[str, Path]
-        Path to the YAML file.
-
-    Returns
-    -------
-    Dict
-        Contents of the YAML file as a dictionary.
-    """
-    if not Path(file_path).exists():
-        raise FileNotFoundError(f"The configuration file {file_path} does not exist.")
-    if Path(file_path).suffix not in [".yaml", ".yml"]:
-        raise ValueError(
-            "The configuration file must be a YAML file with .yaml or .yml extension."
-        )
-    # Expand environment variables in the config file
-    config_text = os.path.expandvars(Path(file_path).read_text())
-
-    config = yaml.safe_load(config_text)
-    # Validate that the YAML file contains a dictionary
-    if not isinstance(config, dict):
-        raise ValueError("The configuration file must contain a dictionary at the top level.")
-    return config
-
-
-def dataprep_builder(args: Union[str, Path, Dict]) -> Tuple[EISDataPrep, pd.DataFrame]:
-    """Build an EISDataPrep data preparation class from configuration file or dictionary.
-
-    The configurations provided will be treated as keyword arguments for instantiating the
-    class. Thus, any required parameters must be included in the configuration, and any
-    optional parameters not included will be set to their default values.
-
-    Notes
-    -----
-    An additional keyword "output" may be provided. If provided, the processed dataset will be
-    exported to the specified pickle file.
-
-    Parameters
-    ----------
-    args : Union[str, Path, Dict]
-        Configuration for the environment. Can be a YAML file path or a dictionary.
-
-    Returns
-    -------
-    EISDataPrep
-        An instance of the EISDataPrep environment.
-    dataset
-        Pandas data frame for the processed EIS dataset.
-    """
-    if isinstance(args, (str, Path)):
-        config = config_reader(args)
-    elif isinstance(args, dict):
-        config = args.copy()
-    else:
-        raise TypeError("The 'args' parameter must be a str, Path, or dict.")
-
-    # "output" is not part of the argument of EISDataPrep
-    if "output" in config:
-        output = config.pop("output")
-    else:
-        output = None
-
-    # Main
-    dataprep = EISDataPrep(**config)
-    dataset = dataprep.load()
-    # Export the dataset pickle file
-    if output is not None:
-        dataset.to_pickle(output)
-
-    return dataprep, dataset
-
-
-def environment_builder(args: Union[str, Path, Dict]) -> EIS_ECM_Env:
-    """Build an EIS_ECM_Env environment from configuration file or dictionary.
-
-    The configurations provided will be treated as keyword arguments for instantiating the
-    class. Thus, any required parameters must be included in the configuration, and any
-    optional parameters not included will be set to their default values.
-
-    Notes
-    -----
-    The "dataset" keyword here can be either a pd.DataFrame or a string indicating the path to
-    the .pkl processed dataset file. If a path is provided, then the dataset will be loaded
-    from the specified file.
-
-    Parameters
-    ----------
-    args : Union[str, Path, Dict]
-        Configuration for the environment. Can be a YAML file path or a dictionary.
-
-    Returns
-    -------
-    EIS_ECM_Env
-        An instance of the EIS_ECM_Env environment.
-    """
-    if isinstance(args, (str, Path)):
-        config = config_reader(args)
-    elif isinstance(args, dict):
-        config = args.copy()
-    else:
-        raise TypeError("The 'args' parameter must be a str, Path, or dict.")
-
-    # Deal with the dataset argument
-    if "dataset" not in config:
-        raise KeyError("The environment configuration must include a 'dataset' key.")
-    if isinstance(config["dataset"], (str, Path)):
-        # In this case, we need to load the dataset
-        dataset_path = config.pop("dataset")
-        dataset = pd.read_pickle(dataset_path)
-        config["dataset"] = dataset
-
-    return EIS_ECM_Env(**config)
-
-
-def agent_builder(args: Dict) -> DDQN_ECM:
-    """Build a DDQN_ECM agent from configuration dictionary.
-
-    The configurations provided will be treated as keyword arguments for instantiating the
-    class. Thus, any required parameters must be included in the configuration, and any
-    optional parameters not included will be set to their default values.
-
-    Notes
-    -----
-    This builder only accepts a configuration dictionary, not a YAML file path. To instantiate
-    an agent class, we need to have an environment instance, which cannot be passed in through
-    a YAML file.
-
-    Parameters
-    ----------
-    args : Dict
-        Configuration for the environment
-
-    Returns
-    -------
-    DDQN_ECM
-        An instance of the DDQN_ECM agent.
-    """
-    # Import lazily so autorec.agent can import the sibling model module without creating a
-    # circular import through this package's public re-exports.
-    from autorec.agent import DDQN_ECM
-
-    config = args.copy()
-    return DDQN_ECM(**config)
 
 
 def pipeline_builder(

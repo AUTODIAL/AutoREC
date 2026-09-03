@@ -66,7 +66,7 @@ agent:
   bayesian: false  # If True, the analysis of the posterior distribution added as a bonus to the reward formulation
 
   # NN hyperparameters
-  hidden_layers:  # specification of Dense NN layers
+  hidden_layers:  # Sequential Keras layer configurations
     - type: Dense
       units: 40
       activation: relu

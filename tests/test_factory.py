@@ -1,25 +1,28 @@
 """Tests for the config-driven AutoREC factory helpers.
 
-The factory imports the real environment, agent, and data-preparation modules at import time.
-These tests load it with lightweight stand-ins so they can verify configuration and pipeline
-wiring without constructing TensorFlow/AutoEIS-backed objects.
+The builders are imported from their public package and exercised with lightweight stand-ins
+so these tests can verify configuration and pipeline wiring without constructing real
+TensorFlow/AutoEIS-backed objects.
 """
 
-import importlib.util
-import sys
+import importlib
 import types
-from pathlib import Path
 
 import pandas as pd
 import pytest
 
 
-AUTOREC_ROOT = Path(__file__).resolve().parents[1]
+factory_package = importlib.import_module("autorec.factory")
+agent_module = importlib.import_module("autorec.agent")
+agent_factory = importlib.import_module("autorec.factory.agent")
+dataprep_factory = importlib.import_module("autorec.factory.dataprep")
+environment_factory = importlib.import_module("autorec.factory.environment")
+pipeline_factory = importlib.import_module("autorec.factory.pipeline")
 
 
-def load_factory(monkeypatch):
-    """Import factory.py after replacing heavyweight dependencies with recording stubs."""
-    data_preparation_module = types.ModuleType("autorec.data_preparation")
+@pytest.fixture
+def factory(monkeypatch):
+    """Replace the split builders' heavyweight classes with recording stubs."""
 
     class DataPrep:
         def __init__(self, **kwargs):
@@ -28,38 +31,39 @@ def load_factory(monkeypatch):
         def load(self):
             return pd.DataFrame({"source": [self.kwargs["path"]]})
 
-    data_preparation_module.EISDataPrep = DataPrep
-    monkeypatch.setitem(sys.modules, "autorec.data_preparation", data_preparation_module)
-
-    environment_module = types.ModuleType("autorec.environment")
-
     class Env:
         def __init__(self, **kwargs):
             self.kwargs = kwargs
             self.dataset = kwargs.get("dataset")
 
-    environment_module.EIS_ECM_Env = Env
-    monkeypatch.setitem(sys.modules, "autorec.environment", environment_module)
-
-    agent_module = types.ModuleType("autorec.agent")
-
     class Agent:
         def __init__(self, **kwargs):
             self.kwargs = kwargs
 
-    agent_module.DDQN_ECM = Agent
-    monkeypatch.setitem(sys.modules, "autorec.agent", agent_module)
+    monkeypatch.setattr(dataprep_factory, "EISDataPrep", DataPrep)
+    monkeypatch.setattr(environment_factory, "EIS_ECM_Env", Env)
+    monkeypatch.setattr(agent_module, "DDQN_ECM", Agent)
 
-    spec = importlib.util.spec_from_file_location(
-        "factory_under_test", AUTOREC_ROOT / "src" / "autorec" / "factory" / "factory.py"
+    return types.SimpleNamespace(
+        agent_builder=factory_package.agent_builder,
+        config_reader=factory_package.config_reader,
+        dataprep_builder=factory_package.dataprep_builder,
+        environment_builder=factory_package.environment_builder,
+        pipeline_builder=factory_package.pipeline_builder,
+        _validate_pipeline_config=pipeline_factory._validate_pipeline_config,
     )
-    factory = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(factory)
-    return factory
 
 
-def test_config_reader_loads_yaml_and_expands_environment_variables(monkeypatch, tmp_path):
-    factory = load_factory(monkeypatch)
+def test_factory_package_exports_builders_from_split_modules():
+    assert factory_package.agent_builder is agent_factory.agent_builder
+    assert factory_package.dataprep_builder is dataprep_factory.dataprep_builder
+    assert factory_package.environment_builder is environment_factory.environment_builder
+    assert factory_package.pipeline_builder is pipeline_factory.pipeline_builder
+
+
+def test_config_reader_loads_yaml_and_expands_environment_variables(
+    factory, monkeypatch, tmp_path
+):
     monkeypatch.setenv("AUTOREC_TEST_DATA", "/tmp/example.pkl")
     config_path = tmp_path / "config.yaml"
     config_path.write_text("dataset: ${AUTOREC_TEST_DATA}\nseed: 42\n")
@@ -69,15 +73,12 @@ def test_config_reader_loads_yaml_and_expands_environment_variables(monkeypatch,
     assert config == {"dataset": "/tmp/example.pkl", "seed": 42}
 
 
-def test_config_reader_rejects_missing_file(monkeypatch, tmp_path):
-    factory = load_factory(monkeypatch)
-
+def test_config_reader_rejects_missing_file(factory, tmp_path):
     with pytest.raises(FileNotFoundError, match="does not exist"):
         factory.config_reader(tmp_path / "missing.yaml")
 
 
-def test_config_reader_rejects_non_yaml_file(monkeypatch, tmp_path):
-    factory = load_factory(monkeypatch)
+def test_config_reader_rejects_non_yaml_file(factory, tmp_path):
     config_path = tmp_path / "config.json"
     config_path.write_text("{}")
 
@@ -86,8 +87,7 @@ def test_config_reader_rejects_non_yaml_file(monkeypatch, tmp_path):
 
 
 @pytest.mark.parametrize("contents", ["", "- first\n- second\n"])
-def test_config_reader_rejects_yaml_without_top_level_mapping(monkeypatch, tmp_path, contents):
-    factory = load_factory(monkeypatch)
+def test_config_reader_rejects_yaml_without_top_level_mapping(factory, tmp_path, contents):
     config_path = tmp_path / "config.yaml"
     config_path.write_text(contents)
 
@@ -95,10 +95,7 @@ def test_config_reader_rejects_yaml_without_top_level_mapping(monkeypatch, tmp_p
         factory.config_reader(config_path)
 
 
-def test_dataprep_builder_loads_data_exports_output_and_preserves_config(
-    monkeypatch, tmp_path
-):
-    factory = load_factory(monkeypatch)
+def test_dataprep_builder_loads_data_exports_output_and_preserves_config(factory, tmp_path):
     output_path = tmp_path / "processed.pkl"
     config = {
         "path": "raw",
@@ -127,8 +124,7 @@ def test_dataprep_builder_loads_data_exports_output_and_preserves_config(
     }
 
 
-def test_environment_builder_accepts_dataframe_and_preserves_config(monkeypatch):
-    factory = load_factory(monkeypatch)
+def test_environment_builder_accepts_dataframe_and_preserves_config(factory):
     dataset = pd.DataFrame({"sample": [1]})
     config = {"dataset": dataset, "elements": ["+", "R", "P"], "seed": 42}
 
@@ -140,8 +136,7 @@ def test_environment_builder_accepts_dataframe_and_preserves_config(monkeypatch)
     assert config["dataset"] is dataset
 
 
-def test_environment_builder_loads_pickle_dataset_and_preserves_config(monkeypatch, tmp_path):
-    factory = load_factory(monkeypatch)
+def test_environment_builder_loads_pickle_dataset_and_preserves_config(factory, tmp_path):
     dataset = pd.DataFrame({"sample": [1, 2]})
     dataset_path = tmp_path / "dataset.pkl"
     dataset.to_pickle(dataset_path)
@@ -154,15 +149,12 @@ def test_environment_builder_loads_pickle_dataset_and_preserves_config(monkeypat
     assert config == {"dataset": dataset_path, "seed": 7}
 
 
-def test_environment_builder_requires_dataset(monkeypatch):
-    factory = load_factory(monkeypatch)
-
+def test_environment_builder_requires_dataset(factory):
     with pytest.raises(KeyError, match="include a 'dataset' key"):
         factory.environment_builder({"seed": 42})
 
 
-def test_agent_builder_constructs_agent_without_mutating_config(monkeypatch):
-    factory = load_factory(monkeypatch)
+def test_agent_builder_constructs_agent_without_mutating_config(factory):
     training_env = object()
     config = {"training_env": training_env, "num_trials": 5}
 
@@ -173,15 +165,12 @@ def test_agent_builder_constructs_agent_without_mutating_config(monkeypatch):
 
 
 @pytest.mark.parametrize("builder_name", ["dataprep_builder", "environment_builder"])
-def test_standalone_builders_reject_unsupported_config_types(monkeypatch, builder_name):
-    factory = load_factory(monkeypatch)
-
+def test_standalone_builders_reject_unsupported_config_types(factory, builder_name):
     with pytest.raises(TypeError, match="must be a str, Path, or dict"):
         getattr(factory, builder_name)(["not", "a", "config"])
 
 
-def test_pipeline_builder_wires_single_dataprep_environment_and_agent(monkeypatch):
-    factory = load_factory(monkeypatch)
+def test_pipeline_builder_wires_single_dataprep_environment_and_agent(factory):
     config = {
         "dataprep": {"path": "training.pkl", "mode": "load"},
         "environment": {"seed": 42},
@@ -200,8 +189,7 @@ def test_pipeline_builder_wires_single_dataprep_environment_and_agent(monkeypatc
     assert agent.kwargs["num_trials"] == 5
 
 
-def test_pipeline_builder_wires_separate_training_and_eval_sections(monkeypatch):
-    factory = load_factory(monkeypatch)
+def test_pipeline_builder_wires_separate_training_and_eval_sections(factory):
     stale_dataset = pd.DataFrame({"stale": [True]})
     stale_env = object()
     config = {
@@ -228,8 +216,7 @@ def test_pipeline_builder_wires_separate_training_and_eval_sections(monkeypatch)
     assert agent.kwargs["eval_env"] is env_eval
 
 
-def test_pipeline_builder_uses_environment_dataset_without_dataprep(monkeypatch):
-    factory = load_factory(monkeypatch)
+def test_pipeline_builder_uses_environment_dataset_without_dataprep(factory):
     dataset = pd.DataFrame({"sample": [1]})
     config = {
         "environment": {"dataset": dataset, "seed": 42},
@@ -275,16 +262,13 @@ def test_pipeline_builder_uses_environment_dataset_without_dataprep(monkeypatch)
     ],
 )
 def test_validate_pipeline_config_rejects_invalid_structure(
-    monkeypatch, config, error_type, message
+    factory, config, error_type, message
 ):
-    factory = load_factory(monkeypatch)
-
     with pytest.raises(error_type, match=message):
         factory._validate_pipeline_config(config)
 
 
-def test_yaml_pipeline_forwards_generic_hidden_layer_configs(monkeypatch, tmp_path):
-    factory = load_factory(monkeypatch)
+def test_yaml_pipeline_forwards_generic_hidden_layer_configs(factory, tmp_path):
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
         """dataprep:
@@ -310,8 +294,7 @@ agent:
     ]
 
 
-def test_pipeline_builder_does_not_mutate_generic_agent_config(monkeypatch):
-    factory = load_factory(monkeypatch)
+def test_pipeline_builder_does_not_mutate_generic_agent_config(factory):
     dataset = pd.DataFrame({"sample": [1]})
     hidden_layers = [{"type": "Dropout", "rate": 0.2}]
     config = {

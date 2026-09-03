@@ -400,8 +400,12 @@ AutoREC/
 |       |-- environment.py          # RL environment for ECM generation
 |       |-- factory/                # Config-driven builders and model construction
 |       |   |-- __init__.py
-|       |   |-- factory.py          # Environment and agent factory
-|       |   `-- model.py            # Keras model construction from config
+|       |   |-- agent.py            # Agent builder
+|       |   |-- dataprep.py         # Data-preparation builder
+|       |   |-- environment.py      # Environment builder
+|       |   |-- model.py            # Keras model construction from config
+|       |   |-- pipeline.py         # Complete pipeline builder
+|       |   `-- utils.py            # Configuration loading helpers
 |       |-- utils.py                # Shared utilities
 |       |-- runtime.py              # Runtime setup helpers
 |       `-- optimized_data_structures/
