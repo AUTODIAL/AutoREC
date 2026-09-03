@@ -337,10 +337,21 @@ hidden_layers:
   - type: LayerNormalization
 ```
 
-`optimizer` accepts a configuration for a built-in Keras optimizer. Its `type` must exactly
-match a class name in `tf.keras.optimizers`; the remaining keys are passed to that optimizer's
-constructor. A pre-initialized Keras optimizer object can be supplied when constructing
-`DDQN_ECM` directly.
+`optimizer` accepts a configuration for a built-in Keras optimizer, with `learning_rate` set
+to either a number or a nested built-in Keras schedule configuration. Optimizer and schedule
+types are case-sensitive and must match their Keras class names. A pre-initialized optimizer
+object can also be supplied when constructing `DDQN_ECM` directly. For example:
+
+```yaml
+optimizer:
+  type: Adam
+  learning_rate:
+    type: ExponentialDecay
+    initial_learning_rate: 0.0005
+    decay_steps: 1000
+    decay_rate: 0.96
+    staircase: true
+```
 
 Training recommendations:
 
