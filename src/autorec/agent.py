@@ -1,4 +1,4 @@
-from typing import Optional, List, Tuple, Dict, Union, Any
+from typing import Optional, Dict, Union, Any, Sequence
 from pathlib import Path
 
 import pandas as pd
@@ -7,7 +7,6 @@ from tqdm import tqdm
 import time
 import numpy as np
 import tensorflow as tf
-from tensorflow.keras import layers
 
 import autoeis as ae
 from autorec.environment import EIS_ECM_Env
@@ -17,7 +16,14 @@ from autorec.utils import (
     plot_eval_fit,
     prepare_and_generate_circuit_gif,
 )
+from autorec.factory.model import create_model, get_model_config
 from autorec.optimized_data_structures.circular_buffer import CircularBuffer
+
+
+default_hidden_layers = [
+    {"type": "Dense", "units": 40, "activation": "relu"},
+    {"type": "Dense", "units": 40, "activation": "relu"},
+]
 
 
 class DDQN_ECM:
@@ -54,7 +60,7 @@ class DDQN_ECM:
         bayesian: bool = False,
         # NN hyperparameters
         model: Optional[str] = None,
-        hidden_layers: Optional[List[Tuple[int, str]]] = None,
+        hidden_layers: Optional[Sequence[dict[str, Any]]] = None,
         learning_rate: float = 0.0005,
         batch_size: int = 150,
         train_frequency: int = 5,
@@ -142,8 +148,10 @@ class DDQN_ECM:
             Path to a pre-trained model to load. This argument takes precedence over creating
             a new model from the hidden_layers configuration.
 
-        hidden_layers: list of tuples, optional
-            List of [num_neurons, activation_function] for each hidden layer.
+        hidden_layers: sequence of dicts, optional
+            Each dict specifies a hidden layer configuration with keys 'type' to specify the
+            layer type (e.g., 'Dense') and other keyword arguments like 'units' and
+            'activation'.
 
         learning_rate : float, optional
             Learning rate used by the neural network optimizer.
@@ -273,7 +281,7 @@ class DDQN_ECM:
         self.model_dir.mkdir(exist_ok=True)
 
         if hidden_layers is None:
-            self.hidden_layers = [[40, "relu"], [40, "relu"]]
+            self.hidden_layers = [config.copy() for config in default_hidden_layers]
         else:
             self.hidden_layers = hidden_layers
         self._setup_model(model, self.hidden_layers)
@@ -349,7 +357,9 @@ class DDQN_ECM:
         else:
             return "unknown"
 
-    def _setup_model(self, model: Optional[str], hidden_layers: List[Tuple[int, str]]) -> None:
+    def _setup_model(
+        self, model: Optional[str], hidden_layers: Sequence[dict[str, Any]]
+    ) -> None:
         """
         Load or create and initialize the neural network architecture for the DDQN agent.
 
@@ -370,10 +380,10 @@ class DDQN_ECM:
             This can be used as a starting point for further training or evaluation.
             If not provided, a new model will be created based on the hidden_layers
             configuration, with randomly initialized weights.
-        hidden_layers : list of tuples
-            Each tuple specifies (num_neurons, activation_function) for a hidden layer.
-            Example: [(40, 'relu'), (40, 'relu')] creates two hidden layers with 40 neurons
-            each and ReLU activation.
+        hidden_layers : sequence of dicts
+            Each dict specifies a hidden layer configuration with keys 'type' to specify the
+            layer type (e.g., 'Dense') and other keyword arguments like 'units' and
+            'activation'. This is only used if model is None.
 
         Notes
         -----
@@ -387,8 +397,8 @@ class DDQN_ECM:
             - Combines: One-hot encoded circuit state + normalized EIS measurements
 
         Hidden Layers:
-            - Each layer: Fully connected (Dense) with specified activation function
-            - Configurable number of layers and neurons via hidden_layers parameter
+            - A sequential stack of built-in Keras layers configured by hidden_layers
+            - Each configuration uses a layer "type" and that layer's constructor arguments
 
         Output Layer:
             - Size: Number of possible actions
@@ -420,25 +430,16 @@ class DDQN_ECM:
         n_actions = 2 + (HEAD_len - 1) * elems_len + (TAIL_len) * (elems_len - 2)
 
         if model is None:
-            # Build hidden layers dynamically based on hidden_layers parameter
-            inputs = layers.Input(shape=(state_shape,))
-            x = inputs
-            for neurons, activation in hidden_layers:
-                x = layers.Dense(neurons, activation=activation)(x)
-            outputs = layers.Dense(n_actions, activation="linear")(x)
-
-            self.model = tf.keras.Model(inputs=inputs, outputs=outputs)
+            input_layer = {"type": "InputLayer", "shape": (state_shape,)}
+            output_layer = {"type": "Dense", "units": n_actions, "activation": "linear"}
+            self.model = create_model(
+                input_layer, hidden_layers, output_layer, name="DDQN_Model"
+            )
             self.target_model = tf.keras.models.clone_model(self.model)
             self.target_model.set_weights(self.model.get_weights())
         else:
             # Load the model file
             self.load_model(model)
-            # Update the hidden layers attribute to reflect the loaded model's architecture
-            self.hidden_layers = [
-                (layer.units, layer.activation.__name__)
-                for layer in self.model.layers
-                if isinstance(layer, layers.Dense) and layer != self.model.layers[-1]
-            ]
 
     def save_model(self, filepath: str | Path, save_format: str = "keras") -> None:
         """
@@ -522,8 +523,11 @@ class DDQN_ECM:
             raise FileNotFoundError(f"Model file not found: {filepath}")
 
         self.model = tf.keras.models.load_model(filepath)
+        # Update the target model
         self.target_model = tf.keras.models.clone_model(self.model)
         self.target_model.set_weights(self.model.get_weights())
+        # Update the hidden layers to reflect the loaded model's architecture
+        self.hidden_layers = get_model_config(self.model)
         print(f"✓ Model loaded from: {filepath}")
 
     def scheduler(self, trial: int, schedule_timesteps: float) -> float:
