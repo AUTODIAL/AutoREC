@@ -306,13 +306,14 @@ hidden_layers:
   - type: Dense
     units: 40
     activation: relu
-learning_rate: 0.0005
+optimizer:
+  type: Adam
+  learning_rate: 0.0005
 batch_size: 150
 train_frequency: 5
 update_target_frequency: 1000
 NN_sleep: 1000
 buffer_capacity: 15000
-optimizer_type: adam
 prioritized_replay_alpha: 0.6
 prioritized_replay_eps: 1.0E-6
 initial_beta: 0.4
@@ -335,6 +336,11 @@ hidden_layers:
     rate: 0.2
   - type: LayerNormalization
 ```
+
+`optimizer` accepts a configuration for a built-in Keras optimizer. Its `type` must exactly
+match a class name in `tf.keras.optimizers`; the remaining keys are passed to that optimizer's
+constructor. A pre-initialized Keras optimizer object can be supplied when constructing
+`DDQN_ECM` directly.
 
 Training recommendations:
 
@@ -404,6 +410,7 @@ AutoREC/
 |       |   |-- dataprep.py         # Data-preparation builder
 |       |   |-- environment.py      # Environment builder
 |       |   |-- model.py            # Keras model construction from config
+|       |   |-- optimizer.py        # Keras optimizer construction from config
 |       |   |-- pipeline.py         # Complete pipeline builder
 |       |   `-- utils.py            # Configuration loading helpers
 |       |-- utils.py                # Shared utilities
