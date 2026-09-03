@@ -17,6 +17,7 @@ agent_module = importlib.import_module("autorec.agent")
 agent_factory = importlib.import_module("autorec.factory.agent")
 dataprep_factory = importlib.import_module("autorec.factory.dataprep")
 environment_factory = importlib.import_module("autorec.factory.environment")
+optimizer_factory = importlib.import_module("autorec.factory.optimizer")
 pipeline_factory = importlib.import_module("autorec.factory.pipeline")
 
 
@@ -59,6 +60,8 @@ def test_factory_package_exports_builders_from_split_modules():
     assert factory_package.dataprep_builder is dataprep_factory.dataprep_builder
     assert factory_package.environment_builder is environment_factory.environment_builder
     assert factory_package.pipeline_builder is pipeline_factory.pipeline_builder
+    assert factory_package.create_optimizer is optimizer_factory.create_optimizer
+    assert factory_package.get_optimizer_config is optimizer_factory.get_optimizer_config
 
 
 def test_config_reader_loads_yaml_and_expands_environment_variables(
@@ -268,7 +271,7 @@ def test_validate_pipeline_config_rejects_invalid_structure(
         factory._validate_pipeline_config(config)
 
 
-def test_yaml_pipeline_forwards_generic_hidden_layer_configs(factory, tmp_path):
+def test_yaml_pipeline_forwards_generic_model_and_optimizer_configs(factory, tmp_path):
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
         """dataprep:
@@ -283,6 +286,10 @@ agent:
       activation: relu
     - type: Dropout
       rate: 0.2
+  optimizer:
+    type: SGD
+    learning_rate: 0.01
+    momentum: 0.9
 """
     )
 
@@ -292,17 +299,24 @@ agent:
         {"type": "Dense", "units": 24, "activation": "relu"},
         {"type": "Dropout", "rate": 0.2},
     ]
+    assert agent.kwargs["optimizer"] == {
+        "type": "SGD",
+        "learning_rate": 0.01,
+        "momentum": 0.9,
+    }
 
 
 def test_pipeline_builder_does_not_mutate_generic_agent_config(factory):
     dataset = pd.DataFrame({"sample": [1]})
     hidden_layers = [{"type": "Dropout", "rate": 0.2}]
+    optimizer = {"type": "Adam", "learning_rate": 0.0005}
     config = {
         "environment": {"dataset": dataset},
-        "agent": {"hidden_layers": hidden_layers},
+        "agent": {"hidden_layers": hidden_layers, "optimizer": optimizer},
     }
 
     _, _, _, _, agent = factory.pipeline_builder(config)
 
     assert agent.kwargs["hidden_layers"] == hidden_layers
-    assert config["agent"] == {"hidden_layers": hidden_layers}
+    assert agent.kwargs["optimizer"] == optimizer
+    assert config["agent"] == {"hidden_layers": hidden_layers, "optimizer": optimizer}

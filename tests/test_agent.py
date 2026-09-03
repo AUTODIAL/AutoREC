@@ -4,8 +4,6 @@ Most tests stub model creation so they can verify constructor behavior without b
 Keras networks or running training. Focused architecture tests use small real Keras models.
 """
 
-from pathlib import Path
-
 import numpy as np
 import pytest
 
@@ -50,13 +48,6 @@ class DummyModel:
         return None
 
 
-class DummyOptimizer:
-    """Records optimizer construction without importing real optimizer behavior."""
-
-    def __init__(self, learning_rate):
-        self.learning_rate = learning_rate
-
-
 def dense_signature(model):
     """Return the units and activations of a model's Dense layers."""
     return [
@@ -73,7 +64,6 @@ def dense_signature(model):
 @pytest.fixture
 def light_agent(monkeypatch):
     """Return DDQN_ECM with expensive neural-network setup replaced by stubs."""
-    monkeypatch.setattr(agent_module.tf.keras.optimizers, "Adam", DummyOptimizer)
 
     def fake_setup_model(self, model, hidden_layers):
         self.model_setup = (model, hidden_layers)
@@ -100,6 +90,10 @@ def test_agent_initializes_defaults_and_writes_summary(light_agent, tmp_path):
     assert agent.start_jump == 4
     assert agent.anneal_fraction == pytest.approx(0.595)
     assert agent.prioritized_replay_beta == 0.2
+    assert isinstance(agent.optimizer, agent_module.tf.keras.optimizers.Adam)
+    assert float(agent.optimizer.learning_rate.numpy()) == pytest.approx(0.0005)
+    assert agent.optimizer_config["type"] == "Adam"
+    assert agent.optimizer_config["learning_rate"] == pytest.approx(0.0005)
     assert agent.hidden_layers == [
         {"type": "Dense", "units": 40, "activation": "relu"},
         {"type": "Dense", "units": 40, "activation": "relu"},
@@ -173,22 +167,42 @@ def test_agent_can_replace_envs(light_agent, tmp_path):
 
 
 def test_agent_rejects_unknown_optimizer(light_agent, tmp_path):
-    with pytest.raises(ValueError, match="Unsupported optimizer"):
+    with pytest.raises(ValueError, match="Unknown Keras optimizer type"):
         light_agent(
             training_env=DummyEnv(),
             save_dir=tmp_path,
-            optimizer_type="not-an-optimizer",
+            optimizer={"type": "NotAnOptimizer"},
         )
 
 
-def test_agent_uses_custom_optimizer_object(light_agent, tmp_path):
-    optimizer = object()
+@pytest.mark.parametrize("optimizer", ["Adam", object()])
+def test_agent_rejects_invalid_optimizer_inputs(light_agent, tmp_path, optimizer):
+    with pytest.raises(TypeError, match="configuration dictionary or a Keras optimizer"):
+        light_agent(training_env=DummyEnv(), save_dir=tmp_path, optimizer=optimizer)
 
-    agent = light_agent(
-        training_env=DummyEnv(), save_dir=Path(tmp_path), optimizer_type=optimizer
-    )
+
+def test_agent_builds_optimizer_from_config_without_mutating_it(light_agent, tmp_path):
+    config = {"type": "SGD", "learning_rate": 0.01, "momentum": 0.9}
+
+    agent = light_agent(training_env=DummyEnv(), save_dir=tmp_path, optimizer=config)
+
+    assert isinstance(agent.optimizer, agent_module.tf.keras.optimizers.SGD)
+    assert float(agent.optimizer.learning_rate.numpy()) == pytest.approx(0.01)
+    assert float(agent.optimizer.momentum) == pytest.approx(0.9)
+    assert agent.optimizer_config["type"] == "SGD"
+    assert agent.optimizer_config["learning_rate"] == pytest.approx(0.01)
+    assert agent.optimizer_config["momentum"] == pytest.approx(0.9)
+    assert config == {"type": "SGD", "learning_rate": 0.01, "momentum": 0.9}
+
+
+def test_agent_uses_custom_optimizer_object(light_agent, tmp_path):
+    optimizer = agent_module.tf.keras.optimizers.SGD(learning_rate=0.01)
+
+    agent = light_agent(training_env=DummyEnv(), save_dir=tmp_path, optimizer=optimizer)
 
     assert agent.optimizer is optimizer
+    assert agent.optimizer_config["type"] == "SGD"
+    assert agent.optimizer_config["learning_rate"] == pytest.approx(0.01)
 
 
 def test_agent_builds_requested_hidden_layers(tmp_path):
@@ -201,7 +215,6 @@ def test_agent_builds_requested_hidden_layers(tmp_path):
         training_env=DummyEnv(),
         save_dir=tmp_path,
         hidden_layers=hidden_layers,
-        optimizer_type=object(),
     )
 
     assert dense_signature(agent.model) == [
@@ -228,7 +241,6 @@ def test_agent_output_size_matches_one_operator_action_list(tmp_path):
         training_env=env,
         save_dir=tmp_path,
         hidden_layers=[{"type": "Dense", "units": 8, "activation": "relu"}],
-        optimizer_type=object(),
     )
 
     assert agent.model.input_shape == (None, 29)
@@ -239,7 +251,7 @@ def test_agent_metadata_records_configuration(light_agent, tmp_path):
     training_env = DummyEnv("training")
     eval_env = DummyEnv("evaluation")
     model_path = tmp_path / "input.keras"
-    optimizer = object()
+    optimizer = {"type": "SGD", "learning_rate": 0.001, "momentum": 0.9}
     agent = light_agent(
         training_env=training_env,
         eval_env=eval_env,
@@ -261,13 +273,12 @@ def test_agent_metadata_records_configuration(light_agent, tmp_path):
         bayesian=True,
         model=model_path,
         hidden_layers=[{"type": "Dense", "units": 12, "activation": "tanh"}],
-        learning_rate=0.001,
         batch_size=32,
         train_frequency=2,
         update_target_frequency=50,
         NN_sleep=40,
         buffer_capacity=500,
-        optimizer_type=optimizer,
+        optimizer=optimizer,
         prioritized_replay_alpha=0.7,
         prioritized_replay_eps=1e-5,
         initial_beta=0.3,
@@ -277,7 +288,13 @@ def test_agent_metadata_records_configuration(light_agent, tmp_path):
         final_beta=0.9,
     )
 
-    assert agent.metadata == {
+    metadata = agent.metadata
+    optimizer_metadata = metadata.pop("optimizer")
+
+    assert optimizer_metadata["type"] == "SGD"
+    assert optimizer_metadata["learning_rate"] == pytest.approx(0.001)
+    assert optimizer_metadata["momentum"] == pytest.approx(0.9)
+    assert metadata == {
         "training_env": {"name": "training"},
         "eval_env": {"name": "evaluation"},
         "save_dir": str(tmp_path),
@@ -298,13 +315,11 @@ def test_agent_metadata_records_configuration(light_agent, tmp_path):
         "bayesian": True,
         "model": str(model_path),
         "hidden_layers": [{"type": "Dense", "units": 12, "activation": "tanh"}],
-        "learning_rate": 0.001,
         "batch_size": 32,
         "train_frequency": 2,
         "update_target_frequency": 50,
         "NN_sleep": 40,
         "buffer_capacity": 500,
-        "optimizer_type": "object",
         "prioritized_replay_alpha": 0.7,
         "prioritized_replay_eps": 1e-5,
         "initial_beta": 0.3,
@@ -326,7 +341,6 @@ def test_agent_builds_generic_hidden_layer_stack(tmp_path):
         training_env=DummyEnv(),
         save_dir=tmp_path,
         hidden_layers=hidden_layers,
-        optimizer_type=object(),
     )
 
     assert [layer.__class__.__name__ for layer in agent.model.layers] == [
@@ -354,7 +368,6 @@ def test_model_file_takes_precedence_over_hidden_layers(tmp_path):
         save_dir=tmp_path / "loaded",
         model=str(model_path),
         hidden_layers=[{"type": "Dense", "units": 999, "activation": "relu"}],
-        optimizer_type=object(),
     )
 
     assert len(agent.hidden_layers) == 1
