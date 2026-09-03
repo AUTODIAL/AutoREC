@@ -44,9 +44,13 @@ class DummyOptimizer:
 def dense_signature(model):
     """Return the units and activations of a model's Dense layers."""
     return [
-        (layer.units, layer.activation.__name__)
+        {
+            "type": layer.__class__.__name__,
+            "units": layer.units,
+            "activation": layer.activation.__name__,
+        }
         for layer in model.layers
-        if isinstance(layer, agent_module.layers.Dense)
+        if isinstance(layer, agent_module.tf.keras.layers.Dense)
     ]
 
 
@@ -80,14 +84,27 @@ def test_agent_initializes_defaults_and_writes_summary(light_agent, tmp_path):
     assert agent.start_jump == 4
     assert agent.anneal_fraction == pytest.approx(0.595)
     assert agent.prioritized_replay_beta == 0.2
-    assert agent.hidden_layers == [[40, "relu"], [40, "relu"]]
-    assert agent.model_setup == (None, [[40, "relu"], [40, "relu"]])
+    assert agent.hidden_layers == [
+        {"type": "Dense", "units": 40, "activation": "relu"},
+        {"type": "Dense", "units": 40, "activation": "relu"},
+    ]
+    assert agent.model_setup == (
+        None,
+        [
+            {"type": "Dense", "units": 40, "activation": "relu"},
+            {"type": "Dense", "units": 40, "activation": "relu"},
+        ],
+    )
     assert agent.model_dir == tmp_path / "models"
     assert (tmp_path / "model_summary.txt").read_text() == "dummy model\n"
 
 
 def test_agent_forwards_custom_model_configuration(light_agent, tmp_path):
-    hidden_layers = [[32, "tanh"], [16, "relu"], [8, "elu"]]
+    hidden_layers = [
+        {"type": "Dense", "units": 32, "activation": "tanh"},
+        {"type": "Dense", "units": 16, "activation": "relu"},
+        {"type": "Dense", "units": 8, "activation": "elu"},
+    ]
     model_path = tmp_path / "existing.keras"
 
     agent = light_agent(
@@ -99,6 +116,15 @@ def test_agent_forwards_custom_model_configuration(light_agent, tmp_path):
 
     assert agent.hidden_layers is hidden_layers
     assert agent.model_setup == (str(model_path), hidden_layers)
+
+
+def test_default_hidden_layer_configs_are_not_shared(light_agent, tmp_path):
+    first = light_agent(training_env=DummyEnv(), save_dir=tmp_path / "first")
+    second = light_agent(training_env=DummyEnv(), save_dir=tmp_path / "second")
+
+    first.hidden_layers[0]["units"] = 999
+
+    assert second.hidden_layers[0]["units"] == 40
 
 
 def test_agent_switches_between_training_and_eval_envs(light_agent, tmp_path):
@@ -149,8 +175,11 @@ def test_agent_uses_custom_optimizer_object(light_agent, tmp_path):
 
 
 def test_agent_builds_requested_hidden_layers(tmp_path):
-    hidden_layers = [[32, "tanh"], [16, "relu"], [8, "elu"]]
-
+    hidden_layers = [
+        {"type": "Dense", "units": 32, "activation": "tanh"},
+        {"type": "Dense", "units": 16, "activation": "relu"},
+        {"type": "Dense", "units": 8, "activation": "elu"},
+    ]
     agent = agent_module.DDQN_ECM(
         training_env=DummyEnv(),
         save_dir=tmp_path,
@@ -159,10 +188,10 @@ def test_agent_builds_requested_hidden_layers(tmp_path):
     )
 
     assert dense_signature(agent.model) == [
-        (32, "tanh"),
-        (16, "relu"),
-        (8, "elu"),
-        (16, "linear"),
+        {"type": "Dense", "units": 32, "activation": "tanh"},
+        {"type": "Dense", "units": 16, "activation": "relu"},
+        {"type": "Dense", "units": 8, "activation": "elu"},
+        {"type": "Dense", "units": 16, "activation": "linear"},
     ]
     assert agent.model.input_shape == (None, 34)
     assert agent.model.output_shape == (None, 16)
@@ -175,10 +204,36 @@ def test_agent_builds_requested_hidden_layers(tmp_path):
         np.testing.assert_array_equal(target_weight, model_weight)
 
 
+def test_agent_builds_generic_hidden_layer_stack(tmp_path):
+    hidden_layers = [
+        {"type": "Dense", "units": 24, "activation": "relu"},
+        {"type": "Dropout", "rate": 0.2},
+        {"type": "LayerNormalization"},
+    ]
+
+    agent = agent_module.DDQN_ECM(
+        training_env=DummyEnv(),
+        save_dir=tmp_path,
+        hidden_layers=hidden_layers,
+        optimizer_type=object(),
+    )
+
+    assert [layer.__class__.__name__ for layer in agent.model.layers] == [
+        "Dense",
+        "Dropout",
+        "LayerNormalization",
+        "Dense",
+    ]
+    assert agent.model.layers[1].rate == pytest.approx(0.2)
+    assert [layer.__class__.__name__ for layer in agent.target_model.layers] == [
+        layer.__class__.__name__ for layer in agent.model.layers
+    ]
+
+
 def test_model_file_takes_precedence_over_hidden_layers(tmp_path):
-    inputs = agent_module.layers.Input(shape=(34,))
-    hidden = agent_module.layers.Dense(12, activation="sigmoid")(inputs)
-    outputs = agent_module.layers.Dense(16, activation="linear")(hidden)
+    inputs = agent_module.tf.keras.layers.Input(shape=(34,))
+    hidden = agent_module.tf.keras.layers.Dense(12, activation="sigmoid")(inputs)
+    outputs = agent_module.tf.keras.layers.Dense(16, activation="linear")(hidden)
     saved_model = agent_module.tf.keras.Model(inputs=inputs, outputs=outputs)
     model_path = tmp_path / "saved.keras"
     saved_model.save(model_path)
@@ -187,12 +242,18 @@ def test_model_file_takes_precedence_over_hidden_layers(tmp_path):
         training_env=DummyEnv(),
         save_dir=tmp_path / "loaded",
         model=str(model_path),
-        hidden_layers=[[999, "relu"]],
+        hidden_layers=[{"type": "Dense", "units": 999, "activation": "relu"}],
         optimizer_type=object(),
     )
 
-    assert agent.hidden_layers == [(12, "sigmoid")]
-    assert dense_signature(agent.model) == [(12, "sigmoid"), (16, "linear")]
+    assert len(agent.hidden_layers) == 1
+    assert agent.hidden_layers[0]["type"] == "Dense"
+    assert agent.hidden_layers[0]["units"] == 12
+    assert agent.hidden_layers[0]["activation"] == "sigmoid"
+    assert dense_signature(agent.model) == [
+        {"type": "Dense", "units": 12, "activation": "sigmoid"},
+        {"type": "Dense", "units": 16, "activation": "linear"},
+    ]
     assert agent.target_model.input_shape == agent.model.input_shape
     assert agent.target_model.output_shape == agent.model.output_shape
     assert dense_signature(agent.target_model) == dense_signature(agent.model)
