@@ -321,12 +321,12 @@ class EISDataPrep:
         ]
         if missing_columns:
             raise ValueError(
-                f"{csv_path}: Missing required columns {missing_columns}; expected "
+                f"Missing required columns {missing_columns}; expected "
                 f"{list(cls.RAW_EIS_REQUIRED_COLUMNS)}"
             )
 
         if data.empty:
-            raise ValueError(f"{csv_path}: EIS sample CSV contains no data rows")
+            raise ValueError("EIS sample CSV contains no data rows")
 
         non_numeric_columns = [
             column
@@ -334,11 +334,11 @@ class EISDataPrep:
             if not pd.api.types.is_numeric_dtype(data[column])
         ]
         if non_numeric_columns:
-            raise ValueError(f"{csv_path}: Non-numeric EIS columns: {non_numeric_columns}")
+            raise ValueError(f"Non-numeric EIS columns: {non_numeric_columns}")
 
         values = data.loc[:, cls.RAW_EIS_REQUIRED_COLUMNS].to_numpy(dtype=float)
         if not np.isfinite(values).all():
-            raise ValueError(f"{csv_path}: EIS sample CSV contains NaN or infinite values")
+            raise ValueError("EIS sample CSV contains NaN or infinite values")
 
     def load_single_csv(self, csv_path: Path, base_path: Path) -> Optional[dict]:
         """
