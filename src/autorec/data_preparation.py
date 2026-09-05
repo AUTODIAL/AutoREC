@@ -1,6 +1,6 @@
 from pathlib import Path
 import pickle
-from typing import Optional, Union
+from typing import Iterable, Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -112,12 +112,14 @@ class EISDataPrep:
         "nmag",
     ]
 
+    DEFAULT_EIS_FEATURES = ("ImZ", "phi", "mag", "nphi")
+
     def __init__(
         self,
         path: Union[str, Path],
         mode: str = "load",
         evaluation: bool = False,
-        eis_features: Optional[list] = ["ImZ", "phi", "mag", "nphi"],
+        eis_features: Optional[Iterable[str]] = None,
     ):
         """
         Initialize EISDataPrep, please ensure the provided data fits the expectations below.
@@ -194,17 +196,24 @@ class EISDataPrep:
             self.file_type = None
 
     @classmethod
-    def _validate_eis_features(cls, eis_features) -> list:
+    def _validate_eis_features(cls, eis_features: Optional[Iterable[str]]) -> list[str]:
         """Normalize and validate feature names used to flatten each spectrum."""
-        if isinstance(eis_features, str):
-            eis_features = [eis_features]
-        for feature in eis_features:
+        if eis_features is None:
+            features = list(cls.DEFAULT_EIS_FEATURES)
+        elif isinstance(eis_features, str):
+            features = [eis_features]
+        else:
+            # Materialize one-shot iterables before validating so the same
+            # normalized values can be returned to the caller.
+            features = list(eis_features)
+
+        for feature in features:
             if feature not in cls.AVAILABLE_EIS_FEATURES:
                 raise ValueError(
                     f"Invalid EIS feature: '{feature}'. "
                     f"Available features: {cls.AVAILABLE_EIS_FEATURES}"
                 )
-        return list(eis_features)
+        return features
 
     @classmethod
     def from_eisforge(
@@ -212,7 +221,7 @@ class EISDataPrep:
         eisforge_rows: pd.DataFrame,
         frequency: np.ndarray,
         evaluation: bool = True,
-        eis_features: Optional[list] = None,
+        eis_features: Optional[Iterable[str]] = None,
     ) -> "EISDataPrep":
         """Prepare EISForge generation results entirely in memory.
 
@@ -241,9 +250,7 @@ class EISDataPrep:
         prep.path = Path("<in-memory-eisforge>")
         prep.mode = "process"
         prep.evaluation = evaluation
-        prep.eis_features = cls._validate_eis_features(
-            ["ImZ", "phi", "mag", "nphi"] if eis_features is None else eis_features
-        )
+        prep.eis_features = cls._validate_eis_features(eis_features)
         prep.file_type = None
         prep.dataset = None
         prep._validation_errors = []

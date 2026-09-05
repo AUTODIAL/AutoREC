@@ -36,6 +36,20 @@ def _skip_threshold_fitting(monkeypatch):
     )
 
 
+def test_eis_feature_generator_is_materialized_once():
+    """One-shot feature iterables retain their values after validation."""
+    features = (feature for feature in ["ImZ", "phi"])
+
+    assert EISDataPrep._validate_eis_features(features) == ["ImZ", "phi"]
+
+
+def test_none_eis_features_uses_defaults():
+    """An omitted feature selection resolves to AutoREC's standard features."""
+    assert EISDataPrep._validate_eis_features(None) == list(
+        EISDataPrep.DEFAULT_EIS_FEATURES
+    )
+
+
 def test_eisforge_output_is_consumed_without_reading_summary_csv(
     tmp_path, monkeypatch, capsys
 ):
