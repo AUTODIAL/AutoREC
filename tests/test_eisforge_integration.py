@@ -66,3 +66,19 @@ def test_eisforge_sample_csv_is_consumed_from_disk(tmp_path, monkeypatch):
             155.7142 - 39.3695186j,
         ],
     )
+
+
+def test_invalid_eisforge_sample_reports_missing_columns(tmp_path, capsys):
+    """A malformed exported sample reports the broken disk contract."""
+    circuit_dir = tmp_path / "R1-C2"
+    circuit_dir.mkdir()
+    pd.DataFrame({"freq": [100.0], "Z_real": [10.0]}).to_csv(
+        circuit_dir / "sample_0000.csv", index=False
+    )
+
+    prep = EISDataPrep(tmp_path, mode="process", evaluation=True)
+    with np.testing.assert_raises(ValueError):
+        prep.load()
+
+    output = capsys.readouterr().out
+    assert "Missing required columns ['Z_imag']" in output
