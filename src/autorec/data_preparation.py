@@ -19,6 +19,12 @@ impedance.validation.circuit_elements["np"] = np
 DEFAULT_UPPER_BOUND_DECREASE = 0.997
 DEFAULT_LOWER_BOUND_INCREASE = 2.5
 
+# EISForge marks directories that it owns and names every AutoREC-compatible
+# spectrum with this pattern.  Keeping these details here makes discovery
+# explicit without making EISForge a runtime dependency of AutoREC.
+EISFORGE_OUTPUT_MARKER = ".eisforge-output"
+EISFORGE_SAMPLE_PATTERN = "sample_*.csv"
+
 
 class EISDataPrep:
     """
@@ -95,6 +101,17 @@ class EISDataPrep:
         "r2_thresh",
     ]
 
+    AVAILABLE_EIS_FEATURES = [
+        "ReZ",
+        "ImZ",
+        "phi",
+        "mag",
+        "nReZ",
+        "nImZ",
+        "nphi",
+        "nmag",
+    ]
+
     def __init__(
         self,
         path: Union[str, Path],
@@ -148,16 +165,7 @@ class EISDataPrep:
                 f"EISDataPrep: Invalid mode: '{mode}'. Must be 'process' or 'load'"
             )
 
-        avail_eis_features = ["ReZ", "ImZ", "phi", "mag", "nReZ", "nImZ", "nphi", "nmag"]
-        if isinstance(eis_features, str):
-            eis_features = [eis_features]
-        for feature in eis_features:
-            if feature not in avail_eis_features:
-                raise ValueError(
-                    f"Invalid EIS feature: '{feature}'. "
-                    f"Available features: {avail_eis_features}"
-                )
-        self.eis_features = eis_features
+        self.eis_features = self._validate_eis_features(eis_features)
 
         self.mode = mode
         self.evaluation = evaluation
@@ -184,6 +192,95 @@ class EISDataPrep:
             if not self.path.is_dir():
                 raise ValueError(f"In 'process' mode, path must be a folder, got: {self.path}")
             self.file_type = None
+
+    @classmethod
+    def _validate_eis_features(cls, eis_features) -> list:
+        """Normalize and validate feature names used to flatten each spectrum."""
+        if isinstance(eis_features, str):
+            eis_features = [eis_features]
+        for feature in eis_features:
+            if feature not in cls.AVAILABLE_EIS_FEATURES:
+                raise ValueError(
+                    f"Invalid EIS feature: '{feature}'. "
+                    f"Available features: {cls.AVAILABLE_EIS_FEATURES}"
+                )
+        return list(eis_features)
+
+    @classmethod
+    def from_eisforge(
+        cls,
+        eisforge_rows: pd.DataFrame,
+        frequency: np.ndarray,
+        evaluation: bool = True,
+        eis_features: Optional[list] = None,
+    ) -> "EISDataPrep":
+        """Prepare EISForge generation results entirely in memory.
+
+        ``EISForge.DataGen.generate_data`` returns one row per accepted sample.
+        This constructor translates its final circuit and impedance columns
+        into AutoREC's processed dataset without creating intermediate CSVs.
+        """
+        if not isinstance(eisforge_rows, pd.DataFrame) or eisforge_rows.empty:
+            raise ValueError("EISForge input must be a non-empty pandas DataFrame")
+
+        required_columns = {"relabel_ecm", "final_Z"}
+        missing_columns = required_columns.difference(eisforge_rows.columns)
+        if missing_columns:
+            raise ValueError(
+                "EISForge input is missing required columns: "
+                + ", ".join(sorted(missing_columns))
+            )
+
+        frequency = np.asarray(frequency, dtype=float)
+        if frequency.ndim != 1 or frequency.size == 0:
+            raise ValueError("EISForge frequency must be a non-empty one-dimensional array")
+
+        # Build the normal EISDataPrep state without requiring a placeholder
+        # path; every downstream AutoREC component receives the usual dataset.
+        prep = cls.__new__(cls)
+        prep.path = Path("<in-memory-eisforge>")
+        prep.mode = "process"
+        prep.evaluation = evaluation
+        prep.eis_features = cls._validate_eis_features(
+            ["ImZ", "phi", "mag", "nphi"] if eis_features is None else eis_features
+        )
+        prep.file_type = None
+        prep.dataset = None
+        prep._validation_errors = []
+        prep._validation_warnings = []
+
+        records = []
+        sample_counts = {}
+        for row_index, row in eisforge_rows.iterrows():
+            circuit = str(row["relabel_ecm"])
+            impedance = np.asarray(row["final_Z"], dtype=complex)
+            if impedance.ndim != 1 or impedance.shape != frequency.shape:
+                raise ValueError(
+                    f"EISForge row {row_index} has {impedance.size} impedance points; "
+                    f"expected {frequency.size}"
+                )
+
+            # Match EISForge's per-circuit sample numbering so in-memory and
+            # file-based runs produce comparable identifiers.
+            sample_index = sample_counts.get(circuit, 0)
+            sample_counts[circuit] = sample_index + 1
+            chi_thresh, r2_thresh = prep.calculate_thresholds(frequency, impedance)
+            records.append(
+                {
+                    "sub_id": f"{circuit}/sample_{sample_index:04d}",
+                    "true_circuit": circuit,
+                    "freq": frequency.copy(),
+                    "Z_true": impedance.copy(),
+                    "flatten_Z": prep.flatten_EIS(impedance, prep.eis_features),
+                    "chi_thresh": chi_thresh,
+                    "r2_thresh": r2_thresh,
+                }
+            )
+
+        prep.dataset = pd.DataFrame(records)
+        if not prep.validate():
+            raise ValueError(prep._format_validation_errors())
+        return prep
 
     def calculate_thresholds(
         self,
@@ -427,8 +524,15 @@ class EISDataPrep:
         """
         all_data = []
 
-        # Recursively get all CSV files from all subfolders
-        csv_files = list(self.path.rglob("*.csv"))
+        # EISForge may place a consolidated summary CSV beside its per-spectrum
+        # files.  The marker lets AutoREC select only the spectrum files while
+        # preserving the existing all-CSV behavior for every other data source.
+        csv_pattern = (
+            EISFORGE_SAMPLE_PATTERN
+            if (self.path / EISFORGE_OUTPUT_MARKER).is_file()
+            else "*.csv"
+        )
+        csv_files = sorted(self.path.rglob(csv_pattern))
         print(f"Found {len(csv_files)} CSV files (including subfolders)")
 
         # Group files by folder for reporting
