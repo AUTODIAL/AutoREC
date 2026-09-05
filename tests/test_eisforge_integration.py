@@ -13,10 +13,16 @@ import pandas as pd
 # their caches outside the repository until the shared test setup on upstream's
 # unit-test branch is merged.
 _TEST_CACHE = Path(tempfile.gettempdir()) / "autorec_eisforge_contract_test"
+_MATPLOTLIB_CACHE = _TEST_CACHE / "matplotlib"
+_JULIA_ENV = _TEST_CACHE / "julia_env"
+_JULIA_DEPOT = _TEST_CACHE / "julia_depot"
+for cache_directory in (_MATPLOTLIB_CACHE, _JULIA_ENV, _JULIA_DEPOT):
+    cache_directory.mkdir(parents=True, exist_ok=True)
+
 os.environ.setdefault("XDG_CACHE_HOME", str(_TEST_CACHE))
-os.environ.setdefault("MPLCONFIGDIR", str(_TEST_CACHE / "matplotlib"))
-os.environ.setdefault("PYTHON_JULIAPKG_PROJECT", str(_TEST_CACHE / "julia_env"))
-os.environ.setdefault("JULIA_DEPOT_PATH", str(_TEST_CACHE / "julia_depot"))
+os.environ.setdefault("MPLCONFIGDIR", str(_MATPLOTLIB_CACHE))
+os.environ.setdefault("PYTHON_JULIAPKG_PROJECT", str(_JULIA_ENV))
+os.environ.setdefault("JULIA_DEPOT_PATH", str(_JULIA_DEPOT))
 os.environ.setdefault("PYTHON_JULIACALL_AUTOLOAD_IPYTHON_EXTENSION", "no")
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
 
