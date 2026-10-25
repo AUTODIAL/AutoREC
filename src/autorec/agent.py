@@ -31,7 +31,7 @@ default_optimizer_config = {"type": "Adam", "learning_rate": 0.0005}
 
 @dataclass
 class _TrainingState:
-    """Cross-trial counters and histories, reset on each ``train()`` call.
+    """Cross-trial counters and histories, retained across bounded training calls.
 
     Counters and histories are synchronized after each completed episode; completed trials
     are recorded after schedule updates. This is not a snapshot of an unfinished episode.
@@ -43,6 +43,8 @@ class _TrainingState:
     memory: int = 0
     success_count: int = 0
     completed_trials: int = 0
+    schedule_config: dict = field(default_factory=dict)
+    at_trial_boundary: bool = True
     NN_loss: pd.DataFrame = field(default_factory=pd.DataFrame)
     success_rate: pd.DataFrame = field(default_factory=pd.DataFrame)
     terminal_states: pd.DataFrame = field(
@@ -53,6 +55,15 @@ class _TrainingState:
     statistical_analysis: dict[str, list] = field(
         default_factory=lambda: {"episodic_cumul_reward": [], "episodic_mean_reward": []}
     )
+
+    def results(self) -> dict:
+        """Return the current histories without copying or consuming randomness."""
+        return {
+            "NN_loss": self.NN_loss,
+            "success_rate": self.success_rate,
+            "terminal_states": self.terminal_states,
+            "statistical_analysis": self.statistical_analysis,
+        }
 
 
 class DDQN_ECM:
@@ -279,6 +290,7 @@ class DDQN_ECM:
         self.buffer_capacity = buffer_capacity
         self._replay_buffer: Optional[CircularBuffer] = None
         self._training_state: Optional[_TrainingState] = None
+        self._continuation_mode = False
 
         # Prioritized replay parameters
         self.prioritized_replay_alpha = prioritized_replay_alpha
@@ -915,63 +927,116 @@ class DDQN_ECM:
 
         return np.mean(losses)
 
-    def train(self):
-        """Train all trials with fresh replay, counters, and result histories.
+    @property
+    def completed_trials(self) -> int:
+        """Completed trials in the retained run; zero before training starts."""
+        return self._training_state.completed_trials if self._training_state else 0
 
-        Retain those objects on the agent afterward. Models, optimizer, epsilon/beta, and
-        their schedule histories keep their existing lifecycle across calls.
+    def _training_schedule_config(self) -> dict:
+        """Capture the horizon and resolved epsilon/beta schedule parameters."""
+        return {
+            name: getattr(self, name)
+            for name in (
+                "num_trials",
+                "start_decay",
+                "epsilon_decay",
+                "epsilon_min",
+                "start_jump",
+                "anneal_fraction",
+                "initial_beta",
+                "final_beta",
+            )
+        }
+
+    def train(self, *, additional_trials: Optional[int] = None):
+        """Train all trials, or advance a retained run by a bounded number of trials.
+
+        Parameters
+        ----------
+        additional_trials : int or None, optional
+            A nonnegative count opts into continuation, preserving replay, counters,
+            histories, and the original ``num_trials`` horizon. Zero initializes or reads
+            state without taking a step. Subsequent calls without a count finish the
+            remaining horizon; calls at completion do nothing. Exceeding the horizon or
+            changing its epsilon/beta schedule configuration raises an error.
+
+            Without opting in, repeated no-argument calls retain legacy behavior: fresh
+            replay, counters, and result histories, with the existing model, optimizer,
+            epsilon/beta, and schedule-history lifecycle.
+
+        Returns
+        -------
+        dict
+            Cumulative histories for the retained run, referencing its result objects.
+            Final exports and plots are produced only when the horizon is reached.
+            Intermediate model saves retain their original global trial schedule.
+
+        Notes
+        -----
+        Continuation supports completed-trial boundaries in the same process only. Do not
+        reseed, change other training settings, mutate returned histories, or run operations
+        that change training RNG/environment/model state between calls. A failed trial
+        cannot be continued. This API does not save or load checkpoints.
         """
+        if additional_trials is not None:
+            if isinstance(additional_trials, bool) or not isinstance(additional_trials, int):
+                raise TypeError("additional_trials must be a nonnegative integer or None.")
+            if additional_trials < 0:
+                raise ValueError("additional_trials must be nonnegative.")
+
+        continuation = additional_trials is not None or self._continuation_mode
+        state = self._training_state
+        start = 0
+        stop = self.num_trials
+        if continuation:
+            if isinstance(self.num_trials, bool) or not isinstance(self.num_trials, int):
+                raise TypeError("Continuation requires an integer num_trials horizon.")
+            if self.num_trials < 1:
+                raise ValueError("Continuation requires a positive num_trials horizon.")
+            if state is not None:
+                if not state.at_trial_boundary:
+                    raise RuntimeError("Cannot continue after an unfinished trial.")
+                if state.schedule_config != self._training_schedule_config():
+                    raise ValueError(
+                        "Cannot change the training horizon or epsilon/beta schedules."
+                    )
+                if self._replay_buffer is None:
+                    raise RuntimeError("Cannot continue without the retained replay buffer.")
+                start = state.completed_trials
+            stop = self.num_trials if additional_trials is None else start + additional_trials
+            if stop > self.num_trials:
+                raise ValueError(
+                    "additional_trials would exceed the original num_trials horizon."
+                )
+
+        self._continuation_mode = continuation
+        if continuation and state is not None and start == stop:
+            return state.results()
 
         self.switch_to_training()
         print(f"Training on: {self.training_env.dataset.shape[0]} EIS samples")
-
-        self._training_state = state = _TrainingState()
         initial_time = time.time()
 
-        # Initialize CircularBuffer for efficient experience replay
-        buffer = CircularBuffer(
-            capacity=self.buffer_capacity,
-            dtypes=[
-                # Standard for NumPy: (name, dtype, shape) for multi-dimensional fields
-                ("EIS", "i4"),
-                ("state", "U50"),
-                (
-                    "encoded_state",
-                    "f4",
-                    (
-                        self._active_env.chromosome_len
-                        * len(self._active_env.ELEMENTS_EXTENDED),
-                    ),
-                ),  # ADDED THIS
-                ("action_type", "U10"),
-                ("action_position", "i4"),
-                ("new_state", "U50"),
-                (
-                    "encoded_new_state",
-                    "f4",
-                    (
-                        self._active_env.chromosome_len
-                        * len(self._active_env.ELEMENTS_EXTENDED),
-                    ),
-                ),  # ADDED THIS
-                ("reward", "f4"),
-                ("terminal_flag", "i1"),
-                ("priority", "f4"),
-            ],
-        )
-        self._replay_buffer = buffer
+        if not continuation or state is None:
+            self._training_state = state = _TrainingState(
+                schedule_config=self._training_schedule_config()
+            )
+            self._replay_buffer = self._create_replay_buffer()
+        buffer = self._replay_buffer
+
+        if continuation and start == stop:
+            return state.results()
 
         # Main trial loop
-        for t in range(self.num_trials):
+        for t in range(start, stop):
+            state.at_trial_boundary = False
             EIS_i, _ = self._active_env.reset()
             flatten_Z = self._active_env.Z_norm_flatten
             ground_truth = self._active_env.dataset["true_circuit"][EIS_i]
             print("Trial: ", t, f"for EIS_i: {EIS_i} (EIS of {ground_truth})")
 
             # Run all episodes for this trial
-            for e in range(
-                self.episodes_trial
-            ):  # NOTE: For dev purpose only as episodes_trial=1 for now
+            for e in range(self.episodes_trial):
                 episode_result = self._run_episode(
                     EIS_i,
                     t,
@@ -1012,27 +1077,61 @@ class DDQN_ECM:
             self._update_epsilon(t)
             self._update_beta(t)
             state.completed_trials = t + 1
+            state.at_trial_boundary = True
 
-        print("RL loop is completed")
+        print(
+            "Training session is completed"
+            if stop < self.num_trials
+            else "RL loop is completed"
+        )
         final_time = time.time()
         print(f"Training took {(final_time - initial_time) / 60:.2f} minutes")
 
-        self.model.save(self.model_name)
-        state.success_rate.to_csv(self.save_dir / "success_rate.csv")
-        state.NN_loss.to_csv(self.save_dir / "NN_loss.csv")
-        state.terminal_states.to_csv(self.save_dir / "terminal_states.csv")
-        pd.DataFrame(state.statistical_analysis).to_pickle(
-            self.save_dir / "statistical_analysis.pkl"
+        if stop == self.num_trials:
+            self.model.save(self.model_name)
+            state.success_rate.to_csv(self.save_dir / "success_rate.csv")
+            state.NN_loss.to_csv(self.save_dir / "NN_loss.csv")
+            state.terminal_states.to_csv(self.save_dir / "terminal_states.csv")
+            pd.DataFrame(state.statistical_analysis).to_pickle(
+                self.save_dir / "statistical_analysis.pkl"
+            )
+
+            self._plot_training_metrics(state.NN_loss, state.statistical_analysis)
+
+        return state.results()
+
+    def _create_replay_buffer(self) -> CircularBuffer:
+        """Allocate fresh replay using the active training environment's dimensions."""
+        return CircularBuffer(
+            capacity=self.buffer_capacity,
+            dtypes=[
+                # Standard for NumPy: (name, dtype, shape) for multi-dimensional fields
+                ("EIS", "i4"),
+                ("state", "U50"),
+                (
+                    "encoded_state",
+                    "f4",
+                    (
+                        self._active_env.chromosome_len
+                        * len(self._active_env.ELEMENTS_EXTENDED),
+                    ),
+                ),  # ADDED THIS
+                ("action_type", "U10"),
+                ("action_position", "i4"),
+                ("new_state", "U50"),
+                (
+                    "encoded_new_state",
+                    "f4",
+                    (
+                        self._active_env.chromosome_len
+                        * len(self._active_env.ELEMENTS_EXTENDED),
+                    ),
+                ),  # ADDED THIS
+                ("reward", "f4"),
+                ("terminal_flag", "i1"),
+                ("priority", "f4"),
+            ],
         )
-
-        self._plot_training_metrics(state.NN_loss, state.statistical_analysis)
-
-        return {
-            "NN_loss": state.NN_loss,
-            "success_rate": state.success_rate,
-            "terminal_states": state.terminal_states,
-            "statistical_analysis": state.statistical_analysis,
-        }
 
     def _run_episode(
         self,

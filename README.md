@@ -177,6 +177,47 @@ agent.train()
 agent.save_model("PATH/final_model.keras")
 ```
 
+#### Continue training in shorter sessions
+
+Set `num_trials` to the **total experiment horizon** when constructing the agent. For a
+1,000-trial experiment, keep `num_trials=1000` even when each call runs only 100 trials:
+
+```python
+# Construct a fresh agent with num_trials=1000, using either approach above.
+for ii in range(10):
+    results = agent.train(additional_trials=100)
+    assert agent.completed_trials == (ii + 1) * 100
+```
+
+`additional_trials` opts into continuation on the same agent. Replay, optimizer and target
+update counters, histories, environment/cache state, and epsilon/beta progress carry forward.
+The beta schedule continues to use the original horizon, never the length of an individual
+call. After opting in, `agent.train()` without arguments finishes the remaining trials.
+
+The count must be a nonnegative integer; exceeding the horizon raises an error.
+`additional_trials=0` initializes or reads the retained state without taking a training step.
+At completion, calls requesting zero or the remaining trials are no-ops. `completed_trials`
+is read-only. Changing the retained horizon or epsilon/beta schedule parameters is rejected.
+
+Partial calls return cumulative histories. Treat these as read-only references, not immutable
+snapshots. Final model/results/plots are written at the horizon; intermediate model exports
+keep their existing global trial schedule. Without opting into continuation, repeated
+no-argument `train()` calls keep their existing reset behavior.
+
+This currently supports **one live Python process**, not checkpoint save/load or recovery
+after a failed or interrupted trial. For exact comparisons, use the same deterministic
+execution conditions and configuration. Between calls, do not reseed, change settings/data,
+mutate histories, or perform evaluation or other work that changes the training RNGs,
+environment/cache, or models. Real-fitting and GPU reproducibility require separate
+qualification; the regression tests use controlled fitting and CPU networks.
+
+See [example/bounded_training.py](example/bounded_training.py) for the configuration-based
+workflow:
+
+```bash
+python example/bounded_training.py --config PATH/config.yaml --trials-per-session 100
+```
+
 ### 3. Evaluate an Agent
 
 ```python

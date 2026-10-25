@@ -7,6 +7,7 @@ execution or checkpoint recovery.
 """
 
 import random
+from unittest.mock import Mock
 
 import numpy as np
 import pandas as pd
@@ -111,14 +112,37 @@ def training_progress(state):
     )
 
 
-def run_training(output_dir, monkeypatch, environment_factory, unrelated_numpy_seed):
+def freeze_state(value):
+    """Snapshot nested cache contents in order without calling cache lookup methods."""
+    if isinstance(value, (np.ndarray, np.generic)):
+        return array_state(value)
+    if isinstance(value, dict):
+        return tuple((key, freeze_state(item)) for key, item in value.items())
+    if isinstance(value, (tuple, list)):
+        return tuple(freeze_state(item) for item in value)
+    return value
+
+
+def run_training(
+    output_dir,
+    monkeypatch,
+    environment_factory,
+    unrelated_numpy_seed,
+    *,
+    sessions=(None,),
+    warmup=3,
+    cache_type="lru",
+    default_beta_schedule=False,
+):
     random.seed(42)
     agent_module.tf.random.set_seed(42)
     # Environment construction must reseed NumPy independently of prior caller draws.
     np.random.seed(unrelated_numpy_seed)
-    env = environment_factory()
+    env = environment_factory(cache_type)
     initial_observation = (env.current_eis_index, env.state)
     trace = {"events": [], "resets": [], "transitions": [], "samples": [], "copies": []}
+    trace["saves"] = []
+    trace["plots"] = []
     buffers = []
 
     def capture_buffer(*args, **kwargs):
@@ -148,7 +172,7 @@ def run_training(output_dir, monkeypatch, environment_factory, unrelated_numpy_s
             hidden_layers=[{"type": "Dense", "units": 4, "activation": "relu"}],
             batch_size=2,
             buffer_capacity=7,
-            NN_sleep=3,
+            NN_sleep=warmup,
             train_frequency=3,
             update_target_frequency=5,
             gradient_steps=2,
@@ -158,8 +182,8 @@ def run_training(output_dir, monkeypatch, environment_factory, unrelated_numpy_s
             start_decay=0,
             initial_beta=0.25,
             final_beta=0.75,
-            start_jump=0,
-            anneal_fraction=0.5,
+            start_jump=None if default_beta_schedule else 0,
+            anneal_fraction=None if default_beta_schedule else 0.5,
         )
         assert agent._replay_buffer is None
         assert agent._training_state is None
@@ -172,14 +196,14 @@ def run_training(output_dir, monkeypatch, environment_factory, unrelated_numpy_s
         def reset(*args, **kwargs):
             # The next trial must see the previous trial's completed state, not a
             # snapshot assigned only when train() returns.
-            assert (
-                training_progress(agent._training_state)
-                == [
-                    (0, 0, 0, 0, 0),
-                    (4, 4, 0, 0, 1),
-                    (8, 3, 1, 0, 2),
-                    (12, 2, 2, 0, 3),
-                ][len(trace["transitions"]) // 4]
+            steps = len(trace["transitions"])
+            memory = steps if steps <= warmup else (steps - warmup - 1) % 3
+            assert training_progress(agent._training_state) == (
+                steps,
+                steps % 5,
+                memory,
+                0,
+                steps // 4,
             )
             result = original_reset(*args, **kwargs)
             trace["resets"].append(
@@ -208,9 +232,25 @@ def run_training(output_dir, monkeypatch, environment_factory, unrelated_numpy_s
         patch.setattr(agent, "_train_model", train_model)
         patch.setattr(agent, "_sample_experience", sample)
         patch.setattr(agent.target_model, "set_weights", copy_target)
-        patch.setattr(agent.model, "save", lambda *args, **kwargs: None)
-        patch.setattr(agent, "_plot_training_metrics", lambda *args: None)
-        results = agent.train()
+        patch.setattr(agent.model, "save", lambda path: trace["saves"].append(path.name))
+        patch.setattr(
+            agent,
+            "_plot_training_metrics",
+            lambda *args: trace["plots"].append(agent.completed_trials),
+        )
+        completed = 0
+        for count in sessions:
+            results = agent.train(additional_trials=count)
+            completed = agent.num_trials if count is None else completed + count
+            assert agent.completed_trials == completed
+            assert len(buffers) == 1
+            assert agent._replay_buffer is buffers[0]
+            assert agent._training_state.at_trial_boundary
+            assert len(results["success_rate"]) == completed * agent.episodes_trial
+            if completed < agent.num_trials:
+                assert "dqn_model.keras" not in trace["saves"]
+                assert trace["plots"] == []
+                assert not (output_dir / "NN_loss.csv").exists()
 
     state = {
         "initial_observation": initial_observation,
@@ -222,9 +262,202 @@ def run_training(output_dir, monkeypatch, environment_factory, unrelated_numpy_s
         "numpy_rng": [array_state(value) for value in np.random.get_state()],
         "python_rng": random.getstate(),
         "cache_stats": env.get_cache_stats(),
+        "cache": freeze_state(vars(env.cache.cache)),
+        "environment": (
+            env.current_eis_index,
+            env.START_STATE,
+            env.state,
+            array_state(env.encoded_state),
+        ),
+        "progress": training_progress(agent._training_state),
         "trace": trace,
     }
     return agent, buffers[0], results, state
+
+
+@pytest.mark.parametrize(
+    ("sessions", "warmup", "cache_type", "default_beta_schedule"),
+    [
+        ((1, 1, 1, 1), 3, "lru", False),
+        ((1, None), 5, "clock", True),
+        ((0, 2, 0, 2), 3, "clock", True),
+        ((4,), 5, "lru", False),
+    ],
+)
+def test_continuous_and_split_training_match_exactly(
+    tmp_path,
+    monkeypatch,
+    environment_factory,
+    sessions,
+    warmup,
+    cache_type,
+    default_beta_schedule,
+):
+    options = dict(
+        warmup=warmup, cache_type=cache_type, default_beta_schedule=default_beta_schedule
+    )
+    agent, buffer, results, state = run_training(
+        tmp_path / "continuous", monkeypatch, environment_factory, 123, **options
+    )
+    other, other_buffer, other_results, other_state = run_training(
+        tmp_path / "split", monkeypatch, environment_factory, 999, sessions=sessions, **options
+    )
+    assert state == other_state
+    assert (buffer.capacity, buffer.size, buffer.position) == (
+        other_buffer.capacity,
+        other_buffer.size,
+        other_buffer.position,
+    )
+    assert (
+        agent.epsilon,
+        agent.epsilon_list,
+        agent.prioritized_replay_beta,
+        agent.beta_list,
+    ) == (other.epsilon, other.epsilon_list, other.prioritized_replay_beta, other.beta_list)
+    assert agent.num_trials == other.num_trials == 4
+    assert agent.completed_trials == other.completed_trials == 4
+    assert state["trace"]["saves"] == ["dqn_model_trial_0.keras", "dqn_model.keras"]
+    assert state["trace"]["plots"] == [4]
+    for name in ("NN_loss", "success_rate", "terminal_states"):
+        pd.testing.assert_frame_equal(results[name], other_results[name], check_exact=True)
+        assert (tmp_path / "continuous" / f"{name}.csv").read_bytes() == (
+            tmp_path / "split" / f"{name}.csv"
+        ).read_bytes()
+    assert results["statistical_analysis"] == other_results["statistical_analysis"]
+    pd.testing.assert_frame_equal(
+        agent.training_env.dataset, other.training_env.dataset, check_exact=True
+    )
+
+
+@pytest.fixture
+def continuation_agent(tmp_path, monkeypatch, environment_factory):
+    env = environment_factory()
+    monkeypatch.setattr(env, "_evaluate_circuit", controlled_fit)
+    agent = agent_module.DDQN_ECM(
+        training_env=env,
+        save_dir=tmp_path,
+        num_trials=4,
+        action_cap=1,
+        hidden_layers=[{"type": "Dense", "units": 2, "activation": "relu"}],
+        buffer_capacity=5,
+        batch_size=2,
+        NN_sleep=100,
+        save_frequency=2,
+    )
+    monkeypatch.setattr(agent.model, "save", Mock())
+    monkeypatch.setattr(agent, "_plot_training_metrics", Mock())
+    return agent
+
+
+@pytest.mark.parametrize(
+    ("count", "error"),
+    [(True, TypeError), (1.5, TypeError), ("1", TypeError), (-1, ValueError), (5, ValueError)],
+)
+def test_invalid_trial_count_does_not_initialize_or_consume_randomness(
+    continuation_agent, count, error
+):
+    agent = continuation_agent
+    rng = freeze_state(np.random.get_state()), random.getstate()
+    with pytest.raises(error):
+        agent.train(additional_trials=count)
+    assert agent._training_state is None
+    assert agent._replay_buffer is None
+    assert not agent._continuation_mode
+    assert agent.completed_trials == 0
+    assert (freeze_state(np.random.get_state()), random.getstate()) == rng
+    agent.model.save.assert_not_called()
+
+
+def test_zero_steps_finish_remaining_and_completed_noop(continuation_agent):
+    agent = continuation_agent
+    rng = freeze_state(np.random.get_state()), random.getstate()
+    empty = agent.train(additional_trials=0)
+    assert agent.completed_trials == 0
+    assert empty["success_rate"].empty
+    assert agent._replay_buffer.size == 0
+    assert (freeze_state(np.random.get_state()), random.getstate()) == rng
+    agent.model.save.assert_not_called()
+    agent._plot_training_metrics.assert_not_called()
+    with pytest.raises(AttributeError):
+        agent.completed_trials = 1
+
+    first_state, first_buffer = agent._training_state, agent._replay_buffer
+    partial = agent.train(additional_trials=2)
+    assert agent.completed_trials == 2
+    assert len(partial["success_rate"]) == 2
+    assert not (agent.save_dir / "success_rate.csv").exists()
+    assert agent.model.save.call_count == 1  # Original intermediate save at global t=0.
+    agent._plot_training_metrics.assert_not_called()
+    rng = freeze_state(np.random.get_state()), random.getstate()
+    with pytest.raises(ValueError, match="exceed"):
+        agent.train(additional_trials=3)
+    unchanged = agent.train(additional_trials=0)
+    assert unchanged["success_rate"] is partial["success_rate"]
+    assert agent.completed_trials == 2
+    assert agent.model.save.call_count == 1
+    assert (freeze_state(np.random.get_state()), random.getstate()) == rng
+
+    complete = agent.train()  # Continuation mode completes the remaining two trials.
+    assert agent.completed_trials == 4
+    assert agent._training_state is first_state
+    assert agent._replay_buffer is first_buffer
+    assert complete["success_rate"]["t"].tolist() == [0, 1, 2, 3]
+    assert [call.args[0].name for call in agent.model.save.call_args_list] == [
+        "dqn_model_trial_0.keras",
+        "dqn_model_trial_2.keras",
+        "dqn_model.keras",
+    ]
+    agent._plot_training_metrics.assert_called_once()
+    assert (agent.save_dir / "success_rate.csv").exists()
+    rng = freeze_state(np.random.get_state()), random.getstate()
+    for count in (None, 0):
+        repeated = agent.train(additional_trials=count)
+        assert repeated["success_rate"] is complete["success_rate"]
+    assert agent.model.save.call_count == 3
+    agent._plot_training_metrics.assert_called_once()
+    assert (freeze_state(np.random.get_state()), random.getstate()) == rng
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "num_trials",
+        "start_decay",
+        "epsilon_decay",
+        "epsilon_min",
+        "start_jump",
+        "anneal_fraction",
+        "initial_beta",
+        "final_beta",
+    ],
+)
+def test_continuation_rejects_changed_horizon_or_schedules(continuation_agent, name):
+    agent = continuation_agent
+    agent.train(additional_trials=1)
+    progress = training_progress(agent._training_state)
+    replay = array_state(agent._replay_buffer.buffer)
+    rng = freeze_state(np.random.get_state()), random.getstate()
+    setattr(agent, name, getattr(agent, name) + 1)
+    with pytest.raises(ValueError, match="horizon or epsilon/beta schedules"):
+        agent.train(additional_trials=1)
+    assert training_progress(agent._training_state) == progress
+    assert array_state(agent._replay_buffer.buffer) == replay
+    assert (freeze_state(np.random.get_state()), random.getstate()) == rng
+
+
+def test_continuation_rejects_unfinished_trial(continuation_agent, monkeypatch):
+    agent = continuation_agent
+    failed_step = Mock(side_effect=RuntimeError("injected step failure"))
+    monkeypatch.setattr(agent.training_env, "step", failed_step)
+    with pytest.raises(RuntimeError, match="injected step failure"):
+        agent.train(additional_trials=1)
+    assert agent.completed_trials == 0
+    assert not agent._training_state.at_trial_boundary
+    rng = freeze_state(np.random.get_state()), random.getstate()
+    with pytest.raises(RuntimeError, match="unfinished trial"):
+        agent.train()
+    failed_step.assert_called_once()
+    assert (freeze_state(np.random.get_state()), random.getstate()) == rng
 
 
 def test_seeded_training_preserves_trial_update_order_and_is_exactly_repeatable(
