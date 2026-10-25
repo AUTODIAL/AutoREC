@@ -17,6 +17,7 @@ from autorec import agent as agent_module
 from autorec import environment as environment_module
 from autorec.environment import EIS_ECM_Env
 from autorec.optimized_data_structures.circular_buffer import CircularBuffer
+from autorec.optimized_data_structures.circuit_cache import HistoryCache
 
 
 @pytest.fixture(autouse=True)
@@ -133,6 +134,7 @@ def run_training(
     warmup=3,
     cache_type="lru",
     default_beta_schedule=False,
+    roundtrip_cache=False,
 ):
     random.seed(42)
     agent_module.tf.random.set_seed(42)
@@ -247,6 +249,12 @@ def run_training(
             assert agent._replay_buffer is buffers[0]
             assert agent._training_state.at_trial_boundary
             assert len(results["success_rate"]) == completed * agent.episodes_trial
+            if roundtrip_cache:
+                cache_before = freeze_state(vars(env.cache.cache))
+                rng_before = freeze_state(np.random.get_state()), random.getstate()
+                env.cache = HistoryCache.from_state_dict(env.cache.state_dict())
+                assert freeze_state(vars(env.cache.cache)) == cache_before
+                assert (freeze_state(np.random.get_state()), random.getstate()) == rng_before
             if completed < agent.num_trials:
                 assert "dqn_model.keras" not in trace["saves"]
                 assert trace["plots"] == []
@@ -276,12 +284,14 @@ def run_training(
 
 
 @pytest.mark.parametrize(
-    ("sessions", "warmup", "cache_type", "default_beta_schedule"),
+    ("sessions", "warmup", "cache_type", "default_beta_schedule", "roundtrip_cache"),
     [
-        ((1, 1, 1, 1), 3, "lru", False),
-        ((1, None), 5, "clock", True),
-        ((0, 2, 0, 2), 3, "clock", True),
-        ((4,), 5, "lru", False),
+        ((1, 1, 1, 1), 3, "lru", False, False),
+        ((1, None), 5, "clock", True, False),
+        ((0, 2, 0, 2), 3, "clock", True, False),
+        ((4,), 5, "lru", False, False),
+        ((1, 1, 1, 1), 3, "lru", False, True),
+        ((1, 1, 1, 1), 5, "clock", True, True),
     ],
 )
 def test_continuous_and_split_training_match_exactly(
@@ -292,6 +302,7 @@ def test_continuous_and_split_training_match_exactly(
     warmup,
     cache_type,
     default_beta_schedule,
+    roundtrip_cache,
 ):
     options = dict(
         warmup=warmup, cache_type=cache_type, default_beta_schedule=default_beta_schedule
@@ -300,7 +311,13 @@ def test_continuous_and_split_training_match_exactly(
         tmp_path / "continuous", monkeypatch, environment_factory, 123, **options
     )
     other, other_buffer, other_results, other_state = run_training(
-        tmp_path / "split", monkeypatch, environment_factory, 999, sessions=sessions, **options
+        tmp_path / "split",
+        monkeypatch,
+        environment_factory,
+        999,
+        sessions=sessions,
+        roundtrip_cache=roundtrip_cache,
+        **options,
     )
     assert state == other_state
     assert (buffer.capacity, buffer.size, buffer.position) == (
@@ -697,8 +714,9 @@ def test_ddqn_update_matches_hand_calculated_targets_loss_and_priorities():
 
 
 @pytest.mark.parametrize("cache_type", ["lru", "clock"])
+@pytest.mark.parametrize("roundtrip_cache", [False, True])
 def test_environment_cache_hit_reuses_reward_without_consuming_fit_randomness(
-    monkeypatch, environment_factory, cache_type
+    monkeypatch, environment_factory, cache_type, roundtrip_cache
 ):
     env = environment_factory(cache_type)
     monkeypatch.setattr(env, "_evaluate_circuit", controlled_fit)
@@ -709,6 +727,8 @@ def test_environment_cache_hit_reuses_reward_without_consuming_fit_randomness(
     first = env.step(action_type="L", action_position=3)
     assert first["validity"] == 1
     assert first["reward"] == reference_rng.uniform(0.125, 0.25)
+    if roundtrip_cache:
+        env.cache = HistoryCache.from_state_dict(env.cache.state_dict())
     env._update_state(new_state="+/RPR")
     cached = env.step(action_type="L", action_position=3)
     assert cached["reward"] == first["reward"]

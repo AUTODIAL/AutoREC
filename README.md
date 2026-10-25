@@ -248,6 +248,40 @@ optimizer, and do not provide checkpoint files or fresh-process training resumpt
 Matching the restored dtype/capacity to an agent's configuration remains the caller's
 responsibility. No existing training path automatically uses these methods yet.
 
+#### Circuit-cache state utilities
+
+`LRUCache`, `ClockCache`, and the environment's `HistoryCache` wrapper provide the same
+component snapshot API:
+
+```python
+from autorec.optimized_data_structures.circuit_cache import HistoryCache
+
+cache = HistoryCache(capacity=3, cache_type="clock")
+snapshot = cache.state_dict()
+restored = HistoryCache.from_state_dict(snapshot)
+```
+
+Both policies export `version=1`, `cache_type`, `capacity`, ordered `entries` as
+`(key, payload)` tuples, and `hits`/`misses`. LRU entries retain least-to-most-recent order.
+Clock additionally exports `reference_bits`, `keys_list`, and `hand`; dictionary order and
+circular order are preserved independently. Clearing a cache retains its statistics, and
+restoring a cleared cache preserves those counters too.
+
+Snapshots deep-copy the complete payload graph, preserving shared objects within it while
+isolating mutable payloads from the original cache. Normal Python containers, NumPy arrays
+and scalars (including complex predictions), cached failed-fit results, and CPU JAX scalars
+are covered by tests. Values are not converted to JSON or normalized to different dtypes.
+Custom payload classes/copy hooks and other framework/device configurations are not
+qualified for exactness. Use trusted, deepcopy-compatible data and pause cache writes while
+snapshotting; copying temporarily requires additional memory for the payloads.
+
+Restoration validates versions, policies, capacity/counts, unique hashable tuple keys, and
+Clock invariants before reconstructing the cache without `get()` or `put()` calls.
+`HistoryCache` also checks its four-part keys and required circuit-result fields. Neither
+export nor restoration should affect recency, hit/miss statistics, or RNG streams for the
+supported payloads. These methods perform no file I/O and do not save complete checkpoints;
+existing training only uses them if explicitly invoked by the caller.
+
 ### 3. Evaluate an Agent
 
 ```python
