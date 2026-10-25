@@ -526,6 +526,24 @@ def test_seeded_training_preserves_trial_update_order_and_is_exactly_repeatable(
         pd.testing.assert_frame_equal(results[name], other_results[name], check_exact=True)
     assert results["statistical_analysis"] == other_results["statistical_analysis"]
 
+    # Round-trip the actual training replay, then verify the next PER draw uses the same
+    # physical slots, weights, and random stream. Restoring replay must not restore/reseed RNG.
+    numpy_state = np.random.get_state()
+    restored = CircularBuffer.from_state_dict(buffer.state_dict())
+    assert freeze_state(np.random.get_state()) == freeze_state(numpy_state)
+    original_sample = agent._sample_experience(
+        buffer.to_dataframe(), agent.prioritized_replay_beta
+    )
+    after_sample = freeze_state(np.random.get_state())
+    np.random.set_state(numpy_state)
+    restored_sample = agent._sample_experience(
+        restored.to_dataframe(), agent.prioritized_replay_beta
+    )
+    pd.testing.assert_frame_equal(original_sample[0], restored_sample[0], check_exact=True)
+    assert array_state(original_sample[1]) == array_state(restored_sample[1])
+    assert array_state(original_sample[2]) == array_state(restored_sample[2])
+    assert freeze_state(np.random.get_state()) == after_sample
+
 
 @pytest.mark.parametrize("successful_fit", [False, True])
 def test_train_retains_state_but_replaces_it_on_each_call(

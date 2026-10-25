@@ -218,6 +218,36 @@ workflow:
 python example/bounded_training.py --config PATH/config.yaml --trials-per-session 100
 ```
 
+#### Replay buffer state utilities
+
+`CircularBuffer` provides a component-level snapshot API:
+
+```python
+from autorec.optimized_data_structures.circular_buffer import CircularBuffer
+
+replay = CircularBuffer(capacity=3, dtypes=[("reward", "f4"), ("priority", "f4")])
+replay.add(reward=0.5, priority=1.0)
+snapshot = replay.state_dict()
+restored = CircularBuffer.from_state_dict(snapshot)
+```
+
+The version-1 dictionary contains `version`, `capacity`, `size`, `position`, and `buffer`.
+`buffer` is an independent structured NumPy array containing every physical slot, including
+unused slots, with its dtype and field shapes preserved. Restoration creates a writable,
+independent buffer without changing insertion order, consuming randomness, or modifying the
+input. Metadata and ring invariants are validated before allocation. Unsupported versions,
+missing/extra fields, invalid shapes/counters, and object-containing dtypes raise errors.
+
+Positive capacities and nonempty, object-free structured dtypes are supported. The array can
+be stored separately with `np.save(..., allow_pickle=False)` and loaded with
+`np.load(..., allow_pickle=False)`; the four integer metadata fields are JSON-compatible.
+Snapshotting requires a paused writer and temporarily copies the full replay allocation.
+
+These utilities preserve replay only. They do not save the agent, RNGs, environment, or
+optimizer, and do not provide checkpoint files or fresh-process training resumption.
+Matching the restored dtype/capacity to an agent's configuration remains the caller's
+responsibility. No existing training path automatically uses these methods yet.
+
 ### 3. Evaluate an Agent
 
 ```python
