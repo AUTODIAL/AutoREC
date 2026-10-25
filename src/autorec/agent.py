@@ -1,5 +1,6 @@
 from typing import Optional, Dict, Union, Any, Sequence
 from pathlib import Path
+from dataclasses import dataclass, field
 
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -26,6 +27,32 @@ default_hidden_layers = [
     {"type": "Dense", "units": 40, "activation": "relu"},
 ]
 default_optimizer_config = {"type": "Adam", "learning_rate": 0.0005}
+
+
+@dataclass
+class _TrainingState:
+    """Cross-trial counters and histories, reset on each ``train()`` call.
+
+    Counters and histories are synchronized after each completed episode; completed trials
+    are recorded after schedule updates. This is not a snapshot of an unfinished episode.
+    Replay, models, optimizer, and epsilon/beta state remain separate agent attributes.
+    """
+
+    iteration: int = 0
+    target_freq: int = 0
+    memory: int = 0
+    success_count: int = 0
+    completed_trials: int = 0
+    NN_loss: pd.DataFrame = field(default_factory=pd.DataFrame)
+    success_rate: pd.DataFrame = field(default_factory=pd.DataFrame)
+    terminal_states: pd.DataFrame = field(
+        default_factory=lambda: pd.DataFrame(
+            columns=["EIS", "state", "coding", "circuit", "episode", "action"]
+        )
+    )
+    statistical_analysis: dict[str, list] = field(
+        default_factory=lambda: {"episodic_cumul_reward": [], "episodic_mean_reward": []}
+    )
 
 
 class DDQN_ECM:
@@ -250,6 +277,8 @@ class DDQN_ECM:
         self.gradient_steps = gradient_steps
         self.NN_sleep = NN_sleep  # The number of initial data that should be gathered before the first training (should be larger than batch_size)
         self.buffer_capacity = buffer_capacity
+        self._replay_buffer: Optional[CircularBuffer] = None
+        self._training_state: Optional[_TrainingState] = None
 
         # Prioritized replay parameters
         self.prioritized_replay_alpha = prioritized_replay_alpha
@@ -887,14 +916,16 @@ class DDQN_ECM:
         return np.mean(losses)
 
     def train(self):
-        """Main training loop across all trials."""
+        """Train all trials with fresh replay, counters, and result histories.
+
+        Retain those objects on the agent afterward. Models, optimizer, epsilon/beta, and
+        their schedule histories keep their existing lifecycle across calls.
+        """
 
         self.switch_to_training()
         print(f"Training on: {self.training_env.dataset.shape[0]} EIS samples")
 
-        # Tracking variables
-        NN_loss = pd.DataFrame()
-        success_rate = pd.DataFrame()
+        self._training_state = state = _TrainingState()
         initial_time = time.time()
 
         # Initialize CircularBuffer for efficient experience replay
@@ -928,20 +959,7 @@ class DDQN_ECM:
                 ("priority", "f4"),
             ],
         )
-
-        terminal_states = pd.DataFrame(
-            columns=["EIS", "state", "coding", "circuit", "episode", "action"]
-        )
-
-        # Training state trackers
-        iteration = 0
-        target_freq = 0
-        memory = 0
-        success_count = 0
-        statistical_analysis = {
-            "episodic_cumul_reward": [],
-            "episodic_mean_reward": [],
-        }  # Learning curve tracking
+        self._replay_buffer = buffer
 
         # Main trial loop
         for t in range(self.num_trials):
@@ -961,26 +979,28 @@ class DDQN_ECM:
                     flatten_Z,
                     self.gradient_steps,
                     buffer,
-                    terminal_states,
-                    iteration,
-                    target_freq,
-                    memory,
-                    success_count,
+                    state.terminal_states,
+                    state.iteration,
+                    state.target_freq,
+                    state.memory,
+                    state.success_count,
                 )
 
                 # Update counters from episode
-                iteration = episode_result["iteration"]
-                target_freq = episode_result["target_freq"]
-                memory = episode_result["memory"]
-                success_count = episode_result["success_count"]
+                state.iteration = episode_result["iteration"]
+                state.target_freq = episode_result["target_freq"]
+                state.memory = episode_result["memory"]
+                state.success_count = episode_result["success_count"]
 
                 # Track episode statistics
-                NN_loss = self._update_loss_tracking(NN_loss, episode_result["losses"], t)
-                success_rate = self._update_success_rate_tracking(
-                    success_rate, success_count, iteration, t
+                state.NN_loss = self._update_loss_tracking(
+                    state.NN_loss, episode_result["losses"], t
                 )
-                statistical_analysis = self._update_episode_statistics(
-                    statistical_analysis, episode_result["total_reward"]
+                state.success_rate = self._update_success_rate_tracking(
+                    state.success_rate, state.success_count, state.iteration, t
+                )
+                state.statistical_analysis = self._update_episode_statistics(
+                    state.statistical_analysis, episode_result["total_reward"]
                 )
 
             # intermediate saving
@@ -991,26 +1011,27 @@ class DDQN_ECM:
             # Post-trial updates
             self._update_epsilon(t)
             self._update_beta(t)
+            state.completed_trials = t + 1
 
         print("RL loop is completed")
         final_time = time.time()
         print(f"Training took {(final_time - initial_time) / 60:.2f} minutes")
 
         self.model.save(self.model_name)
-        success_rate.to_csv(self.save_dir / "success_rate.csv")
-        NN_loss.to_csv(self.save_dir / "NN_loss.csv")
-        terminal_states.to_csv(self.save_dir / "terminal_states.csv")
-        pd.DataFrame(statistical_analysis).to_pickle(
+        state.success_rate.to_csv(self.save_dir / "success_rate.csv")
+        state.NN_loss.to_csv(self.save_dir / "NN_loss.csv")
+        state.terminal_states.to_csv(self.save_dir / "terminal_states.csv")
+        pd.DataFrame(state.statistical_analysis).to_pickle(
             self.save_dir / "statistical_analysis.pkl"
         )
 
-        self._plot_training_metrics(NN_loss, statistical_analysis)
+        self._plot_training_metrics(state.NN_loss, state.statistical_analysis)
 
         return {
-            "NN_loss": NN_loss,
-            "success_rate": success_rate,
-            "terminal_states": terminal_states,
-            "statistical_analysis": statistical_analysis,
+            "NN_loss": state.NN_loss,
+            "success_rate": state.success_rate,
+            "terminal_states": state.terminal_states,
+            "statistical_analysis": state.statistical_analysis,
         }
 
     def _run_episode(

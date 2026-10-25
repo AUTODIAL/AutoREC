@@ -101,6 +101,16 @@ def array_state(value):
     return value.dtype, value.shape, value.tobytes()
 
 
+def training_progress(state):
+    return (
+        state.iteration,
+        state.target_freq,
+        state.memory,
+        state.success_count,
+        state.completed_trials,
+    )
+
+
 def run_training(output_dir, monkeypatch, environment_factory, unrelated_numpy_seed):
     random.seed(42)
     agent_module.tf.random.set_seed(42)
@@ -151,6 +161,8 @@ def run_training(output_dir, monkeypatch, environment_factory, unrelated_numpy_s
             start_jump=0,
             anneal_fraction=0.5,
         )
+        assert agent._replay_buffer is None
+        assert agent._training_state is None
         initial_weights = [array_state(value) for value in agent.model.weights]
         original_reset = env.reset
         original_train = agent._train_model
@@ -158,6 +170,17 @@ def run_training(output_dir, monkeypatch, environment_factory, unrelated_numpy_s
         original_copy = agent.target_model.set_weights
 
         def reset(*args, **kwargs):
+            # The next trial must see the previous trial's completed state, not a
+            # snapshot assigned only when train() returns.
+            assert (
+                training_progress(agent._training_state)
+                == [
+                    (0, 0, 0, 0, 0),
+                    (4, 4, 0, 0, 1),
+                    (8, 3, 1, 0, 2),
+                    (12, 2, 2, 0, 3),
+                ][len(trace["transitions"]) // 4]
+            )
             result = original_reset(*args, **kwargs)
             trace["resets"].append(
                 (len(trace["transitions"]), env.current_eis_index, env.state)
@@ -213,6 +236,15 @@ def test_seeded_training_preserves_trial_update_order_and_is_exactly_repeatable(
     other, other_buffer, other_results, other_state = run_training(
         tmp_path / "second", monkeypatch, environment_factory, 999
     )
+    assert agent._replay_buffer is buffer
+    assert other._replay_buffer is other_buffer
+    assert agent._training_state is not other._training_state
+    assert training_progress(agent._training_state) == (16, 1, 0, 0, 4)
+    assert training_progress(other._training_state) == (16, 1, 0, 0, 4)
+    for name, value in results.items():
+        assert getattr(agent._training_state, name) is value
+        assert getattr(other._training_state, name) is other_results[name]
+        assert value is not other_results[name]
 
     # Fixed semantic expectations supplement repeatability: two equally wrong runs
     # must not pass if warm-up, cadence, or ordering changes in a later refactor.
@@ -260,6 +292,85 @@ def test_seeded_training_preserves_trial_update_order_and_is_exactly_repeatable(
     for name in ("NN_loss", "success_rate", "terminal_states"):
         pd.testing.assert_frame_equal(results[name], other_results[name], check_exact=True)
     assert results["statistical_analysis"] == other_results["statistical_analysis"]
+
+
+@pytest.mark.parametrize("successful_fit", [False, True])
+def test_train_retains_state_but_replaces_it_on_each_call(
+    tmp_path, monkeypatch, environment_factory, successful_fit
+):
+    env = environment_factory()
+
+    def fit(circuit, components_number):
+        result = controlled_fit(circuit, components_number)
+        result["terminated"] = successful_fit
+        return result
+
+    monkeypatch.setattr(env, "_evaluate_circuit", fit)
+    agent = agent_module.DDQN_ECM(
+        training_env=env,
+        save_dir=tmp_path,
+        num_trials=1,
+        episodes_trial=1,
+        action_cap=2,
+        hidden_layers=[{"type": "Dense", "units": 4, "activation": "relu"}],
+        buffer_capacity=3,
+        batch_size=2,
+        NN_sleep=100,
+    )
+    monkeypatch.setattr(agent.model, "save", lambda *args, **kwargs: None)
+    monkeypatch.setattr(agent, "_plot_training_metrics", lambda *args: None)
+    # Always make a valid mutation so both success and action-cap termination run.
+    monkeypatch.setattr(
+        agent, "eps_greedy", lambda _: (3, "L" if env.state[3] == "P" else "P")
+    )
+
+    assert agent._replay_buffer is None
+    assert agent._training_state is None
+    first_results = agent.train()
+    first_state = agent._training_state
+    first = agent._replay_buffer
+    steps = 1 if successful_fit else 2
+    assert isinstance(first, CircularBuffer)
+    assert (first.capacity, first.size, first.position) == (3, steps, steps)
+    expected_progress = (steps, steps, steps, int(successful_fit), 1)
+    assert training_progress(first_state) == expected_progress
+    assert first_results["success_rate"]["success_rate"].tolist() == [float(successful_fit)]
+    # Preserve the known reporting bug: _run_episode does not propagate the new
+    # terminal DataFrame. Correcting it belongs in a separate reporting change.
+    assert first_results["terminal_states"].empty
+    history_snapshots = {
+        name: value.copy(deep=True)
+        for name, value in first_results.items()
+        if isinstance(value, pd.DataFrame)
+    }
+    reward_snapshot = {
+        name: values.copy() for name, values in first_state.statistical_analysis.items()
+    }
+    first_contents = array_state(first.buffer)
+
+    second_results = agent.train()
+    second_state = agent._training_state
+    assert second_state is not first_state
+    assert training_progress(second_state) == expected_progress
+    assert training_progress(first_state) == expected_progress
+    for name, value in first_results.items():
+        assert getattr(first_state, name) is value
+        assert getattr(second_state, name) is second_results[name]
+        assert second_results[name] is not value
+    for name, snapshot in history_snapshots.items():
+        pd.testing.assert_frame_equal(first_results[name], snapshot, check_exact=True)
+    assert first_state.statistical_analysis == reward_snapshot
+    assert len(second_state.statistical_analysis["episodic_cumul_reward"]) == 1
+    # These histories were already agent-owned and must keep their legacy append behavior.
+    assert agent.epsilon_list == [1.0, 1.0]
+    assert agent.beta_list == [agent.initial_beta, agent.initial_beta]
+    second = agent._replay_buffer
+    assert isinstance(second, CircularBuffer)
+    assert second is not first
+    assert (second.capacity, second.size, second.position) == (3, steps, steps)
+    assert second.buffer.dtype == first.buffer.dtype
+    assert array_state(first.buffer) == first_contents
+    assert agent.optimizer.iterations.numpy() == 0
 
 
 def test_prioritized_sampling_has_known_indices_weights_and_rng_consumption():
