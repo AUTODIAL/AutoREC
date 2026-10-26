@@ -10,10 +10,11 @@ or YAML, train agents, and evaluate the circuits they propose for EIS spectra.
 
 ## Getting started
 
-The documentation website is being developed incrementally. The repository
-currently provides the installation instructions and user walkthroughs:
+Start with the installation and quick-start guides. The repository's notebooks
+and example configurations provide detailed walkthroughs and reference inputs:
 
-- [Installation and usage](https://github.com/AUTODIAL/AutoREC/blob/main/README.md)
+- [Installation](getting_started/installation.md)
+- [Quick Start](getting_started/quickstart.md)
 - [Jupyter tutorials](https://github.com/AUTODIAL/AutoREC/tree/main/tutorials)
 - [Example configurations](https://github.com/AUTODIAL/AutoREC/tree/main/configs_yaml/examples)
 
@@ -29,7 +30,8 @@ currently provides the installation instructions and user walkthroughs:
 :maxdepth: 1
 :caption: Getting started
 
-Installation and usage <https://github.com/AUTODIAL/AutoREC/blob/main/README.md>
+getting_started/installation
+getting_started/quickstart
 Notebook tutorials <https://github.com/AUTODIAL/AutoREC/tree/main/tutorials>
 Example configurations <https://github.com/AUTODIAL/AutoREC/tree/main/configs_yaml/examples>
 ```
