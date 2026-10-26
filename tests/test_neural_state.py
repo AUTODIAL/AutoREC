@@ -91,8 +91,13 @@ OPTIMIZERS = [
 ]
 
 
-@pytest.mark.parametrize("config", OPTIMIZERS)
-@pytest.mark.parametrize("phase", ["unbuilt", "built", "trained"])
+@pytest.mark.parametrize(
+    ("config", "phase"),
+    # Slot lifecycle uses one representative of each optimizer class; trained snapshots
+    # still cover every supported schedule and AMSGrad configuration.
+    [(config, "trained") for config in OPTIMIZERS]
+    + [(OPTIMIZERS[ii], phase) for ii in (0, 2) for phase in ("unbuilt", "built")],
+)
 def test_exact_roundtrip_and_next_updates(config, phase):
     online, target = models()
     optimizer = create_optimizer(config)

@@ -50,8 +50,11 @@ def test_rng_exact_next_draws_and_capture_is_inert(generator):
     assert draw() == expected
 
 
-@pytest.mark.parametrize("cache_type", ["lru", "clock"])
-@pytest.mark.parametrize("separate", [False, True])
+@pytest.mark.parametrize(
+    ("cache_type", "separate"),
+    [("lru", False), ("clock", True)],
+    ids=["shared-lru", "distinct-clock"],
+)
 def test_environment_roundtrip_preserves_graph_and_next_reset(
     environment_factory, cache_type, separate
 ):

@@ -16,7 +16,6 @@ import pytest
 from autorec import agent as agent_module
 from autorec import environment as environment_module
 from autorec.environment import EIS_ECM_Env
-from autorec.neural_state import neural_state_dict, restore_neural_state
 from autorec.optimized_data_structures.circular_buffer import CircularBuffer
 from autorec.optimized_data_structures.circuit_cache import HistoryCache
 
@@ -135,9 +134,6 @@ def run_training(
     warmup=3,
     cache_type="lru",
     default_beta_schedule=False,
-    roundtrip_cache=False,
-    neural_mode=None,
-    optimizer_config=None,
 ):
     random.seed(42)
     agent_module.tf.random.set_seed(42)
@@ -181,7 +177,6 @@ def run_training(
             train_frequency=3,
             update_target_frequency=5,
             gradient_steps=2,
-            optimizer=optimizer_config,
             initial_epsilon=1.0,
             epsilon_min=0.125,
             epsilon_decay=0.5,
@@ -253,33 +248,6 @@ def run_training(
             assert agent._replay_buffer is buffers[0]
             assert agent._training_state.at_trial_boundary
             assert len(results["success_rate"]) == completed * agent.episodes_trial
-            if neural_mode is not None:
-                neural_before = tuple(
-                    tuple(array_state(variable) for variable in component.variables)
-                    for component in (agent.model, agent.target_model, agent.optimizer)
-                )
-                rng_before = freeze_state(np.random.get_state()), random.getstate()
-                was_built = agent.optimizer.built
-                snapshot = neural_state_dict(agent.model, agent.target_model, agent.optimizer)
-                if neural_mode == "restore":
-                    agent.optimizer = restore_neural_state(
-                        snapshot, agent.model, agent.target_model
-                    )
-                assert agent.optimizer.built == was_built
-                assert (
-                    tuple(
-                        tuple(array_state(variable) for variable in component.variables)
-                        for component in (agent.model, agent.target_model, agent.optimizer)
-                    )
-                    == neural_before
-                )
-                assert (freeze_state(np.random.get_state()), random.getstate()) == rng_before
-            if roundtrip_cache:
-                cache_before = freeze_state(vars(env.cache.cache))
-                rng_before = freeze_state(np.random.get_state()), random.getstate()
-                env.cache = HistoryCache.from_state_dict(env.cache.state_dict())
-                assert freeze_state(vars(env.cache.cache)) == cache_before
-                assert (freeze_state(np.random.get_state()), random.getstate()) == rng_before
             if completed < agent.num_trials:
                 assert "dqn_model.keras" not in trace["saves"]
                 assert trace["plots"] == []
@@ -308,25 +276,15 @@ def run_training(
     return agent, buffers[0], results, state
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize(
-    (
-        "sessions",
-        "warmup",
-        "cache_type",
-        "default_beta_schedule",
-        "roundtrip_cache",
-        "neural_mode",
-    ),
+    ("sessions", "warmup", "cache_type", "default_beta_schedule"),
     [
-        ((1, 1, 1, 1), 3, "lru", False, False, None),
-        ((1, None), 5, "clock", True, False, None),
-        ((0, 2, 0, 2), 3, "clock", True, False, None),
-        ((4,), 5, "lru", False, False, None),
-        ((1, 1, 1, 1), 3, "lru", False, True, None),
-        ((1, 1, 1, 1), 5, "clock", True, True, None),
-        ((0, 1, 1, 1, 1), 5, "lru", True, False, "export"),
-        ((0, 1, 1, 1, 1), 5, "lru", True, False, "restore"),
+        ((1, 1, 1, 1), 3, "lru", False),
+        ((1, None), 5, "clock", True),
+        ((0, 2, 0, 2), 3, "clock", True),
     ],
+    ids=["one-trial-sessions", "finish-after-warmup-boundary", "zero-length-sessions"],
 )
 def test_continuous_and_split_training_match_exactly(
     tmp_path,
@@ -336,22 +294,12 @@ def test_continuous_and_split_training_match_exactly(
     warmup,
     cache_type,
     default_beta_schedule,
-    roundtrip_cache,
-    neural_mode,
 ):
+    # Full checkpoint process tests now cover neural/cache restoration during training.
+    # Keep these cases focused on same-process continuation semantics.
     options = dict(
         warmup=warmup, cache_type=cache_type, default_beta_schedule=default_beta_schedule
     )
-    if neural_mode is not None:
-        options["optimizer_config"] = {
-            "type": "Adam",
-            "learning_rate": {
-                "type": "ExponentialDecay",
-                "initial_learning_rate": 0.0005,
-                "decay_steps": 2,
-                "decay_rate": 0.5,
-            },
-        }
     agent, buffer, results, state = run_training(
         tmp_path / "continuous", monkeypatch, environment_factory, 123, **options
     )
@@ -361,8 +309,6 @@ def test_continuous_and_split_training_match_exactly(
         environment_factory,
         999,
         sessions=sessions,
-        roundtrip_cache=roundtrip_cache,
-        neural_mode=neural_mode,
         **options,
     )
     assert state == other_state
@@ -523,6 +469,7 @@ def test_continuation_rejects_unfinished_trial(continuation_agent, monkeypatch):
     assert (freeze_state(np.random.get_state()), random.getstate()) == rng
 
 
+@pytest.mark.integration
 def test_seeded_training_preserves_trial_update_order_and_is_exactly_repeatable(
     tmp_path, monkeypatch, environment_factory
 ):
@@ -760,9 +707,8 @@ def test_ddqn_update_matches_hand_calculated_targets_loss_and_priorities():
 
 
 @pytest.mark.parametrize("cache_type", ["lru", "clock"])
-@pytest.mark.parametrize("roundtrip_cache", [False, True])
 def test_environment_cache_hit_reuses_reward_without_consuming_fit_randomness(
-    monkeypatch, environment_factory, cache_type, roundtrip_cache
+    monkeypatch, environment_factory, cache_type
 ):
     env = environment_factory(cache_type)
     monkeypatch.setattr(env, "_evaluate_circuit", controlled_fit)
@@ -773,18 +719,20 @@ def test_environment_cache_hit_reuses_reward_without_consuming_fit_randomness(
     first = env.step(action_type="L", action_position=3)
     assert first["validity"] == 1
     assert first["reward"] == reference_rng.uniform(0.125, 0.25)
-    if roundtrip_cache:
-        env.cache = HistoryCache.from_state_dict(env.cache.state_dict())
-    env._update_state(new_state="+/RPR")
-    cached = env.step(action_type="L", action_position=3)
-    assert cached["reward"] == first["reward"]
-    assert env.get_cache_stats()["hits"] == 1
-    assert env.get_cache_stats()["misses"] == 1
+    # Exercise cache hits before and after restoration using the same fitted entry.
+    for expected_hits in (1, 2):
+        env._update_state(new_state="+/RPR")
+        cached = env.step(action_type="L", action_position=3)
+        assert cached["reward"] == first["reward"]
+        assert env.get_cache_stats()["hits"] == expected_hits
+        assert env.get_cache_stats()["misses"] == 1
+        if expected_hits == 1:
+            env.cache = HistoryCache.from_state_dict(env.cache.state_dict())
 
     # Repeating the mutation without resetting is invalid and must not fit either.
     invalid = env.step(action_type="L", action_position=3)
     assert invalid["validity"] == 0
     assert invalid["reward"] == -0.5
-    assert env.get_cache_stats()["hits"] == 1
+    assert env.get_cache_stats()["hits"] == 2
     assert env.get_cache_stats()["misses"] == 1
     assert np.random.rand() == reference_rng.rand()

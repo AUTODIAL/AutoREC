@@ -12,7 +12,6 @@ import os
 from pathlib import Path
 import pickle
 import platform
-import shutil
 import tempfile
 
 import numpy as np
@@ -164,8 +163,10 @@ def save_checkpoint(agent, destination) -> Path:
     runtime = _runtime()
     payloads = _capture(agent)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    temporary = Path(tempfile.mkdtemp(prefix=f".{destination.name}-", dir=destination.parent))
-    try:
+    with tempfile.TemporaryDirectory(
+        prefix=f".{destination.name}-", dir=destination.parent
+    ) as temporary_name:
+        temporary = Path(temporary_name)
         for name, payload in payloads.items():
             with (temporary / name).open("wb") as stream:
                 if name.endswith(".json"):
@@ -191,9 +192,6 @@ def save_checkpoint(agent, destination) -> Path:
             raise FileExistsError(f"Checkpoint already exists: {destination}")
         temporary.rename(destination)
         _sync_directory(destination.parent)
-    finally:
-        if temporary.exists():
-            shutil.rmtree(temporary)
     return destination
 
 

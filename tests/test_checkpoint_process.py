@@ -9,6 +9,9 @@ import sys
 import pytest
 
 
+pytestmark = pytest.mark.integration
+
+
 def run_worker(directory, *, resume=None, horizon=12, count=12, cache="lru", save_every=None):
     command = [
         sys.executable,

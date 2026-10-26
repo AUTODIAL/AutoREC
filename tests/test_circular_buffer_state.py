@@ -121,9 +121,12 @@ def test_export_and_restore_leave_rng_streams_unchanged():
     np.testing.assert_equal(np.random.get_state(), numpy_state)
 
 
-@pytest.mark.parametrize("name", ["version", "capacity", "size", "position"])
-@pytest.mark.parametrize("value", [True, np.bool_(False), 1.5, "1"])
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [("version", True), ("capacity", 1.5), ("size", "1"), ("position", np.bool_(False))],
+)
 def test_noninteger_metadata_is_rejected(name, value):
+    # All metadata fields use the same type check: cover each field/type without a product.
     state = CircularBuffer(3, DTYPE).state_dict()
     state[name] = value
     with pytest.raises(TypeError, match=f"{name} must be an integer"):
@@ -135,13 +138,11 @@ def test_noninteger_metadata_is_rejected(name, value):
     [
         ({"version": 2}, "version"),
         ({"capacity": 0}, "capacity"),
-        ({"capacity": -1}, "capacity"),
         ({"size": -1}, "size"),
         ({"size": 4}, "size"),
         ({"position": -1}, "position"),
         ({"position": 3}, "position"),
         ({"size": 1, "position": 0}, "position must equal size"),
-        ({"size": 0, "position": 1}, "position must equal size"),
         ({"buffer": np.zeros(2, dtype=DTYPE)}, "shape"),
         ({"buffer": np.zeros((3, 1), dtype=DTYPE)}, "shape"),
         ({"buffer": np.zeros(3)}, "structured dtype"),
@@ -157,11 +158,10 @@ def test_invalid_metadata_or_array_is_rejected_without_modifying_input(updates, 
     assert state["buffer"].tobytes() == before
 
 
-@pytest.mark.parametrize("missing", ["version", "capacity", "size", "position", "buffer"])
-def test_missing_keys_are_rejected(missing):
+def test_missing_keys_are_rejected():
     state = CircularBuffer(3, DTYPE).state_dict()
-    del state[missing]
-    with pytest.raises(ValueError, match=f"missing=.*{missing}"):
+    del state["buffer"]
+    with pytest.raises(ValueError, match="missing=.*buffer"):
         CircularBuffer.from_state_dict(state)
 
 

@@ -19,3 +19,10 @@ os.environ.setdefault("PYTHON_JULIAPKG_PROJECT", str(_TEST_CACHE_DIR / "julia_en
 os.environ.setdefault("JULIA_DEPOT_PATH", str(_TEST_CACHE_DIR / "julia_depot"))
 os.environ.setdefault("PYTHON_JULIACALL_AUTOLOAD_IPYTHON_EXTENSION", "no")
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
+
+
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers",
+        "integration: complete training runs or fresh-process checkpoint comparisons",
+    )
