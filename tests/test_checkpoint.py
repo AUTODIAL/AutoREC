@@ -6,6 +6,7 @@ import pickle
 import pytest
 
 from test_training_baseline import environment_factory as _environment_factory
+from checkpoint_worker import exact
 from autorec.agent import DDQN_ECM
 from autorec import checkpoint
 from autorec.runtime_state import rng_state_dict, restore_rng_state
@@ -92,3 +93,34 @@ def test_unfinished_trial_rejected(agent, tmp_path):
     agent._training_state.at_trial_boundary = False
     with pytest.raises(ValueError, match="boundary"):
         checkpoint.save_checkpoint(agent, tmp_path / "checkpoint")
+
+
+def test_restore_before_optimizer_slots_and_relocate(agent, tmp_path):
+    path = checkpoint.save_checkpoint(agent, tmp_path / "checkpoint")
+    restored = checkpoint.load_checkpoint(path, save_dir=tmp_path / "relocated")
+    assert restored.completed_trials == 0
+    assert restored.training_env is restored.eval_env
+    assert restored.optimizer.built is False
+    assert restored.save_dir == tmp_path / "relocated"
+    assert restored._continuation_mode is True
+    assert exact(checkpoint._capture(agent)["training.pkl"]) == exact(
+        checkpoint._capture(restored)["training.pkl"]
+    )
+
+
+def test_failed_reconstruction_restores_caller_rng(agent, tmp_path, monkeypatch):
+    path = checkpoint.save_checkpoint(agent, tmp_path / "checkpoint")
+    before = rng_state_dict()
+
+    def fail(*args, **kwargs):
+        import random
+        import numpy as np
+
+        random.random()
+        np.random.random()
+        raise ValueError("simulated neural restoration failure")
+
+    monkeypatch.setattr(checkpoint, "restore_neural_state", fail)
+    with pytest.raises(ValueError, match="simulated"):
+        checkpoint.load_checkpoint(path)
+    assert pickle.dumps(before) == pickle.dumps(rng_state_dict())

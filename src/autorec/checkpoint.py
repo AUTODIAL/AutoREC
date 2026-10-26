@@ -19,8 +19,14 @@ import numpy as np
 import tensorflow as tf
 from tensorflow.python.framework import config as tf_config
 
-from autorec.neural_state import neural_state_dict
-from autorec.runtime_state import environment_state_dict, rng_state_dict
+from autorec.neural_state import neural_state_dict, restore_neural_state
+from autorec.optimized_data_structures.circular_buffer import CircularBuffer
+from autorec.runtime_state import (
+    environment_state_dict,
+    restore_environment_state,
+    restore_rng_state,
+    rng_state_dict,
+)
 
 
 _CONFIG_FIELDS = frozenset(
@@ -229,3 +235,92 @@ def _read_checkpoint(directory):
     ):
         raise ValueError("Checkpoint progress does not match its boundary/manifest.")
     return payloads
+
+
+def load_checkpoint(directory, *, save_dir=None):
+    """Build a fresh agent from a trusted checkpoint and restore RNG streams LAST.
+
+    Only output relocation is supported; training configuration/horizon cannot be
+    overridden. The next ``train()`` finishes the original horizon, while
+    ``train(additional_trials=n)`` advances by n cumulative trials. Failed loads restore
+    the caller's supported RNG streams and never modify an existing agent.
+    """
+    from autorec.agent import DDQN_ECM, _TrainingState
+
+    previous_rng = rng_state_dict()
+    try:
+        payloads = _read_checkpoint(directory)
+        config = payloads["config.json"]
+        training = payloads["training.pkl"]
+        if set(config) != {"agent", "output"} or set(config["agent"]) != _CONFIG_FIELDS:
+            raise ValueError("Invalid checkpoint agent configuration.")
+        if set(config["output"]) != {"save_dir", "model_name"}:
+            raise ValueError("Invalid checkpoint output configuration.")
+        if (
+            set(training) != {"attributes", "progress", "replay", "rng"}
+            or set(training["attributes"]) != _DYNAMIC_FIELDS
+        ):
+            raise ValueError("Invalid checkpoint training attributes.")
+        if set(training["progress"]) != {field.name for field in fields(_TrainingState)}:
+            raise ValueError("Invalid checkpoint progress fields.")
+        agent = DDQN_ECM.__new__(DDQN_ECM)
+        agent.__dict__.update(config["agent"])
+        agent.__dict__.update(training["attributes"])
+        agent._training_state = _TrainingState(**training["progress"])
+        progress = agent._training_state
+        for name in (
+            "iteration",
+            "target_freq",
+            "memory",
+            "success_count",
+            "completed_trials",
+        ):
+            value = getattr(progress, name)
+            if type(value) is not int or value < 0:
+                raise ValueError(f"Invalid checkpoint counter: {name}")
+        if (
+            type(agent.num_trials) is not int
+            or not 0 <= progress.completed_trials <= agent.num_trials
+        ):
+            raise ValueError("Invalid cumulative trial count/horizon.")
+        if progress.schedule_config != agent._training_schedule_config():
+            raise ValueError("Checkpoint horizon/schedules are inconsistent.")
+        agent.training_env, agent.eval_env, agent._active_env = restore_environment_state(
+            payloads["environments.pkl"]
+        )
+        agent._replay_buffer = CircularBuffer.from_state_dict(
+            dict(training["replay"], buffer=payloads["replay.npy"])
+        )
+        expected_replay = agent._create_replay_buffer()
+        if (
+            agent._replay_buffer.capacity != expected_replay.capacity
+            or agent._replay_buffer.buffer.dtype != expected_replay.buffer.dtype
+        ):
+            raise ValueError("Checkpoint replay does not match the agent/environment.")
+        neural = payloads["neural.pkl"]
+        agent.model = tf.keras.Sequential.from_config(neural["online"]["config"])
+        agent.target_model = tf.keras.Sequential.from_config(neural["target"]["config"])
+        agent.optimizer = restore_neural_state(neural, agent.model, agent.target_model)
+        env = agent.training_env
+        input_size = env.chromosome_len * len(env.ELEMENTS_EXTENDED) + env.EIS_INPUT_SIZE
+        for model in (agent.model, agent.target_model):
+            if model.input_shape != (None, input_size) or model.output_shape != (
+                None,
+                len(env.ACTIONS_LIST),
+            ):
+                raise ValueError("Checkpoint network dimensions do not match the environment.")
+        agent._continuation_mode = True
+        output = config["output"]
+        agent.save_dir = Path(output["save_dir"] if save_dir is None else save_dir)
+        agent.model_dir = agent.save_dir / "models"
+        agent.model_name = (
+            Path(output["model_name"])
+            if save_dir is None
+            else agent.save_dir / Path(output["model_name"]).name
+        )
+        agent.model_dir.mkdir(parents=True, exist_ok=True)
+        restore_rng_state(training["rng"])
+        return agent
+    except BaseException:
+        restore_rng_state(previous_rng)
+        raise
