@@ -1,8 +1,9 @@
 # Building the documentation
 
-The documentation uses Sphinx, the Furo theme, and MyST Markdown. Its dependencies
-are separate from AutoREC's scientific environment. The build does not install or
-import AutoREC, initialize Julia, or run notebooks or training workloads.
+The documentation uses Sphinx, the Furo theme, MyST Markdown, and Sphinx
+Copybutton. Its dependencies are separate from AutoREC's scientific environment.
+The build does not install or import AutoREC, initialize Julia, or run notebooks
+or training workloads.
 
 ## Create a documentation environment
 
@@ -105,12 +106,31 @@ Before submitting a documentation change:
 2. Check the changed pages, navigation, links, and code blocks in the local preview.
 3. Review the diff and keep generated HTML and virtual environments out of commits.
 
+## Appearance and navigation
+
+`doc/conf.py` selects the existing repository-level `Logo.png` for both color
+modes and defines the teal/light and aqua/dark accent colors. The visible project
+name stays below the logo. Furo supplies the system fonts, search, theme toggle,
+and responsive sidebar; no external font service or copied AutoEIS assets are
+required. Small layout and keyboard-focus adjustments live in
+`doc/_static/custom.css`.
+
+The homepage's toctrees group navigation into Getting started, Development, and
+Project. User guides currently link to the existing repository content. Replace
+those links with local pages as the guides are migrated, and add further groups
+only when they contain useful content.
+
+For appearance changes, preview both pages in light and dark modes at desktop
+and narrow mobile widths. Check the sidebar, visible keyboard focus, and code
+copy buttons. Long code blocks and tables should scroll within their containers
+without widening the whole page; long navigation labels should wrap.
+
 Keep `conf.py` independent of AutoREC imports and scientific dependencies. The
 documentation uses a `development` release label until release-aware builds are
 introduced. Notebook rendering, API extraction, and automated deployment will be
 added separately.
 
-`doc/requirements.txt` pins both the three documentation tools and their resolved
+`doc/requirements.txt` pins both the documentation tools and their resolved
 dependencies. When updating them, resolve the tools in a fresh Python 3.12
 environment, use `python -m pip freeze` to refresh the resolved pins, and preserve
 the Windows-only `colorama` requirement. Run `python -m pip check` as well as the

@@ -27,7 +27,28 @@ currently provides the installation instructions and user walkthroughs:
 ```{toctree}
 :hidden:
 :maxdepth: 1
+:caption: Getting started
+
+Installation and usage <https://github.com/AUTODIAL/AutoREC/blob/main/README.md>
+Notebook tutorials <https://github.com/AUTODIAL/AutoREC/tree/main/tutorials>
+Example configurations <https://github.com/AUTODIAL/AutoREC/tree/main/configs_yaml/examples>
+```
+
+```{toctree}
+:hidden:
+:maxdepth: 1
 :caption: Development
 
 development/documentation
+```
+
+```{toctree}
+:hidden:
+:maxdepth: 1
+:caption: Project
+
+Source code <https://github.com/AUTODIAL/AutoREC>
+Report an issue <https://github.com/AUTODIAL/AutoREC/issues>
+Paper <https://arxiv.org/abs/2604.27266>
+License <https://github.com/AUTODIAL/AutoREC/blob/main/LICENSE>
 ```
