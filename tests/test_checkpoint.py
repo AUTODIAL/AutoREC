@@ -1,0 +1,94 @@
+"""Checkpoint storage, integrity, and restoration through the real component APIs."""
+
+import json
+import pickle
+
+import pytest
+
+from test_training_baseline import environment_factory as _environment_factory
+from autorec.agent import DDQN_ECM
+from autorec import checkpoint
+from autorec.runtime_state import rng_state_dict, restore_rng_state
+
+
+environment_factory = _environment_factory
+
+
+@pytest.fixture
+def agent(tmp_path, environment_factory):
+    saved = rng_state_dict()
+    instance = DDQN_ECM(
+        environment_factory(),
+        save_dir=tmp_path / "outputs",
+        num_trials=12,
+        hidden_layers=[{"type": "Dense", "units": 4, "activation": "relu"}],
+        action_cap=2,
+        batch_size=2,
+        buffer_capacity=7,
+        NN_sleep=3,
+        train_frequency=3,
+        update_target_frequency=5,
+        save_start=100,
+    )
+    instance.train(additional_trials=0)
+    yield instance
+    restore_rng_state(saved)
+
+
+def test_save_read_is_exact_and_rng_inert(agent, tmp_path):
+    before = rng_state_dict()
+    path = checkpoint.save_checkpoint(agent, tmp_path / "checkpoint")
+    payloads = checkpoint._read_checkpoint(path)
+    assert pickle.dumps(before) == pickle.dumps(rng_state_dict())
+    assert (
+        payloads["replay.npy"].tobytes()
+        == agent._replay_buffer.state_dict()["buffer"].tobytes()
+    )
+    assert payloads["config.json"]["agent"]["num_trials"] == 12
+    assert payloads["training.pkl"]["progress"]["completed_trials"] == 0
+    with pytest.raises(FileExistsError):
+        checkpoint.save_checkpoint(agent, path)
+
+
+@pytest.mark.parametrize("problem", ["missing", "corrupt", "version", "runtime", "incomplete"])
+def test_invalid_checkpoint_rejected_before_unpickling(agent, tmp_path, monkeypatch, problem):
+    path = checkpoint.save_checkpoint(agent, tmp_path / "checkpoint")
+    manifest_path = path / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    if problem == "missing":
+        (path / "neural.pkl").unlink()
+    elif problem == "corrupt":
+        (path / "training.pkl").write_bytes(b"broken")
+    elif problem == "version":
+        manifest["format_version"] = 100
+    elif problem == "runtime":
+        manifest["runtime"]["python"] = "incompatible"
+    else:
+        manifest["files"].pop("replay.npy")
+    manifest_path.write_text(json.dumps(manifest))
+    monkeypatch.setattr(
+        checkpoint.pickle, "load", lambda *_: pytest.fail("Unpickled before validation")
+    )
+    with pytest.raises(ValueError):
+        checkpoint._read_checkpoint(path)
+
+
+def test_interrupted_write_preserves_previous_checkpoint(agent, tmp_path, monkeypatch):
+    previous = checkpoint.save_checkpoint(agent, tmp_path / "previous")
+    original = (previous / "manifest.json").read_bytes()
+
+    def fail(*args, **kwargs):
+        raise OSError("simulated interrupted write")
+
+    monkeypatch.setattr(checkpoint.pickle, "dump", fail)
+    with pytest.raises(OSError, match="interrupted"):
+        checkpoint.save_checkpoint(agent, tmp_path / "next")
+    assert (previous / "manifest.json").read_bytes() == original
+    assert not (tmp_path / "next").exists()
+    assert not list(tmp_path.glob(".next-*"))
+
+
+def test_unfinished_trial_rejected(agent, tmp_path):
+    agent._training_state.at_trial_boundary = False
+    with pytest.raises(ValueError, match="boundary"):
+        checkpoint.save_checkpoint(agent, tmp_path / "checkpoint")
