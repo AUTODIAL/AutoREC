@@ -65,6 +65,33 @@ python -m http.server --bind 127.0.0.1 --directory doc/_build/html 8000
 Open <http://127.0.0.1:8000/>. Rebuild after editing sources, then refresh the
 browser. Stop the server with `Ctrl+C`.
 
+## Automated builds and review artifacts
+
+The `Documentation` GitHub Actions workflow in `.github/workflows/docs.yml` runs
+on pull requests, pushes to `main`, and manual dispatch. It uses Python 3.12 in a
+dedicated virtual environment, installs `doc/requirements.txt`, checks dependency
+compatibility, and runs the same strict HTML build described above. Sphinx
+warnings fail the build.
+
+After a successful build, the workflow uploads `doc/_build/html/` as the
+`docs-html` artifact, retained for seven days. To review it:
+
+1. Open the pull request's **Build documentation** check, or find its run under
+   **Actions → Documentation** in the repository.
+2. Open the workflow run summary and download **docs-html** from **Artifacts**.
+   GitHub requires you to sign in to download artifacts.
+3. Extract the archive. From the extracted directory containing `index.html`, run:
+
+   ```bash
+   python -m http.server --bind 127.0.0.1 8000
+   ```
+
+4. Open <http://127.0.0.1:8000/> to review the built pages.
+
+The workflow has read-only repository permissions and does not deploy a website.
+An artifact is available only when the build and upload steps succeed. Subsequent
+updates to the same pull request or branch cancel an older in-progress build.
+
 ## Edit and review pages
 
 Write narrative pages in MyST Markdown (`.md`). Use reStructuredText (`.rst`) when
