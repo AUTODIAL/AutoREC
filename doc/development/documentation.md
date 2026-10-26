@@ -1,9 +1,9 @@
 # Building the documentation
 
-The documentation uses Sphinx, the Furo theme, MyST Markdown, and Sphinx
-Copybutton. Its dependencies are separate from AutoREC's scientific environment.
-The build does not install or import AutoREC, initialize Julia, or run notebooks
-or training workloads.
+The documentation uses Sphinx, the Furo theme, MyST Markdown, nbsphinx,
+nbsphinx-link, and Sphinx Copybutton. Its dependencies are separate from
+AutoREC's scientific environment. The build does not install or import AutoREC,
+initialize Julia, execute notebooks, or run training workloads.
 
 ## Create a documentation environment
 
@@ -14,6 +14,15 @@ environment:
 python3.12 -m venv .venv-docs
 source .venv-docs/bin/activate
 python -m pip install -r doc/requirements.txt
+```
+
+Notebook conversion also requires Pandoc. The documentation is validated with
+Pandoc 3.1.3. On Ubuntu or Debian, install the distribution package and confirm
+that the executable is available:
+
+```bash
+sudo apt-get install pandoc
+pandoc --version
 ```
 
 On Windows, use PowerShell:
@@ -106,6 +115,26 @@ Before submitting a documentation change:
 2. Check the changed pages, navigation, links, and code blocks in the local preview.
 3. Review the diff and keep generated HTML and virtual environments out of commits.
 
+## Maintain notebook tutorials
+
+The `.nblink` files under `doc/tutorials/` point to the three authoritative
+notebooks under the repository-level `tutorials/` directory. Do not copy the
+notebooks into `doc/`. nbsphinx renders their saved outputs with
+`nbsphinx_execute = "never"`; documentation builds do not need an IPython kernel
+or AutoREC's scientific dependencies.
+
+Before publishing notebook changes, check that notebook-level `nbsphinx`
+metadata does not override the global no-execution setting. Clear accidental
+error outputs, retain only useful and current display outputs, and review any
+performance or scientific claims separately. A successful documentation build
+shows that the saved notebook is renderable; it does not validate the numerical
+results.
+
+The linked notebooks assume `tutorials/` is the working directory when users run
+them locally. Keep input and output paths on the tutorials index synchronized
+with the notebook cells. The download and source links shown on every rendered
+notebook are configured in `doc/conf.py`.
+
 ## Appearance and navigation
 
 `doc/conf.py` selects the existing repository-level `Logo.png` for both color
@@ -127,8 +156,7 @@ without widening the whole page; long navigation labels should wrap.
 
 Keep `conf.py` independent of AutoREC imports and scientific dependencies. The
 documentation uses a `development` release label until release-aware builds are
-introduced. Notebook rendering, API extraction, and automated deployment will be
-added separately.
+introduced. API extraction and automated deployment will be added separately.
 
 `doc/requirements.txt` pins both the documentation tools and their resolved
 dependencies. When updating them, resolve the tools in a fresh Python 3.12

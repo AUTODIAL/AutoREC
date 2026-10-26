@@ -31,6 +31,12 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install Pandoc
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends pandoc
+          pandoc --version
+
       - name: Install documentation dependencies
         run: |
           python -m venv .venv-docs

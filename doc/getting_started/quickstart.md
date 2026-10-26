@@ -53,9 +53,9 @@ dataset, and saves it as a pickle file. Use `--evaluation` when directory names
 contain ground-truth circuit labels that should be required and validated.
 
 For an already processed dataset, use `--mode load`. Optional interpolation and
-lin-KK controls are listed by `autorec preprocess --help`. The repository's
-[data-preparation notebook](https://github.com/AUTODIAL/AutoREC/blob/main/tutorials/01_data_preparation_walkthrough.ipynb)
-provides a fuller walkthrough.
+lin-KK controls are listed by `autorec preprocess --help`. The
+{doc}`data-preparation tutorial <../tutorials/data_preparation>` provides a
+fuller walkthrough.
 
 ## Train from a YAML configuration
 
@@ -107,8 +107,8 @@ training environment as the evaluation fallback.
 
 ## Where to go next
 
-- Browse the existing [notebook tutorials](https://github.com/AUTODIAL/AutoREC/tree/main/tutorials)
-  for the current detailed walkthroughs.
+- Browse the {doc}`notebook tutorials <../tutorials/index>` for detailed
+  walkthroughs.
 - Review the [example configurations](https://github.com/AUTODIAL/AutoREC/tree/main/configs_yaml/examples)
   before creating an experiment configuration.
 - Use `autorec <command> --help` for the exact options accepted by

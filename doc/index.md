@@ -15,7 +15,7 @@ and example configurations provide detailed walkthroughs and reference inputs:
 
 - [Installation](getting_started/installation.md)
 - [Quick Start](getting_started/quickstart.md)
-- [Jupyter tutorials](https://github.com/AUTODIAL/AutoREC/tree/main/tutorials)
+- [Jupyter tutorials](tutorials/index.md)
 - [Example configurations](https://github.com/AUTODIAL/AutoREC/tree/main/configs_yaml/examples)
 
 ## Project
@@ -32,7 +32,7 @@ and example configurations provide detailed walkthroughs and reference inputs:
 
 getting_started/installation
 getting_started/quickstart
-Notebook tutorials <https://github.com/AUTODIAL/AutoREC/tree/main/tutorials>
+tutorials/index
 Example configurations <https://github.com/AUTODIAL/AutoREC/tree/main/configs_yaml/examples>
 ```
 
