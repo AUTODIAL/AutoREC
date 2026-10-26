@@ -282,6 +282,48 @@ export nor restoration should affect recency, hit/miss statistics, or RNG stream
 supported payloads. These methods perform no file I/O and do not save complete checkpoints;
 existing training only uses them if explicitly invoked by the caller.
 
+#### Neural state utilities
+
+The neural component API preserves the online model, target model, and optimizer separately:
+
+```python
+from autorec.neural_state import neural_state_dict, restore_neural_state
+
+# Pause training before either operation.
+snapshot = neural_state_dict(agent.model, agent.target_model, agent.optimizer)
+agent.optimizer = restore_neural_state(snapshot, agent.model, agent.target_model)
+```
+
+The version-1 dictionary contains TensorFlow/Keras versions, both full Keras model
+configurations and independent arrays for every `model.variables` entry, plus the live
+optimizer configuration, built/unbuilt flag, and all optimizer variables. This includes
+BatchNormalization statistics, Dropout's layer-local seed counters, Adam moments, SGD
+momentum, iterations, mutable learning rates, and supported schedule parameters. Merely
+saving `model.weights` would miss seed-counter state in the pinned Keras version.
+
+Restoration requires compatible **already-built** destination networks. It validates both
+architectures, variable counts/types/shapes, trainability, optimizer state, and exact library
+versions before assigning either network. Generated model/layer names may differ; Sequential
+topology remains positional. A new optimizer is returned: **assign that return value**.
+Its slots are built only when the saved optimizer was built, without a dummy gradient step.
+Restoration preserves target lag and never copies online weights into the target.
+
+The qualified configurations are uncompiled built-in Sequential models using Dense, BatchNormalization,
+Dropout, Activation, and Flatten with float32/float64 policies; Adam (including AMSGrad) or
+SGD; and constant LR, ExponentialDecay, PiecewiseConstantDecay, or CosineDecay. Configurations
+must contain ordinary serializable constants. Compiled or custom/Functional models, other layers or
+optimizers, quantization/LoRA, mixed precision/loss scaling, EMA, gradient accumulation,
+callable/stateful schedules, and weight-decay exclusions are not supported by these methods.
+Ordinary training retains its existing model and optimizer support.
+
+Tests cover exact state restoration and subsequent updates on CPU, including neural export
+and restoration between bounded DDQN calls. GPU/other execution environments and arbitrary
+user-defined components remain unqualified. The API performs no file I/O, model construction,
+or global RNG restoration; it is not a complete checkpoint or fresh-process resume API.
+Existing `save_model()`/`load_model()` behavior is unchanged. Runtime/device failures during
+variable assignment are not transactional; pre-assignment validation failures leave supplied
+networks unchanged. Snapshots require trusted input, paused training, and memory for copies.
+
 ### 3. Evaluate an Agent
 
 ```python

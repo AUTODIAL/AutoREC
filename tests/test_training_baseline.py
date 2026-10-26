@@ -16,6 +16,7 @@ import pytest
 from autorec import agent as agent_module
 from autorec import environment as environment_module
 from autorec.environment import EIS_ECM_Env
+from autorec.neural_state import neural_state_dict, restore_neural_state
 from autorec.optimized_data_structures.circular_buffer import CircularBuffer
 from autorec.optimized_data_structures.circuit_cache import HistoryCache
 
@@ -135,6 +136,8 @@ def run_training(
     cache_type="lru",
     default_beta_schedule=False,
     roundtrip_cache=False,
+    neural_mode=None,
+    optimizer_config=None,
 ):
     random.seed(42)
     agent_module.tf.random.set_seed(42)
@@ -178,6 +181,7 @@ def run_training(
             train_frequency=3,
             update_target_frequency=5,
             gradient_steps=2,
+            optimizer=optimizer_config,
             initial_epsilon=1.0,
             epsilon_min=0.125,
             epsilon_decay=0.5,
@@ -249,6 +253,27 @@ def run_training(
             assert agent._replay_buffer is buffers[0]
             assert agent._training_state.at_trial_boundary
             assert len(results["success_rate"]) == completed * agent.episodes_trial
+            if neural_mode is not None:
+                neural_before = tuple(
+                    tuple(array_state(variable) for variable in component.variables)
+                    for component in (agent.model, agent.target_model, agent.optimizer)
+                )
+                rng_before = freeze_state(np.random.get_state()), random.getstate()
+                was_built = agent.optimizer.built
+                snapshot = neural_state_dict(agent.model, agent.target_model, agent.optimizer)
+                if neural_mode == "restore":
+                    agent.optimizer = restore_neural_state(
+                        snapshot, agent.model, agent.target_model
+                    )
+                assert agent.optimizer.built == was_built
+                assert (
+                    tuple(
+                        tuple(array_state(variable) for variable in component.variables)
+                        for component in (agent.model, agent.target_model, agent.optimizer)
+                    )
+                    == neural_before
+                )
+                assert (freeze_state(np.random.get_state()), random.getstate()) == rng_before
             if roundtrip_cache:
                 cache_before = freeze_state(vars(env.cache.cache))
                 rng_before = freeze_state(np.random.get_state()), random.getstate()
@@ -284,14 +309,23 @@ def run_training(
 
 
 @pytest.mark.parametrize(
-    ("sessions", "warmup", "cache_type", "default_beta_schedule", "roundtrip_cache"),
+    (
+        "sessions",
+        "warmup",
+        "cache_type",
+        "default_beta_schedule",
+        "roundtrip_cache",
+        "neural_mode",
+    ),
     [
-        ((1, 1, 1, 1), 3, "lru", False, False),
-        ((1, None), 5, "clock", True, False),
-        ((0, 2, 0, 2), 3, "clock", True, False),
-        ((4,), 5, "lru", False, False),
-        ((1, 1, 1, 1), 3, "lru", False, True),
-        ((1, 1, 1, 1), 5, "clock", True, True),
+        ((1, 1, 1, 1), 3, "lru", False, False, None),
+        ((1, None), 5, "clock", True, False, None),
+        ((0, 2, 0, 2), 3, "clock", True, False, None),
+        ((4,), 5, "lru", False, False, None),
+        ((1, 1, 1, 1), 3, "lru", False, True, None),
+        ((1, 1, 1, 1), 5, "clock", True, True, None),
+        ((0, 1, 1, 1, 1), 5, "lru", True, False, "export"),
+        ((0, 1, 1, 1, 1), 5, "lru", True, False, "restore"),
     ],
 )
 def test_continuous_and_split_training_match_exactly(
@@ -303,10 +337,21 @@ def test_continuous_and_split_training_match_exactly(
     cache_type,
     default_beta_schedule,
     roundtrip_cache,
+    neural_mode,
 ):
     options = dict(
         warmup=warmup, cache_type=cache_type, default_beta_schedule=default_beta_schedule
     )
+    if neural_mode is not None:
+        options["optimizer_config"] = {
+            "type": "Adam",
+            "learning_rate": {
+                "type": "ExponentialDecay",
+                "initial_learning_rate": 0.0005,
+                "decay_steps": 2,
+                "decay_rate": 0.5,
+            },
+        }
     agent, buffer, results, state = run_training(
         tmp_path / "continuous", monkeypatch, environment_factory, 123, **options
     )
@@ -317,6 +362,7 @@ def test_continuous_and_split_training_match_exactly(
         999,
         sessions=sessions,
         roundtrip_cache=roundtrip_cache,
+        neural_mode=neural_mode,
         **options,
     )
     assert state == other_state
