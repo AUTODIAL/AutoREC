@@ -79,17 +79,28 @@ def _run_preprocess(args: argparse.Namespace) -> int:
 
 
 def _run_train(args: argparse.Namespace) -> int:
-    """Run DDQN training from a YAML configuration."""
+    """Run DDQN training from YAML or resume a trusted complete checkpoint."""
     _configure_runtime(args)
 
     from autorec.factory import pipeline_builder
     from autorec.utils import set_global_seed
 
-    set_global_seed(args.seed, deterministic_ops=not args.non_deterministic)
+    if args.resume is not None:
+        import tensorflow as tf
+        from autorec.agent import DDQN_ECM
 
-    config = _read_config_with_overrides(args.config, args.output_dir)
-    _, _, _, _, agent = pipeline_builder(config)
-    agent.train()
+        if not args.non_deterministic:
+            tf.config.experimental.enable_op_determinism()
+        agent = DDQN_ECM.from_checkpoint(args.resume, save_dir=args.output_dir)
+    else:
+        set_global_seed(args.seed, deterministic_ops=not args.non_deterministic)
+        config = _read_config_with_overrides(args.config, args.output_dir)
+        _, _, _, _, agent = pipeline_builder(config)
+    agent.train(
+        additional_trials=args.additional_trials,
+        checkpoint_dir=args.checkpoint_dir,
+        checkpoint_every=args.checkpoint_every,
+    )
 
     return 0
 
@@ -248,11 +259,25 @@ def _build_parser() -> argparse.ArgumentParser:
         "train",
         help="Train an AutoREC DDQN agent from a YAML configuration.",
     )
-    train.add_argument(
+    training_source = train.add_mutually_exclusive_group(required=True)
+    training_source.add_argument(
         "--config",
-        required=True,
         type=Path,
         help="YAML file containing environment and agent configuration.",
+    )
+    training_source.add_argument(
+        "--resume", type=Path, help="Trusted complete checkpoint directory to resume."
+    )
+    train.add_argument(
+        "--additional-trials", type=int, help="Additional cumulative trials to run."
+    )
+    train.add_argument(
+        "--checkpoint-dir", type=Path, help="Directory for new complete checkpoints."
+    )
+    train.add_argument(
+        "--checkpoint-every",
+        type=int,
+        help="Save every N cumulative trials and at session end.",
     )
     _add_output_dir_arg(train)
     _add_seed_args(train)

@@ -3,6 +3,7 @@
 import argparse
 import hashlib
 import pickle
+import struct
 from pathlib import Path
 
 import numpy as np
@@ -12,13 +13,15 @@ import tensorflow as tf
 
 from test_training_baseline import controlled_fit, environment_factory
 from autorec.agent import DDQN_ECM
-from autorec.checkpoint import _capture, load_checkpoint, save_checkpoint
+from autorec.checkpoint import _capture
 from autorec.environment import EIS_ECM_Env
 from autorec.utils import set_global_seed
 
 
 def exact(value):
     """Stable comparison form, including ordered containers and raw numerical bytes."""
+    if type(value) is float:
+        return ("float64", struct.pack("!d", value))
     if isinstance(value, np.ndarray):
         return (
             value.dtype.descr if value.dtype.names else value.dtype.str,
@@ -54,6 +57,7 @@ def main():
     parser.add_argument("--horizon", type=int, default=12)
     parser.add_argument("--count", type=int, default=12)
     parser.add_argument("--cache", default="lru")
+    parser.add_argument("--save-every", type=int)
     args = parser.parse_args()
     args.directory.mkdir(parents=True, exist_ok=True)
     patches = pytest.MonkeyPatch()
@@ -67,6 +71,14 @@ def main():
     patches.setattr(tf.keras.Sequential, "save", lambda *args, **kwargs: None)
     set_global_seed(42)
     traces = []
+    sample = DDQN_ECM._sample_experience
+
+    def sampled(self, *args, **kwargs):
+        result = sample(self, *args, **kwargs)
+        traces.append(("sample", exact(result)))
+        return result
+
+    patches.setattr(DDQN_ECM, "_sample_experience", sampled)
     interact = DDQN_ECM._interact_update
 
     def traced(self, *args, **kwargs):
@@ -76,7 +88,7 @@ def main():
 
     patches.setattr(DDQN_ECM, "_interact_update", traced)
     if args.resume:
-        agent = load_checkpoint(args.resume, save_dir=args.directory)
+        agent = DDQN_ECM.from_checkpoint(args.resume, save_dir=args.directory)
     else:
         agent = DDQN_ECM(
             make_env(args.cache),
@@ -89,7 +101,7 @@ def main():
             NN_sleep=3,
             train_frequency=3 if args.horizon < 1000 else 197,
             update_target_frequency=5 if args.horizon < 1000 else 137,
-            epsilon_decay=0.995,
+            epsilon_decay=0.995 if args.horizon < 1000 else 0.99999,
             start_decay=1,
             save_start=args.horizon + 1,
             optimizer={
@@ -102,9 +114,13 @@ def main():
                 },
             },
         )
-    agent.train(additional_trials=args.count)
+    agent.train(
+        additional_trials=args.count,
+        checkpoint_dir=args.directory / "periodic" if args.save_every else None,
+        checkpoint_every=args.save_every,
+    )
     state = signature(agent)
-    save_checkpoint(agent, args.directory / "checkpoint")
+    agent.save_checkpoint(args.directory / "checkpoint")
     assert signature(agent) == state, "Checkpoint saving changed training state"
     with (args.directory / "result.pkl").open("wb") as stream:
         pickle.dump({"state": state, "trace": traces}, stream, protocol=5)

@@ -5,8 +5,58 @@ processing EIS data. Train and evaluate execution belong in broader integration 
 """
 
 from pathlib import Path
+from unittest.mock import Mock
+
+import pytest
 
 from autorec import cli
+
+
+def test_train_config_and_resume_are_exclusive():
+    with pytest.raises(SystemExit):
+        cli._build_parser().parse_args(
+            ["train", "--config", "config.yaml", "--resume", "checkpoint"]
+        )
+
+
+@pytest.mark.parametrize("resume", [False, True])
+def test_train_checkpoint_options_and_resume_without_reseeding(monkeypatch, resume):
+    agent = Mock()
+    seed = Mock()
+    builder = Mock(return_value=(None, None, None, None, agent))
+    loader = Mock(return_value=agent)
+    monkeypatch.setattr(cli, "_configure_runtime", lambda args: None)
+    monkeypatch.setattr(cli, "_read_config_with_overrides", lambda *args: {})
+    monkeypatch.setattr("autorec.utils.set_global_seed", seed)
+    monkeypatch.setattr("autorec.factory.pipeline_builder", builder)
+    monkeypatch.setattr("autorec.agent.DDQN_ECM.from_checkpoint", loader)
+    # Avoid changing this test process's global TF determinism setting.
+    monkeypatch.setattr("tensorflow.config.experimental.enable_op_determinism", lambda: None)
+    source = ["--resume", "checkpoint"] if resume else ["--config", "config.yaml"]
+    args = cli._build_parser().parse_args(
+        [
+            "train",
+            *source,
+            "--additional-trials",
+            "100",
+            "--checkpoint-dir",
+            "checkpoints",
+            "--checkpoint-every",
+            "25",
+        ]
+    )
+    assert cli._run_train(args) == 0
+    agent.train.assert_called_once_with(
+        additional_trials=100, checkpoint_dir=Path("checkpoints"), checkpoint_every=25
+    )
+    if resume:
+        seed.assert_not_called()
+        builder.assert_not_called()
+        loader.assert_called_once_with(Path("checkpoint"), save_dir=None)
+    else:
+        seed.assert_called_once_with(42, deterministic_ops=True)
+        builder.assert_called_once()
+        loader.assert_not_called()
 
 
 def test_parse_indices_handles_spaces_and_empty_items():

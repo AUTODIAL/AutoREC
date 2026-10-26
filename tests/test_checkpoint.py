@@ -124,3 +124,25 @@ def test_failed_reconstruction_restores_caller_rng(agent, tmp_path, monkeypatch)
     with pytest.raises(ValueError, match="simulated"):
         checkpoint.load_checkpoint(path)
     assert pickle.dumps(before) == pickle.dumps(rng_state_dict())
+
+
+@pytest.mark.parametrize("every", [0, -1, True, 1.5])
+def test_invalid_checkpoint_interval_does_not_advance(agent, tmp_path, every):
+    with pytest.raises(ValueError, match="positive integer"):
+        agent.train(additional_trials=1, checkpoint_dir=tmp_path, checkpoint_every=every)
+    assert agent.completed_trials == 0
+
+
+def test_checkpoint_interval_requires_directory(agent):
+    with pytest.raises(ValueError, match="requires checkpoint_dir"):
+        agent.train(checkpoint_every=1)
+    assert agent.completed_trials == 0
+
+
+def test_public_checkpoint_api_and_completed_run_noop(agent, tmp_path):
+    agent._training_state.completed_trials = agent.num_trials
+    path = agent.save_checkpoint(tmp_path / "checkpoint")
+    restored = DDQN_ECM.from_checkpoint(path, save_dir=tmp_path / "resumed")
+    before = exact(checkpoint._capture(restored))
+    restored.train()
+    assert exact(checkpoint._capture(restored)) == before

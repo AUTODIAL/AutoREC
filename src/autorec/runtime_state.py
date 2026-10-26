@@ -69,6 +69,12 @@ def restore_rng_state(state: dict) -> None:
 def environment_state_dict(training_env, eval_env, active_env) -> dict:
     """Capture prepared data, caches, current observations, and environment identities."""
     environments = [training_env] if training_env is eval_env else [training_env, eval_env]
+    if (
+        training_env is not eval_env
+        and training_env.cache is not None
+        and training_env.cache is eval_env.cache
+    ):
+        raise ValueError("Distinct environments must not share a mutable circuit cache.")
     if not any(active_env is env for env in environments):
         raise ValueError("Active environment must be training_env or eval_env.")
     records = []

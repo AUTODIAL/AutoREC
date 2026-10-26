@@ -204,8 +204,9 @@ snapshots. Final model/results/plots are written at the horizon; intermediate mo
 keep their existing global trial schedule. Without opting into continuation, repeated
 no-argument `train()` calls keep their existing reset behavior.
 
-This currently supports **one live Python process**, not checkpoint save/load or recovery
-after a failed or interrupted trial. For exact comparisons, use the same deterministic
+Bounded calls retain state in one live Python process. Complete checkpoints also support
+[fresh-process resumption](docs/checkpointing.md) and recovery from the last saved trial.
+For exact comparisons, use the same deterministic
 execution conditions and configuration. Between calls, do not reseed, change settings/data,
 mutate histories, or perform evaluation or other work that changes the training RNGs,
 environment/cache, or models. Real-fitting and GPU reproducibility require separate
@@ -217,6 +218,18 @@ workflow:
 ```bash
 python example/bounded_training.py --config PATH/config.yaml --trials-per-session 100
 ```
+
+For complete training checkpoints, configure the full horizon once and save at trial boundaries:
+
+```python
+agent.train(additional_trials=100, checkpoint_dir="checkpoints", checkpoint_every=100)
+agent = DDQN_ECM.from_checkpoint("checkpoints/trial-00000100")
+agent.train(additional_trials=100, checkpoint_dir="checkpoints", checkpoint_every=100)
+```
+
+The CLI accepts `autorec train --resume CHECKPOINT --additional-trials 100`.
+See the [checkpoint guide](docs/checkpointing.md) for deterministic CPU setup, compatibility,
+file contents, trusted-input requirements, validation limits, and a runnable example.
 
 #### Replay buffer state utilities
 

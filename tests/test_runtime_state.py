@@ -86,3 +86,21 @@ def test_invalid_rng_does_not_partially_restore():
     with pytest.raises((ValueError, IndexError)):
         restore_rng_state(invalid)
     assert pickle.dumps(before) == pickle.dumps(rng_state_dict())
+
+
+def test_distinct_environments_sharing_cache_are_rejected(environment_factory):
+    training, evaluation = environment_factory(), environment_factory()
+    evaluation.cache = training.cache
+    with pytest.raises(ValueError, match="share a mutable circuit cache"):
+        environment_state_dict(training, evaluation, training)
+
+
+def test_disabled_cache_restores_without_enabling_it(environment_factory):
+    env = environment_factory()
+    env.cache_enabled, env.cache = False, None
+    restored, evaluation, active = restore_environment_state(
+        environment_state_dict(env, env, env)
+    )
+    assert restored is evaluation is active
+    assert restored.cache is None
+    assert restored.cache_enabled is False

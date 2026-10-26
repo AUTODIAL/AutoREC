@@ -948,7 +948,33 @@ class DDQN_ECM:
             )
         }
 
-    def train(self, *, additional_trials: Optional[int] = None):
+    def save_checkpoint(self, directory: str | Path) -> Path:
+        """Save complete training state at a completed-trial boundary to a new directory.
+
+        Unlike ``save_model``, includes replay, optimizer, target network, prepared data,
+        caches, histories and supported RNG streams. See docs/checkpointing.md for the
+        deterministic CPU execution contract and trusted-file requirements.
+        """
+        from autorec.checkpoint import save_checkpoint
+
+        return save_checkpoint(self, directory)
+
+    @classmethod
+    def from_checkpoint(cls, directory: str | Path, *, save_dir: str | Path | None = None):
+        """Restore a fresh agent from a trusted checkpoint; optionally relocate outputs."""
+        from autorec.checkpoint import load_checkpoint
+
+        if cls is not DDQN_ECM:
+            raise TypeError("Checkpoint restoration supports DDQN_ECM only.")
+        return load_checkpoint(directory, save_dir=save_dir)
+
+    def train(
+        self,
+        *,
+        additional_trials: Optional[int] = None,
+        checkpoint_dir: str | Path | None = None,
+        checkpoint_every: Optional[int] = None,
+    ):
         """Train all trials, or advance a retained run by a bounded number of trials.
 
         Parameters
@@ -964,6 +990,14 @@ class DDQN_ECM:
             replay, counters, and result histories, with the existing model, optimizer,
             epsilon/beta, and schedule-history lifecycle.
 
+        checkpoint_dir : str or Path or None, optional
+            Opt into continuation and save complete state at the end of this call and
+            optionally at periodic completed-trial boundaries. Each snapshot is a new
+            ``trial-NNNNNNNN`` directory; existing snapshots are never overwritten.
+        checkpoint_every : int or None, optional
+            Positive cumulative trial interval. Requires checkpoint_dir. None saves only
+            at the session end. A zero-trial call does not automatically save a checkpoint.
+
         Returns
         -------
         dict
@@ -973,18 +1007,29 @@ class DDQN_ECM:
 
         Notes
         -----
-        Continuation supports completed-trial boundaries in the same process only. Do not
+        Continuation supports completed-trial boundaries. Do not
         reseed, change other training settings, mutate returned histories, or run operations
         that change training RNG/environment/model state between calls. A failed trial
-        cannot be continued. This API does not save or load checkpoints.
+        cannot be continued; restore the last valid checkpoint instead.
         """
+        if checkpoint_every is not None:
+            if type(checkpoint_every) is not int or checkpoint_every < 1:
+                raise ValueError("checkpoint_every must be a positive integer or None.")
+            if checkpoint_dir is None:
+                raise ValueError("checkpoint_every requires checkpoint_dir.")
+        if checkpoint_dir is not None:
+            checkpoint_dir = Path(checkpoint_dir)
         if additional_trials is not None:
             if isinstance(additional_trials, bool) or not isinstance(additional_trials, int):
                 raise TypeError("additional_trials must be a nonnegative integer or None.")
             if additional_trials < 0:
                 raise ValueError("additional_trials must be nonnegative.")
 
-        continuation = additional_trials is not None or self._continuation_mode
+        continuation = (
+            additional_trials is not None
+            or self._continuation_mode
+            or checkpoint_dir is not None
+        )
         state = self._training_state
         start = 0
         stop = self.num_trials
@@ -1078,6 +1123,14 @@ class DDQN_ECM:
             self._update_beta(t)
             state.completed_trials = t + 1
             state.at_trial_boundary = True
+            if checkpoint_dir is not None and (
+                state.completed_trials == stop
+                or (
+                    checkpoint_every is not None
+                    and state.completed_trials % checkpoint_every == 0
+                )
+            ):
+                self.save_checkpoint(checkpoint_dir / f"trial-{state.completed_trials:08d}")
 
         print(
             "Training session is completed"
