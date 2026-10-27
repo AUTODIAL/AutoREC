@@ -113,7 +113,40 @@ Before submitting a documentation change:
 
 1. Run the strict HTML build.
 2. Check the changed pages, navigation, links, and code blocks in the local preview.
-3. Review the diff and keep generated HTML and virtual environments out of commits.
+3. Run the external link check when links were added or changed:
+
+   ```bash
+   python -m sphinx -E -a -W --keep-going -b linkcheck doc doc/_build/linkcheck
+   ```
+
+   Review failures individually. External services can rate-limit or reject
+   automated requests even when a browser can open the page.
+4. Review the diff and keep generated HTML and virtual environments out of commits.
+
+## Content ownership and synchronization
+
+Narrative guides under `doc/` are the canonical location for detailed user and
+developer instructions. After the documentation website is deployed, the root
+README should remain a concise project introduction that links to those guides.
+Avoid maintaining full configuration tables, CLI manuals, or tutorials in both
+places.
+
+Use these ownership boundaries:
+
+- constructor signatures and parameter-level behavior belong in source
+  docstrings and the generated API reference;
+- workflows, lifecycle constraints, and cross-component explanations belong in
+  narrative guides;
+- executable walkthroughs belong in the repository-level notebooks, linked into
+  the site with `.nblink` files;
+- example-specific cluster or experiment instructions remain beside that
+  example, with an overview link from the website.
+
+When behavior changes, search the README, `doc/`, notebook sources, example
+configuration comments, and docstrings for affected statements. Validate prose
+against implementation and tests instead of treating an existing example as
+authoritative. Qualify scientific, portability, reproducibility, and
+performance claims to the conditions actually tested.
 
 ## Maintain notebook tutorials
 
@@ -170,10 +203,9 @@ and responsive sidebar; no external font service or copied AutoEIS assets are
 required. Small layout and keyboard-focus adjustments live in
 `doc/_static/custom.css`.
 
-The homepage's toctrees group navigation into Getting started, Reference,
-Development, and Project. User guides currently link to the existing repository
-content. Replace those links with local pages as the guides are migrated, and
-add further groups only when they contain useful content.
+The homepage's toctrees group navigation into Getting started, User guide,
+Reference, Development, and Project. Add a page only when it has a clear owner
+and distinct purpose; prefer cross-references over duplicated explanations.
 
 For appearance changes, preview both pages in light and dark modes at desktop
 and narrow mobile widths. Check the sidebar, visible keyboard focus, and code

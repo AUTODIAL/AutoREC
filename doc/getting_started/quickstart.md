@@ -69,10 +69,10 @@ autorec train \
   --output-dir runs/quickstart-training
 ```
 
-Training writes the final `dqn_model.keras` model, intermediate checkpoints,
-metric CSV files, plots, and a model summary. Copy the demonstration YAML before
-changing datasets or hyperparameters so the tracked example remains a stable
-reference.
+Training writes the final `dqn_model.keras` model, intermediate model exports,
+metric CSV files, plots, and a model summary. These exports are not complete
+resumable training checkpoints. Copy the demonstration YAML before changing
+datasets or hyperparameters so the tracked example remains a stable reference.
 
 ## Use the Python API
 

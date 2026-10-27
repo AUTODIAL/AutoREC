@@ -16,8 +16,18 @@ and example configurations provide detailed walkthroughs and reference inputs:
 - [Installation](getting_started/installation.md)
 - [Quick Start](getting_started/quickstart.md)
 - [Jupyter tutorials](tutorials/index.md)
+- [Core concepts](concepts/architecture.md)
+- [Configuration guide](user_guide/configuration.md)
 - [API reference](api/index.rst)
-- [Example configurations](https://github.com/AUTODIAL/AutoREC/tree/main/configs_yaml/examples)
+
+## Use and extend AutoREC
+
+- Prepare inputs with the [data guide](user_guide/data.md).
+- Run workflows through the [command-line interface](user_guide/cli.md).
+- Interpret artifacts with [models and results](user_guide/models_and_results.md).
+- Diagnose common setup and usage problems in
+  [troubleshooting](user_guide/troubleshooting.md).
+- Develop AutoREC with the [contribution guide](development/contributing.md).
 
 ## Project
 
@@ -34,7 +44,21 @@ and example configurations provide detailed walkthroughs and reference inputs:
 getting_started/installation
 getting_started/quickstart
 tutorials/index
-Example configurations <https://github.com/AUTODIAL/AutoREC/tree/main/configs_yaml/examples>
+```
+
+```{toctree}
+:hidden:
+:maxdepth: 1
+:caption: User guide
+
+concepts/architecture
+user_guide/data
+user_guide/configuration
+user_guide/cli
+user_guide/models_and_results
+user_guide/docker
+user_guide/advanced_examples
+user_guide/troubleshooting
 ```
 
 ```{toctree}
@@ -50,6 +74,7 @@ api/index
 :maxdepth: 1
 :caption: Development
 
+development/contributing
 development/documentation
 ```
 
@@ -58,8 +83,8 @@ development/documentation
 :maxdepth: 1
 :caption: Project
 
+project/citation
 Source code <https://github.com/AUTODIAL/AutoREC>
 Report an issue <https://github.com/AUTODIAL/AutoREC/issues>
-Paper <https://arxiv.org/abs/2604.27266>
 License <https://github.com/AUTODIAL/AutoREC/blob/main/LICENSE>
 ```

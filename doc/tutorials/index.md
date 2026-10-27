@@ -46,7 +46,7 @@ through `pipeline_builder`, then demonstrates training and model persistence.
 
 - **Inputs:** `../data/examples/training_dataset.pkl` and
   `../configs_yaml/examples/demo_pipeline_config.yaml`.
-- **Generated files:** models, checkpoints, summaries, metrics, and plots under
+- **Generated files:** model exports, summaries, metrics, and plots under
   `demo_output/`.
 - **Substantial work:** both `agent.train()` cells run reinforcement-learning
   workloads; the configuration-based cell starts a second training run.
