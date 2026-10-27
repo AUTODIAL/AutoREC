@@ -1,9 +1,9 @@
 # Building the documentation
 
-The documentation uses Sphinx, the Furo theme, MyST Markdown, nbsphinx,
-nbsphinx-link, and Sphinx Copybutton. Its dependencies are separate from
-AutoREC's scientific environment. The build does not install or import AutoREC,
-initialize Julia, execute notebooks, or run training workloads.
+The documentation uses Sphinx, the Furo theme, MyST Markdown, Sphinx AutoAPI,
+nbsphinx, nbsphinx-link, and Sphinx Copybutton. Its dependencies are separate
+from AutoREC's scientific environment. The build does not install or import
+AutoREC, initialize Julia, execute notebooks, or run training workloads.
 
 ## Create a documentation environment
 
@@ -135,6 +135,32 @@ them locally. Keep input and output paths on the tutorials index synchronized
 with the notebook cells. The download and source links shown on every rendered
 notebook are configured in `doc/conf.py`.
 
+## Maintain the API reference
+
+Sphinx AutoAPI parses the Python files under `src/autorec/` without importing
+the package. The curated pages under `doc/api/` use explicit `autoapi`
+directives, and `autoapi_generate_api_docs = False` prevents an exhaustive
+module tree from being generated. Keep each Python object on one canonical API
+page so Sphinx does not create duplicate index entries.
+
+The API pages intentionally document the primary workflow classes, public
+factory exports, runtime setup, and a small set of user-facing utilities. Add an
+object only when it is useful as a supported interface. Prefer improving its
+source docstring in a separately reviewed source change; use nearby prose on the
+API page for lifecycle rules, side effects, or other contract details that do
+not belong in the signature.
+
+`doc/conf.py` contains a narrow `autodoc-process-docstring` hook for known
+formatting problems, stale default text, and model-export terminology in the
+current source docstrings. Keep such replacements exact and temporary so they
+cannot silently rewrite unrelated documentation; remove them when the source
+docstrings are corrected in an approved source change.
+
+Do not replace the `autoapi` directives with import-based `automodule`,
+`autoclass`, or `autofunction` directives. A strict API build must continue to
+pass in the isolated documentation environment without AutoREC, TensorFlow,
+JAX, AutoEIS, or Julia installed.
+
 ## Appearance and navigation
 
 `doc/conf.py` selects the existing repository-level `Logo.png` for both color
@@ -144,10 +170,10 @@ and responsive sidebar; no external font service or copied AutoEIS assets are
 required. Small layout and keyboard-focus adjustments live in
 `doc/_static/custom.css`.
 
-The homepage's toctrees group navigation into Getting started, Development, and
-Project. User guides currently link to the existing repository content. Replace
-those links with local pages as the guides are migrated, and add further groups
-only when they contain useful content.
+The homepage's toctrees group navigation into Getting started, Reference,
+Development, and Project. User guides currently link to the existing repository
+content. Replace those links with local pages as the guides are migrated, and
+add further groups only when they contain useful content.
 
 For appearance changes, preview both pages in light and dark modes at desktop
 and narrow mobile widths. Check the sidebar, visible keyboard focus, and code
@@ -156,7 +182,7 @@ without widening the whole page; long navigation labels should wrap.
 
 Keep `conf.py` independent of AutoREC imports and scientific dependencies. The
 documentation uses a `development` release label until release-aware builds are
-introduced. API extraction and automated deployment will be added separately.
+introduced. Automated deployment will be added separately.
 
 `doc/requirements.txt` pins both the documentation tools and their resolved
 dependencies. When updating them, resolve the tools in a fresh Python 3.12

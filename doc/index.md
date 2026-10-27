@@ -16,6 +16,7 @@ and example configurations provide detailed walkthroughs and reference inputs:
 - [Installation](getting_started/installation.md)
 - [Quick Start](getting_started/quickstart.md)
 - [Jupyter tutorials](tutorials/index.md)
+- [API reference](api/index.rst)
 - [Example configurations](https://github.com/AUTODIAL/AutoREC/tree/main/configs_yaml/examples)
 
 ## Project
@@ -34,6 +35,14 @@ getting_started/installation
 getting_started/quickstart
 tutorials/index
 Example configurations <https://github.com/AUTODIAL/AutoREC/tree/main/configs_yaml/examples>
+```
+
+```{toctree}
+:hidden:
+:maxdepth: 1
+:caption: Reference
+
+api/index
 ```
 
 ```{toctree}
