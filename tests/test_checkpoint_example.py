@@ -13,6 +13,16 @@ _SPEC = spec_from_file_location("checkpoint_example_main", _SCRIPT)
 example = module_from_spec(_SPEC)
 _SPEC.loader.exec_module(example)
 
+_RUNNER_SCRIPT = _SCRIPT.with_name("run_sequential.py")
+_RUNNER_SPEC = spec_from_file_location("checkpoint_example_runner", _RUNNER_SCRIPT)
+runner = module_from_spec(_RUNNER_SPEC)
+_RUNNER_SPEC.loader.exec_module(runner)
+
+_COMPARE_SCRIPT = _SCRIPT.with_name("compare_checkpoints.py")
+_COMPARE_SPEC = spec_from_file_location("checkpoint_example_compare", _COMPARE_SCRIPT)
+comparison = module_from_spec(_COMPARE_SPEC)
+_COMPARE_SPEC.loader.exec_module(comparison)
+
 
 def config(tmp_path, *, num_trials=100, resume_from=None):
     return {
@@ -101,3 +111,33 @@ def test_resumed_configuration_allows_only_session_and_output_changes(tmp_path):
 
     with pytest.raises(ValueError, match="agent.start_jump"):
         example._validate_resumed_configuration(value, agent)
+
+
+def test_runner_follows_generated_config_for_open_ended_progress(tmp_path):
+    value = config(tmp_path, num_trials=25)
+    initial = write_config(tmp_path, value)
+    assert runner._next_config(initial).name == "resume-from-trial-00000025.yaml"
+
+    checkpoint = tmp_path / "checkpoints" / "trial-00000025"
+    checkpoint.mkdir(parents=True)
+    (checkpoint / "manifest.json").write_text('{"completed_trials": 25}')
+    value["checkpoint"]["resume_from"] = str(checkpoint)
+    resumed = tmp_path / "resumed.yaml"
+    resumed.write_text(yaml.safe_dump(value, sort_keys=False))
+
+    assert runner._next_config(resumed).name == "resume-from-trial-00000050.yaml"
+
+
+def test_checkpoint_comparison_excludes_only_session_and_output_configuration():
+    first = {
+        "agent": {"num_trials": 1000, "start_jump": 400, "beta_anneal_trials": 595},
+        "output": {"save_dir": "continuous"},
+    }
+    second = {
+        "agent": {"num_trials": 100, "start_jump": 400, "beta_anneal_trials": 595},
+        "output": {"save_dir": "sequential"},
+    }
+
+    assert comparison._comparable_config(first) == comparison._comparable_config(second)
+    second["agent"]["beta_anneal_trials"] = 594
+    assert comparison._comparable_config(first) != comparison._comparable_config(second)
