@@ -46,6 +46,7 @@ def test_save_read_is_exact_and_rng_inert(agent, tmp_path):
         == agent._replay_buffer.state_dict()["buffer"].tobytes()
     )
     assert payloads["config.json"]["agent"]["num_trials"] == 12
+    assert payloads["config.json"]["agent"]["beta_anneal_trials"] == pytest.approx(7.14)
     assert payloads["training.pkl"]["progress"]["completed_trials"] == 0
     with pytest.raises(FileExistsError):
         checkpoint.save_checkpoint(agent, path)

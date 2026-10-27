@@ -115,6 +115,7 @@ class DDQN_ECM:
         beta_jump: float = 1.06,
         start_jump: Optional[float] = None,
         anneal_fraction: Optional[float] = None,
+        beta_anneal_trials: Optional[float] = None,
         final_beta: float = 0.7,
     ):
         """
@@ -238,6 +239,11 @@ class DDQN_ECM:
             Fraction of training during which beta is annealed. If None, computed as
             (3/5 * num_trials) / num_trials - 0.005
 
+        beta_anneal_trials : Optional[float], optional
+            Absolute number of cumulative trials over which beta is annealed. This is
+            mutually exclusive with ``anneal_fraction``. If omitted, the legacy duration
+            ``num_trials * anneal_fraction`` is used.
+
         final_beta : float, optional
             Final importance-sampling correction factor.
         """
@@ -299,16 +305,27 @@ class DDQN_ECM:
         self.beta_jump = beta_jump
         self.start_jump = start_jump
         self.anneal_fraction = anneal_fraction
+        self.beta_anneal_trials = beta_anneal_trials
         self.final_beta = final_beta
 
         # Compute dynamic hyperparameter values if not explicitly set
         self.start_jump = (2 / 5) * num_trials if self.start_jump is None else self.start_jump
 
-        self.anneal_fraction = (
-            (3 / 5 * num_trials) / num_trials - 0.005
-            if self.anneal_fraction is None
-            else self.anneal_fraction
-        )
+        if self.beta_anneal_trials is not None and self.anneal_fraction is not None:
+            raise ValueError("beta_anneal_trials and anneal_fraction are mutually exclusive.")
+        if self.beta_anneal_trials is None:
+            self.anneal_fraction = (
+                (3 / 5 * num_trials) / num_trials - 0.005
+                if self.anneal_fraction is None
+                else self.anneal_fraction
+            )
+            self.beta_anneal_trials = num_trials * self.anneal_fraction
+        elif isinstance(self.beta_anneal_trials, bool) or not isinstance(
+            self.beta_anneal_trials, (int, float)
+        ):
+            raise TypeError("beta_anneal_trials must be a positive number or None.")
+        elif self.beta_anneal_trials <= 0:
+            raise ValueError("beta_anneal_trials must be positive.")
 
         # Create optimizer
         if optimizer is None:
@@ -943,6 +960,7 @@ class DDQN_ECM:
                 "epsilon_min",
                 "start_jump",
                 "anneal_fraction",
+                "beta_anneal_trials",
                 "initial_beta",
                 "final_beta",
             )
@@ -1493,7 +1511,7 @@ class DDQN_ECM:
         if trial > self.start_jump and self.prioritized_replay_beta < 1:
             self.prioritized_replay_beta = self.scheduler(
                 trial - self.start_jump,
-                self.num_trials * self.anneal_fraction,
+                self.beta_anneal_trials,
             )
             if self.prioritized_replay_beta > 1:
                 self.prioritized_replay_beta = 1
@@ -2074,5 +2092,6 @@ class DDQN_ECM:
             "beta_jump": self.beta_jump,
             "start_jump": self.start_jump,
             "anneal_fraction": self.anneal_fraction,
+            "beta_anneal_trials": self.beta_anneal_trials,
             "final_beta": self.final_beta,
         }

@@ -33,7 +33,8 @@ _CONFIG_FIELDS = frozenset(
     "latent_deadloop invalid_terminals initial_epsilon epsilon_min epsilon_decay start_decay "
     "batch_size train_frequency update_target_frequency gradient_steps NN_sleep buffer_capacity "
     "prioritized_replay_alpha prioritized_replay_eps initial_beta beta_jump start_jump "
-    "anneal_fraction final_beta optimizer_config bayesian _save_start _save_frequency hidden_layers".split()
+    "anneal_fraction beta_anneal_trials final_beta optimizer_config bayesian _save_start "
+    "_save_frequency hidden_layers".split()
 )
 _DYNAMIC_FIELDS = frozenset("epsilon prioritized_replay_beta epsilon_list beta_list".split())
 _COMPONENTS = {"config.json", "training.pkl", "environments.pkl", "neural.pkl", "replay.npy"}
@@ -178,7 +179,7 @@ def save_checkpoint(agent, destination) -> Path:
                 stream.flush()
                 os.fsync(stream.fileno())
         manifest = {
-            "format_version": 1,
+            "format_version": 2,
             "completed_trials": agent.completed_trials,
             "runtime": runtime,
             "files": {name: _digest(temporary / name) for name in sorted(_COMPONENTS)},
@@ -204,7 +205,7 @@ def _read_checkpoint(directory):
     manifest = json.loads(manifest_path.read_text())
     if (
         set(manifest) != {"format_version", "completed_trials", "runtime", "files"}
-        or manifest["format_version"] != 1
+        or manifest["format_version"] != 2
     ):
         raise ValueError("Unsupported checkpoint manifest/version.")
     if manifest["runtime"] != _runtime():

@@ -90,6 +90,7 @@ def test_agent_initializes_defaults_and_writes_summary(light_agent, tmp_path):
     assert agent.action_cap == DummyEnv.chromosome_HEAD_len + DummyEnv.chromosome_TAIL_len + 3
     assert agent.start_jump == 4
     assert agent.anneal_fraction == pytest.approx(0.595)
+    assert agent.beta_anneal_trials == pytest.approx(5.95)
     assert agent.prioritized_replay_beta == 0.2
     assert agent.gradient_steps == 1
     assert isinstance(agent.optimizer, agent_module.tf.keras.optimizers.Adam)
@@ -110,6 +111,51 @@ def test_agent_initializes_defaults_and_writes_summary(light_agent, tmp_path):
     assert agent.model_name == tmp_path / "dqn_model.keras"
     assert agent.model_dir == tmp_path / "models"
     assert (tmp_path / "model_summary.txt").read_text() == "dummy model\n"
+
+
+def test_absolute_beta_schedule_matches_legacy_horizon(light_agent, tmp_path):
+    legacy = light_agent(
+        training_env=DummyEnv(),
+        save_dir=tmp_path / "legacy",
+        num_trials=1000,
+        start_jump=400,
+        anneal_fraction=0.595,
+    )
+    absolute = light_agent(
+        training_env=DummyEnv(),
+        save_dir=tmp_path / "absolute",
+        num_trials=100,
+        start_jump=400,
+        beta_anneal_trials=595,
+    )
+
+    for trial in range(1000):
+        legacy._update_beta(trial)
+        absolute._update_beta(trial)
+
+    assert legacy.beta_list == absolute.beta_list
+    assert legacy.prioritized_replay_beta == absolute.prioritized_replay_beta
+
+
+@pytest.mark.parametrize("value", [0, -1, True, "595"])
+def test_absolute_beta_schedule_rejects_invalid_duration(light_agent, tmp_path, value):
+    error = TypeError if value is True or isinstance(value, str) else ValueError
+    with pytest.raises(error, match="beta_anneal_trials"):
+        light_agent(
+            training_env=DummyEnv(),
+            save_dir=tmp_path,
+            beta_anneal_trials=value,
+        )
+
+
+def test_absolute_and_fractional_beta_schedules_are_mutually_exclusive(light_agent, tmp_path):
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        light_agent(
+            training_env=DummyEnv(),
+            save_dir=tmp_path,
+            anneal_fraction=0.595,
+            beta_anneal_trials=595,
+        )
 
 
 def test_agent_forwards_custom_model_configuration(light_agent, tmp_path):
@@ -403,6 +449,7 @@ def test_agent_metadata_records_configuration(light_agent, tmp_path):
         "beta_jump": 1.02,
         "start_jump": 10,
         "anneal_fraction": 0.4,
+        "beta_anneal_trials": 40.0,
         "final_beta": 0.9,
     }
 
