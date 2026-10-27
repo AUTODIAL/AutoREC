@@ -95,6 +95,8 @@ class EISDataPrep:
         "r2_thresh",
     ]
 
+    RAW_EIS_REQUIRED_COLUMNS = ("freq", "Z_real", "Z_imag")
+
     def __init__(
         self,
         path: Union[str, Path],
@@ -311,6 +313,33 @@ class EISDataPrep:
         flatten_Z = np.concatenate([all_values[f] for f in eis_features])
         return flatten_Z
 
+    @classmethod
+    def _validate_raw_eis_data(cls, data: pd.DataFrame, csv_path: Path) -> None:
+        """Validate the on-disk EIS sample contract before preprocessing."""
+        missing_columns = [
+            column for column in cls.RAW_EIS_REQUIRED_COLUMNS if column not in data.columns
+        ]
+        if missing_columns:
+            raise ValueError(
+                f"Missing required columns {missing_columns}; expected "
+                f"{list(cls.RAW_EIS_REQUIRED_COLUMNS)}"
+            )
+
+        if data.empty:
+            raise ValueError("EIS sample CSV contains no data rows")
+
+        non_numeric_columns = [
+            column
+            for column in cls.RAW_EIS_REQUIRED_COLUMNS
+            if not pd.api.types.is_numeric_dtype(data[column])
+        ]
+        if non_numeric_columns:
+            raise ValueError(f"Non-numeric EIS columns: {non_numeric_columns}")
+
+        values = data.loc[:, cls.RAW_EIS_REQUIRED_COLUMNS].to_numpy(dtype=float)
+        if not np.isfinite(values).all():
+            raise ValueError("EIS sample CSV contains NaN or infinite values")
+
     def load_single_csv(self, csv_path: Path, base_path: Path) -> Optional[dict]:
         """
         Load a single CSV file and extract all necessary information.
@@ -330,6 +359,7 @@ class EISDataPrep:
         try:
             # Read CSV data
             data = pd.read_csv(csv_path)
+            self._validate_raw_eis_data(data, csv_path)
 
             # Extract frequency and impedance
             freq = np.array(data["freq"])
