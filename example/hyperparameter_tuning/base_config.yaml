@@ -89,5 +89,6 @@ agent:
   initial_beta: 0.4  # The larger the beta, the lower weights we multiply to the loss
   beta_jump: 1.06
   start_jump: null  # Or start when mean_loss < 1. If null, computed as (2/5) * num_trials
-  anneal_fraction: null  # If null, computed as (3/5 * num_trials) / num_trials - 0.005
+  anneal_fraction: null  # Legacy fraction relative to num_trials; mutually exclusive with beta_anneal_trials
+  beta_anneal_trials: null  # Preferred absolute cumulative-trial duration for open-ended training
   final_beta: 0.7

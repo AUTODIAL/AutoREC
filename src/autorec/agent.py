@@ -153,7 +153,7 @@ class DDQN_ECM:
             Number of episodes executed per trial.
 
         num_trials : int, optional
-            Total number of trials for training.
+            Number of trials to run in the current training session.
 
         gamma : float, optional
             Discount factor controlling the importance of future rewards.
@@ -614,7 +614,7 @@ class DDQN_ECM:
         Parameters
         ----------
         trial : int
-            Current training trial/episode number (0 to num_trials)
+            Cumulative training trial index.
 
         schedule_timesteps : float
             Total number of trials over which to increase beta

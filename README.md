@@ -520,8 +520,8 @@ optimizer:
 Training recommendations:
 
 - Start with the provided default configuration.
-- Increase `num_trials` for diverse datasets or more complex ECM families.
-- Reduce `num_trials` for small demonstrations or narrowly defined circuit sets.
+- Increase `num_trials` to do more work before the next inspection or checkpoint decision.
+- Reduce `num_trials` for shorter interactive sessions or small demonstrations.
 - Keep `gradient_steps: 1` as a baseline. Increasing it samples additional replay mini-batches
   and applies one optimizer update per batch, increasing training cost and potentially
   destabilizing learning if set too high.

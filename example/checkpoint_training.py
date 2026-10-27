@@ -1,7 +1,8 @@
-"""Run one bounded session, then resume it in another process with --resume.
+"""Run one open-ended session, then optionally resume it with --resume.
 
 Set deterministic CPU/thread/hash environment variables before starting Python, as
-described in docs/checkpointing.md. The YAML num_trials is the full training horizon.
+described in docs/checkpointing.md. YAML ``num_trials`` is the current session length;
+``--additional-trials`` can override it for one invocation.
 """
 
 import argparse
@@ -13,7 +14,7 @@ def main():
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--config", type=Path)
     source.add_argument("--resume", type=Path)
-    parser.add_argument("--additional-trials", type=int, default=100)
+    parser.add_argument("--additional-trials", type=int)
     parser.add_argument("--checkpoint-dir", type=Path, default=Path("checkpoints"))
     parser.add_argument("--checkpoint-every", type=int, default=100)
     parser.add_argument("--output-dir", type=Path)
@@ -42,7 +43,8 @@ def main():
         checkpoint_dir=args.checkpoint_dir,
         checkpoint_every=args.checkpoint_every,
     )
-    print(f"Completed {agent.completed_trials}/{agent.num_trials} trials")
+    print(f"Completed cumulative trial {agent.completed_trials}.")
+    print(f"Default next session length: {agent.num_trials} trials.")
 
 
 if __name__ == "__main__":

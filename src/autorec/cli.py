@@ -269,7 +269,9 @@ def _build_parser() -> argparse.ArgumentParser:
         "--resume", type=Path, help="Trusted complete checkpoint directory to resume."
     )
     train.add_argument(
-        "--additional-trials", type=int, help="Additional cumulative trials to run."
+        "--additional-trials",
+        type=int,
+        help="Trials to run in this invocation instead of the stored session length.",
     )
     train.add_argument(
         "--checkpoint-dir", type=Path, help="Directory for new complete checkpoints."

@@ -107,7 +107,7 @@ action_cap = env.chromosome_HEAD_len + env.chromosome_TAIL_len + 3
 agent = DDQN_ECM(
     env,  # The environment to interact with
     action_cap=action_cap,  # Maximum actions per episode
-    num_trials=NUM_TRIALS,  # Total training episodes
+    num_trials=NUM_TRIALS,  # Trials to run in this training session
     save_dir=SAVE_DIR,  # Where to save checkpoints and models
     save_frequency=100,  # Save checkpoint every 100 trials
 )
