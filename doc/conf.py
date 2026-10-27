@@ -42,6 +42,10 @@ nitpick_ignore = [
     ("py:class", "OptimizerConfig"),
 ]
 
+# Local preview URLs are instructions for a server started by the reader, not
+# externally reachable links.
+linkcheck_ignore = [r"http://127\.0\.0\.1(?::\d+)?/.*"]
+
 nbsphinx_execute = "never"
 nbsphinx_link_target_root = ".."
 nbsphinx_prolog = r"""

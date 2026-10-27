@@ -8,7 +8,7 @@ DataFrames for training or evaluation. Use the
 ## Raw CSV input
 
 In `mode="process"`, `path` must be a directory. AutoREC recursively discovers
-`*.csv` files, each with these exact columns:
+`*.csv` files, each containing these case-sensitive columns:
 
 | Column | Meaning |
 | --- | --- |

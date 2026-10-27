@@ -5,8 +5,7 @@ AutoREC's factory accepts a YAML file or Python dictionary with `dataprep`,
 arguments to the corresponding AutoREC class, with a few factory-specific rules
 described below.
 
-Start from
-[`configs_yaml/examples/demo_pipeline_config.yaml`](https://github.com/AUTODIAL/AutoREC/blob/main/configs_yaml/examples/demo_pipeline_config.yaml)
+Start from `configs_yaml/examples/demo_pipeline_config.yaml` in the repository
 and keep experiment-specific copies outside the tracked example.
 
 ## Pipeline structure

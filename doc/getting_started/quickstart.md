@@ -35,9 +35,9 @@ walkthrough rather than a performance benchmark.
 
 ## Prepare raw EIS data
 
-Raw spectra are CSV files with exactly three columns: `freq`, `Z_real`, and
-`Z_imag`. AutoREC recursively processes CSV files in the input directory. Run
-the included small raw-data example with:
+Raw spectrum CSV files must contain `freq`, `Z_real`, and `Z_imag` columns.
+AutoREC recursively processes CSV files in the input directory. Run the included
+small raw-data example with:
 
 ```bash
 autorec preprocess \

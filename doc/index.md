@@ -33,7 +33,7 @@ and example configurations provide detailed walkthroughs and reference inputs:
 
 - [Source code](https://github.com/AUTODIAL/AutoREC)
 - [Report an issue](https://github.com/AUTODIAL/AutoREC/issues)
-- [AutoREC paper](https://arxiv.org/abs/2604.27266)
+- [Citation and paper](project/citation.md)
 - [MIT license](https://github.com/AUTODIAL/AutoREC/blob/main/LICENSE)
 
 ```{toctree}

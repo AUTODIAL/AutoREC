@@ -111,7 +111,7 @@ the protected `github-pages` environment.
 Repository administrators must select **GitHub Actions** as the Pages source in
 **Settings → Pages** before the first deployment. The deployment step reports
 the authoritative public URL. The organization Pages domain currently redirects
-the repository URL to <https://autodiallab.ca/AutoREC/>; that path will return
+the repository URL to `https://autodiallab.ca/AutoREC/`; that path will return
 404 until a successful deployment is available on the default branch.
 
 ## Edit and review pages
