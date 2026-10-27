@@ -1025,8 +1025,9 @@ class DDQN_ECM:
         -------
         dict
             Cumulative histories for the retained run, referencing its result objects.
-            Final exports and plots retain their legacy behavior in this stage.
-            Intermediate model saves retain their original global trial schedule.
+            The current cumulative model, histories, and plots are exported after every
+            non-empty session. Intermediate model saves retain their original global trial
+            schedule.
 
         Notes
         -----
@@ -1154,24 +1155,19 @@ class DDQN_ECM:
             ):
                 self.save_checkpoint(checkpoint_dir / f"trial-{state.completed_trials:08d}")
 
-        print(
-            "Training session is completed"
-            if stop < self.num_trials
-            else "RL loop is completed"
-        )
+        print("Training session is completed" if continuation else "RL loop is completed")
         final_time = time.time()
         print(f"Training took {(final_time - initial_time) / 60:.2f} minutes")
 
-        if stop == self.num_trials:
-            self.model.save(self.model_name)
-            state.success_rate.to_csv(self.save_dir / "success_rate.csv")
-            state.NN_loss.to_csv(self.save_dir / "NN_loss.csv")
-            state.terminal_states.to_csv(self.save_dir / "terminal_states.csv")
-            pd.DataFrame(state.statistical_analysis).to_pickle(
-                self.save_dir / "statistical_analysis.pkl"
-            )
+        self.model.save(self.model_name)
+        state.success_rate.to_csv(self.save_dir / "success_rate.csv")
+        state.NN_loss.to_csv(self.save_dir / "NN_loss.csv")
+        state.terminal_states.to_csv(self.save_dir / "terminal_states.csv")
+        pd.DataFrame(state.statistical_analysis).to_pickle(
+            self.save_dir / "statistical_analysis.pkl"
+        )
 
-            self._plot_training_metrics(state.NN_loss, state.statistical_analysis)
+        self._plot_training_metrics(state.NN_loss, state.statistical_analysis)
 
         return state.results()
 

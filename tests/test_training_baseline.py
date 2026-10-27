@@ -248,10 +248,10 @@ def run_training(
             assert agent._replay_buffer is buffers[0]
             assert agent._training_state.at_trial_boundary
             assert len(results["success_rate"]) == completed * agent.episodes_trial
-            if completed < agent.num_trials:
-                assert "dqn_model.keras" not in trace["saves"]
-                assert trace["plots"] == []
-                assert not (output_dir / "NN_loss.csv").exists()
+            if count != 0:
+                assert trace["saves"][-1] == "dqn_model.keras"
+                assert trace["plots"][-1] == completed
+                assert (output_dir / "NN_loss.csv").exists()
 
     state = {
         "initial_observation": initial_observation,
@@ -311,7 +311,17 @@ def test_continuous_and_split_training_match_exactly(
         sessions=sessions,
         **options,
     )
-    assert state == other_state
+    state_without_exports = dict(state)
+    other_state_without_exports = dict(other_state)
+    state_without_exports["trace"] = {
+        key: value for key, value in state["trace"].items() if key not in ("saves", "plots")
+    }
+    other_state_without_exports["trace"] = {
+        key: value
+        for key, value in other_state["trace"].items()
+        if key not in ("saves", "plots")
+    }
+    assert state_without_exports == other_state_without_exports
     assert (buffer.capacity, buffer.size, buffer.position) == (
         other_buffer.capacity,
         other_buffer.size,
@@ -327,6 +337,11 @@ def test_continuous_and_split_training_match_exactly(
     assert agent.completed_trials == other.completed_trials == 4
     assert state["trace"]["saves"] == ["dqn_model_trial_0.keras", "dqn_model.keras"]
     assert state["trace"]["plots"] == [4]
+    assert other_state["trace"]["plots"] == [
+        sum(agent.num_trials if count is None else count for count in sessions[:index])
+        for index in range(1, len(sessions) + 1)
+        if sessions[index - 1] != 0
+    ]
     for name in ("NN_loss", "success_rate", "terminal_states"):
         pd.testing.assert_frame_equal(results[name], other_results[name], check_exact=True)
         assert (tmp_path / "continuous" / f"{name}.csv").read_bytes() == (
@@ -394,9 +409,9 @@ def test_zero_steps_and_open_ended_default_session_length(continuation_agent):
     partial = agent.train(additional_trials=2)
     assert agent.completed_trials == 2
     assert len(partial["success_rate"]) == 2
-    assert not (agent.save_dir / "success_rate.csv").exists()
-    assert agent.model.save.call_count == 1  # Original intermediate save at global t=0.
-    agent._plot_training_metrics.assert_not_called()
+    assert (agent.save_dir / "success_rate.csv").exists()
+    assert agent.model.save.call_count == 2  # Intermediate t=0 plus the session export.
+    agent._plot_training_metrics.assert_called_once()
     complete = agent.train()  # Continuation mode adds num_trials=4 more trials.
     assert agent.completed_trials == 6
     assert agent._training_state is first_state
@@ -404,15 +419,17 @@ def test_zero_steps_and_open_ended_default_session_length(continuation_agent):
     assert complete["success_rate"]["t"].tolist() == [0, 1, 2, 3, 4, 5]
     assert [call.args[0].name for call in agent.model.save.call_args_list] == [
         "dqn_model_trial_0.keras",
+        "dqn_model.keras",
         "dqn_model_trial_2.keras",
         "dqn_model_trial_4.keras",
+        "dqn_model.keras",
     ]
-    agent._plot_training_metrics.assert_not_called()
-    assert not (agent.save_dir / "success_rate.csv").exists()
+    assert agent._plot_training_metrics.call_count == 2
+    assert (agent.save_dir / "success_rate.csv").exists()
     rng = freeze_state(np.random.get_state()), random.getstate()
     unchanged = agent.train(additional_trials=0)
     assert unchanged["success_rate"] is complete["success_rate"]
-    assert agent.model.save.call_count == 3
+    assert agent.model.save.call_count == 5
     assert (freeze_state(np.random.get_state()), random.getstate()) == rng
 
 
