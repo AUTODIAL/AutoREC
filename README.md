@@ -139,10 +139,10 @@ data_prep.save("processed_training_data.pkl")
 Using the YAML configuration:
 
 ```python
-from autorec.factory import environment_and_agent_builder
+from autorec.factory import pipeline_builder
 
-env, eval_env, agent = environment_and_agent_builder(
-    "PATH/configs_yaml/examples/demo_environment_agent_config.yaml"
+dataprep, dataprep_eval, env, env_eval, agent = pipeline_builder(
+    "PATH/configs_yaml/examples/demo_pipeline_config.yaml"
 )
 
 agent.train()
@@ -152,19 +152,25 @@ agent.save_model("PATH/final_model.keras")
 Using classes directly:
 
 ```python
-from autorec.agent import DDQN_ECM
 from autorec.environment import EIS_ECM_Env
+from autorec.agent import DDQN_ECM
 from autorec.utils import set_global_seed
 
 set_global_seed(42, deterministic_ops=True)
 
-env = EIS_ECM_Env(dataset=dataset, seed=42, cache_enabled=True)
+env = EIS_ECM_Env(
+    dataset=dataset,
+    elements=["+", "/", "R", "L", "P"],
+    seed=42,
+    cache_enabled=True,
+)
 
 agent = DDQN_ECM(
     training_env=env,
     num_trials=1000,
     save_dir="demo_output",
     random_seed=42,
+    gradient_steps=1,
 )
 
 agent.train()
@@ -181,7 +187,7 @@ eval_results = agent.eval_batch_eis(
 )
 
 mean_reward = eval_results['best_reward'].mean()
-success_rate = eval_results['found_solution'].astype(int).sum() / len(eval_results) * 100
+success_rate = eval_results['found_solution'].mean()
 
 print(f"Success rate: {success_rate:.2%}")
 print(f"Mean reward: {mean_reward:.4f}")
@@ -199,26 +205,70 @@ Start there if you are using the package for the first time.
 
 ## Configuration
 
-YAML Configuration examples are available in `configs_yaml/examples/`. The keys and
-values in the YAML files are treated as keyword arguments for instantiating `EIS_ECM_Env`
-and `DDQN_ECM`. Thus, any required argument for those classes should be included in the
-YAML file under the appropriate section.
+YAML Configuration examples are available in `configs_yaml/examples/`. The configuration
+file should consist of the following sections: `dataprep`, `environment`, and `agent`.
+Each section contains key-value pairs that correspond to the arguments of `EISDataPrep`,
+`EIS_ECM_Env`, and `DDQN_ECM` classes, respectively.
 
-The `dataset` argument for `EIS_ECM_Env` is handled differently. Instead of specifying
-`dataset` directly, provide a `dataset_path` to point to the processed dataset pickle
-file. The path can be specified as an absolute or path relative to wherever the script is
-run. The factory loads the dataset from this path and passes it to the environment
-constructor.
+There are some notes about the configuration file:
+
+1. The `dataprep` and `environment` sections can have `training` and `eval` subsections.
+   Without these subsections or if there is only `training` subsection, the same
+   configuration values are used for both training and evaluation.
+1. The `dataprep` section is optional. If it is omitted, the `dataset` argument for
+   `EIS_ECM_Env` must be provided directly in the `environment` section. If the `dataprep`
+   section is present, the `dataset` argument for `EIS_ECM_Env` will be automatically
+   replaced with the processed dataset from `dataprep`.
+1. The `dataprep` can also accept an additional argument `output` to specify the path to
+   save the processed dataset as a pickle file. If `output` is not specified, the
+   processed dataset is not exported.
+1. The `dataset` argument for `EIS_ECM_Env` can be specified as a path to a processed
+   dataset pickle file. The factory loads the dataset from this path and passes it to the
+   environment constructor.
+1. The `training_env` and `eval_env` arguments for `DDQN_ECM` should not be specified
+   directly in the configuration file. Instead, the factory creates the training and
+   evaluation environments from the `environment` section and passes them to the agent
+   constructor.
 
 > [!NOTE]
 > Configuration values may include the special environment variable
 > `${AUTOREC_ROOT}`, which refers to the root directory of the AutoREC repository.
 > The variable is expanded when the configuration file is loaded.
 
+Data preparation options:
+
+```yaml
+path: ${AUTOREC_ROOT}/data/examples/training_dataset.pkl
+mode: load
+evaluation: false
+perform_linKK_validation: false
+tol_linKK: 5.0E-2
+frequency_bounds:
+  - null
+  - null
+frequency_npoints: null
+eis_features:
+  - ImZ
+  - phi
+  - mag
+  - nphi
+output: data/processed_training_dataset.pkl
+```
+
 Environment options:
 
 ```yaml
-dataset_path: "data/examples/training_dataset.pkl"
+dataset: "data/examples/training_dataset.pkl"
+elements:
+  - "+"
+  - "/"
+  - R
+  - L
+  - P
+initial_state:
+  - +RRRRRR
+  - ++RRRRRR
+  - +++RRRRRR
 seed: 42
 chromosome_HEAD_len: 10
 cache_enabled: true
@@ -226,22 +276,83 @@ cache_capacity: 20000
 cache_type: lru
 ```
 
+The `elements` list controls the environment's state encoding and action space. Use the same
+elements in the same order when evaluating or continuing training with a saved model. Both
+the resistor (`R`) and at least one topology operator (`+` or `/`) are required; `L`, `C`,
+and `P` are optional.
+
 Agent options:
 
 ```yaml
-num_trials: 1000
 save_dir: "results/demo"
+save_start: 0
 save_frequency: 500
+action_cap: null
+random_seed: 42
+num_trials: 1000
+episodes_trial: 1
 gamma: 0.99
-learning_rate: 0.0005
-batch_size: 150
-buffer_capacity: 15000
+continuous_deadloop: 2
+latent_deadloop: 4
+invalid_terminals: false
 initial_epsilon: 1.0
 epsilon_min: 0.1
 epsilon_decay: 0.99968
+start_decay: 10
+bayesian: false
+hidden_layers:
+  - type: Dense
+    units: 40
+    activation: relu
+  - type: Dense
+    units: 40
+    activation: relu
+optimizer:
+  type: Adam
+  learning_rate: 0.0005
+batch_size: 150
+train_frequency: 5
+gradient_steps: 1
+update_target_frequency: 1000
+NN_sleep: 1000
+buffer_capacity: 15000
 prioritized_replay_alpha: 0.6
+prioritized_replay_eps: 1.0E-6
 initial_beta: 0.4
+beta_jump: 1.06
+start_jump: null
+anneal_fraction: null
 final_beta: 0.7
+```
+
+`hidden_layers` accepts a sequence of built-in Keras layer configurations. Each item needs a
+`type` matching a class in `tf.keras.layers`; the remaining keys are passed to that layer's
+constructor. AutoREC supplies the input layer and the linear Q-value output layer. For example:
+
+```yaml
+hidden_layers:
+  - type: Dense
+    units: 64
+    activation: relu
+  - type: Dropout
+    rate: 0.2
+  - type: LayerNormalization
+```
+
+`optimizer` accepts a configuration for a built-in Keras optimizer, with `learning_rate` set
+to either a number or a nested built-in Keras schedule configuration. Optimizer and schedule
+types are case-sensitive and must match their Keras class names. A pre-initialized optimizer
+object can also be supplied when constructing `DDQN_ECM` directly. For example:
+
+```yaml
+optimizer:
+  type: Adam
+  learning_rate:
+    type: ExponentialDecay
+    initial_learning_rate: 0.0005
+    decay_steps: 1000
+    decay_rate: 0.96
+    staircase: true
 ```
 
 Training recommendations:
@@ -249,6 +360,9 @@ Training recommendations:
 - Start with the provided default configuration.
 - Increase `num_trials` for diverse datasets or more complex ECM families.
 - Reduce `num_trials` for small demonstrations or narrowly defined circuit sets.
+- Keep `gradient_steps: 1` as a baseline. Increasing it samples additional replay mini-batches
+  and applies one optimizer update per batch, increasing training cost and potentially
+  destabilizing learning if set too high.
 - Keep caching enabled unless memory use becomes a problem.
 
 ## How AutoREC Works
@@ -271,7 +385,8 @@ Training loop:
 2. The DDQN agent chooses an action that mutates one chromosome position.
 3. The environment converts the chromosome to a circuit and fits it to the EIS data.
 4. Rewards are computed from fit quality metrics such as R2 and chi-square as well as circuit complexity.
-5. The agent stores the transition in prioritized replay and updates its policy.
+5. The agent stores the transition in prioritized replay. At each `train_frequency` interval,
+   it samples and updates `gradient_steps` replay mini-batches.
 6. The process continues until a valid solution is found or the action budget is reached.
 
 The trained agent can then propose ECM topologies for new EIS spectra and report
@@ -306,7 +421,15 @@ AutoREC/
 |       |-- agent.py                # DDQN agent and evaluation helpers
 |       |-- data_preparation.py     # Data loading, processing, and validation
 |       |-- environment.py          # RL environment for ECM generation
-|       |-- factory.py              # Builders for config-driven workflows
+|       |-- factory/                # Config-driven builders and model construction
+|       |   |-- __init__.py
+|       |   |-- agent.py            # Agent builder
+|       |   |-- dataprep.py         # Data-preparation builder
+|       |   |-- environment.py      # Environment builder
+|       |   |-- model.py            # Keras model construction from config
+|       |   |-- optimizer.py        # Keras optimizer construction from config
+|       |   |-- pipeline.py         # Complete pipeline builder
+|       |   `-- utils.py            # Configuration loading helpers
 |       |-- utils.py                # Shared utilities
 |       |-- runtime.py              # Runtime setup helpers
 |       `-- optimized_data_structures/
@@ -343,9 +466,16 @@ autorec preprocess \
   --input tutorials/EIS_raw_demo \
   --output data/processed_training_data.pkl \
   --mode process \
+  --perform-linkk-validation \
+  --tol-linkk 0.05 \
+  --frequency-bounds none none \
+  --frequency-npoints 80 \
   --evaluation \
   --summary
 ```
+
+The interpolation options are optional. For `--frequency-bounds`, use `none`
+or `null` for either bound to use that spectrum's minimum or maximum frequency.
 
 To validate an existing processed dataset without reprocessing raw CSV files:
 
@@ -359,15 +489,16 @@ autorec preprocess \
 
 ### 2. Train an Agent
 
-Use `autorec train` with a YAML configuration file containing `environment` and
-`agent` sections. The environment section points to the processed dataset, and
-the agent section controls training parameters and output paths.
+Use `autorec train` with a pipeline YAML configuration containing `environment`
+and `agent` sections and, optionally, a `dataprep` section. Without `dataprep`,
+the environment section must point to the processed dataset. The agent section
+controls training parameters and output paths.
 Use `--output-dir` to override the YAML `agent.save_dir` for training artifacts.
 If omitted, the CLI uses the `agent.save_dir` value from the config file.
 
 ```bash
 autorec train \
-  --config configs_yaml/examples/demo_environment_agent_config.yaml \
+  --config configs_yaml/examples/demo_pipeline_config.yaml \
   --output-dir runs/demo_train
 ```
 
@@ -376,11 +507,13 @@ autorec train \
 Use `autorec evaluate` to load a trained model and evaluate generated ECMs for
 selected rows, a random sample, or the full dataset.
 
+**Note:** The argument `--model` takes precedence over the `model` key inside the YAML configuration. If both are provided, the CLI uses the model path specified by `--model`.
+
 Evaluate specific row positions:
 
 ```bash
 autorec evaluate \
-  --config configs_yaml/examples/demo_environment_agent_config.yaml \
+  --config configs_yaml/examples/demo_pipeline_config.yaml \
   --model models/examples/agent_trained.keras \
   --indices 0,4,10 \
   --output-dir results/evaluate_demo
@@ -390,7 +523,7 @@ Evaluate a random sample:
 
 ```bash
 autorec evaluate \
-  --config configs_yaml/examples/demo_environment_agent_config.yaml \
+  --config configs_yaml/examples/demo_pipeline_config.yaml \
   --model models/examples/agent_trained.keras \
   --num-samples 20 \
   --output-dir results/evaluate_demo
@@ -400,7 +533,7 @@ Evaluate all rows:
 
 ```bash
 autorec evaluate \
-  --config configs_yaml/examples/demo_environment_agent_config.yaml \
+  --config configs_yaml/examples/demo_pipeline_config.yaml \
   --model models/examples/agent_trained.keras \
   --all-rows \
   --output-dir results/evaluate_demo
@@ -422,7 +555,7 @@ a formal evaluation report.
 
 ```bash
 autorec infer \
-  --config configs_yaml/examples/demo_environment_agent_config.yaml \
+  --config configs_yaml/examples/demo_pipeline_config.yaml \
   --model models/examples/agent_trained.keras \
   --indices 0 \
   --max-actions 24 \
@@ -474,7 +607,7 @@ docker run --rm \
   -v "$PWD/runs:/app/runs" \
   -v "$PWD/results:/app/results" \
   autorec:latest train \
-  --config /app/configs_yaml/examples/demo_docker_environment_agent_config.yaml \
+  --config /app/configs_yaml/examples/demo_docker_pipeline_config.yaml \
   --output-dir /app/runs/demo_train
 ```
 
@@ -487,7 +620,7 @@ docker run --rm \
   -v "$PWD/models:/app/models" \
   -v "$PWD/results:/app/results" \
   autorec:latest infer \
-  --config /app/configs_yaml/examples/demo_docker_environment_agent_config.yaml \
+  --config /app/configs_yaml/examples/demo_docker_pipeline_config.yaml \
   --model /app/models/examples/agent_trained.keras \
   --indices 0 \
   --output-dir /app/results/inference_demo

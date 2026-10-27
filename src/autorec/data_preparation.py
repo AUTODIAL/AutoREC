@@ -1,6 +1,6 @@
 from pathlib import Path
 import pickle
-from typing import Optional, Union
+from typing import Optional, Union, Tuple
 
 import numpy as np
 import pandas as pd
@@ -83,6 +83,7 @@ class EISDataPrep:
         "flatten_Z",
         "chi_thresh",
         "r2_thresh",
+        "metadata",
     ]
 
     EVAL_REQUIRED_COLUMNS = [
@@ -100,6 +101,13 @@ class EISDataPrep:
         path: Union[str, Path],
         mode: str = "load",
         evaluation: bool = False,
+        # For lin-KK preprocessing
+        perform_linKK_validation: bool = False,
+        tol_linKK: float = 5e-2,
+        # For frequency-based interpolation
+        frequency_bounds: Tuple[Optional[float], Optional[float]] = (None, None),
+        frequency_npoints: Optional[int] = None,
+        # EIS features to include in the flatten_Z representation
         eis_features: Optional[list] = ["ImZ", "phi", "mag", "nphi"],
     ):
         """
@@ -118,6 +126,22 @@ class EISDataPrep:
             If True, ground truth (true_circuit from folder names) is required for evaluation.
             In 'process' mode: enforces that folder structure provides circuit names
             In 'load' mode: validates that true_circuit column exists and is valid
+        perform_linKK_validation : bool
+            If True, perform lin-KK pre-processing on the EIS data to clean it up before
+            further processing. This may change the length of the EIS data. The check on
+            ``frequency_bounds`` and ``frequency_npoints`` will be done based on the
+            lin-KK-validated data.
+        tol_linKK : float
+            Tolerance for linKK fitting when calculating thresholds (default: 5e-2)
+        frequency_bounds : Tuple[Optional[float], Optional[float]]
+            Lower and upper frequency bounds used for frequency interpolation. If either bound
+            is None, it will use the min/max frequency from the lin-KK-validated data.
+            The interpolated frequency grid is then generated between these bounds using
+            ``frequency_npoints`` points.
+        frequency_npoints : Optional[int]
+            Number of points for frequency interpolation. If None, it will use the number of
+            points in the provided frequency data, assuming all data has the same number of
+            points. If inconsistent, it will raise an error.
         eis_features : list
             List of EIS features to include in the flatten_Z representation.
             Options include:
@@ -147,6 +171,16 @@ class EISDataPrep:
             raise ValueError(
                 f"EISDataPrep: Invalid mode: '{mode}'. Must be 'process' or 'load'"
             )
+
+        # For lin-KK pre-processing
+        self.perform_linKK_validation = perform_linKK_validation
+        self.tol_linKK = tol_linKK
+
+        # For frequency interpolation
+        self._validate_frequency_bounds(frequency_bounds)
+        self._validate_frequency_npoints(frequency_npoints)
+        self.frequency_bounds = frequency_bounds
+        self.frequency_npoints = frequency_npoints
 
         avail_eis_features = ["ReZ", "ImZ", "phi", "mag", "nReZ", "nImZ", "nphi", "nmag"]
         if isinstance(eis_features, str):
@@ -184,6 +218,24 @@ class EISDataPrep:
             if not self.path.is_dir():
                 raise ValueError(f"In 'process' mode, path must be a folder, got: {self.path}")
             self.file_type = None
+
+    def _validate_frequency_bounds(self, frequency_bounds):
+        """
+        Validate the frequency bounds parameters for interpolation.
+        """
+        if np.ndim(frequency_bounds) != 1 or len(frequency_bounds) != 2:
+            raise ValueError(
+                "frequency_bounds must be a tuple/list of two elements: "
+                "(lower_bound, upper_bound)"
+            )
+
+    def _validate_frequency_npoints(self, frequency_npoints):
+        """
+        Validate the frequency_npoints parameter for interpolation.
+        """
+        if frequency_npoints is not None:
+            if not isinstance(frequency_npoints, int) or frequency_npoints <= 2:
+                raise ValueError("frequency_npoints must be an integer greater than 2.")
 
     def calculate_thresholds(
         self,
@@ -258,8 +310,12 @@ class EISDataPrep:
         """
         idx_sort = np.argsort(freq)
         idx_sort_new = np.argsort(freq_new)
-        real_new = CubicSpline(freq[idx_sort], Z[idx_sort].real)(freq_new[idx_sort_new])
-        imag_new = CubicSpline(freq[idx_sort], Z[idx_sort].imag)(freq_new[idx_sort_new])
+        real_new = CubicSpline(freq[idx_sort], Z[idx_sort].real)(
+            freq_new[idx_sort_new], extrapolate=False
+        )
+        imag_new = CubicSpline(freq[idx_sort], Z[idx_sort].imag)(
+            freq_new[idx_sort_new], extrapolate=False
+        )
         # Revert the sorting
         inv_idx_sort_new = np.argsort(idx_sort_new)
         return real_new[inv_idx_sort_new] + 1j * imag_new[inv_idx_sort_new]
@@ -311,14 +367,26 @@ class EISDataPrep:
         flatten_Z = np.concatenate([all_values[f] for f in eis_features])
         return flatten_Z
 
-    def load_single_csv(self, csv_path: Path, base_path: Path) -> Optional[dict]:
+    def process_single_EIS(
+        self,
+        freq: np.array,
+        Z: np.array,
+        csv_path: Path,
+        base_path: Path,
+    ) -> Optional[dict]:
         """
-        Load a single CSV file and extract all necessary information.
+        Process a single EIS data, including:
+        * Frequency interpolation to ensure all data of the same length
+        * Computing EIS representation (flatten_Z)
 
         Parameters
         ----------
+        freq : np.array
+            Frequency values of the EIS data
+        Z : np.array
+            Complex impedance values of the EIS data
         csv_path : Path
-            Path to the CSV file
+            Path to the CSV file (used for sub_id and circuit extraction)
         base_path : Path
             Base path of the data directory
 
@@ -328,15 +396,22 @@ class EISDataPrep:
             Dictionary with processed data, or None if error occurs
         """
         try:
-            # Read CSV data
-            data = pd.read_csv(csv_path)
-
-            # Extract frequency and impedance
-            freq = np.array(data["freq"])
-            Z_true = np.array(data["Z_real"] + 1j * data["Z_imag"])
+            # Frequency interpolation
+            lower_bound, upper_bound = self.frequency_bounds
+            if lower_bound is None:
+                lower_bound = np.min(freq)
+            if upper_bound is None:
+                upper_bound = np.max(freq)
+            freq_new = np.logspace(
+                np.log10(lower_bound),
+                np.log10(upper_bound),
+                self.frequency_npoints,
+                endpoint=True,
+            )
+            Z_new = self.interpolate_EIS(freq, Z, freq_new)
 
             # Normalize and flatten
-            flatten_Z = self.flatten_EIS(Z_true, self.eis_features)
+            flatten_Z = self.flatten_EIS(Z_new, self.eis_features)
 
             # Get circuit from folder name (not filename)
             circuit_string = self.get_circuit_from_folder(csv_path, base_path)
@@ -346,16 +421,17 @@ class EISDataPrep:
 
             # Calculate thresholds (only in process mode)
             # print(f"Processing {sub_id} (circuit: {circuit_string})...")
-            chi_thresh, r2_thresh = self.calculate_thresholds(freq, Z_true)
+            chi_thresh, r2_thresh = self.calculate_thresholds(freq, Z)
 
             return {
                 "sub_id": sub_id,
                 "true_circuit": circuit_string,
-                "freq": freq,
-                "Z_true": Z_true,
+                "freq": freq_new,
+                "Z_true": Z_new,
                 "flatten_Z": flatten_Z,
                 "chi_thresh": chi_thresh,
                 "r2_thresh": r2_thresh,
+                "metadata": self.metadata,
             }
 
         except Exception as e:
@@ -426,19 +502,51 @@ class EISDataPrep:
             Processed dataset with all required columns
         """
         all_data = []
+        self._preprocess_trace = {}
 
         # Recursively get all CSV files from all subfolders
         csv_files = list(self.path.rglob("*.csv"))
+        if len(csv_files) == 0:
+            raise ValueError(f"No CSV files found in folder: {self.path}")
+        self._preprocess_trace["csv_files"] = [str(f) for f in csv_files]
         print(f"Found {len(csv_files)} CSV files (including subfolders)")
 
         # Group files by folder for reporting
         folders = set(f.parent for f in csv_files)
         print(f"Across {len(folders)} folders/subfolders")
 
-        # Process each CSV
-        # TODO: Add a progress bar
+        # Load all the csv_files
+        raw_eis_data = []
         for csv_file in csv_files:
-            data_dict = self.load_single_csv(csv_file, self.path)
+            try:
+                data = pd.read_csv(csv_file)
+                raw_eis_data.append(data)
+            except Exception as e:
+                print(f"Error reading {csv_file}: {e}")
+        self._preprocess_trace["raw_eis_data"] = raw_eis_data
+
+        # First, we do lin-KK preprocessing to clean up the data.
+        # **Note:** This operation can change the length of EIS data.
+        linKK_preprocessed_data = []
+        for eis_data in raw_eis_data:
+            if self.perform_linKK_validation:
+                freq, Z_true = self._perform_linKK_preprocessing(eis_data)
+            else:
+                freq = eis_data["freq"].values
+                Z_true = (eis_data["Z_real"] + 1j * eis_data["Z_imag"]).values
+            linKK_preprocessed_data.append((freq, Z_true))
+        self._preprocess_trace["linKK_preprocessed_data"] = {
+            "freq": [freq.tolist() for freq, _ in linKK_preprocessed_data],
+            "Z_true": [Z.tolist() for _, Z in linKK_preprocessed_data],
+        }
+
+        # Validate the interpolation parameters based on the lin-KK preprocessed data
+        self._validate_interpolation_parameters_after_linKK(linKK_preprocessed_data)
+
+        # Process each EIS data
+        # TODO: Add a progress bar
+        for ii, (freq, Z_true) in enumerate(linKK_preprocessed_data):
+            data_dict = self.process_single_EIS(freq, Z_true, csv_files[ii], self.path)
             if data_dict is not None:
                 all_data.append(data_dict)
 
@@ -454,6 +562,57 @@ class EISDataPrep:
             print(f"Circuits: {sorted(df['true_circuit'].unique())}")
 
         return df
+
+    def _perform_linKK_preprocessing(
+        self, eis_data: pd.DataFrame
+    ) -> Tuple[np.array, np.array]:
+        """Perform lin-KK preprocessing on the raw EIS data.
+
+        Notes
+        -----
+        This calculation may change the length of the EIS data, so it should be done before
+        any length validation.
+        """
+        # Extract frequency and impedance
+        freq = eis_data["freq"].values
+        Z_true = (eis_data["Z_real"] + 1j * eis_data["Z_imag"]).values
+
+        # lin-KK pre-processing
+        freq, Z_true = ae.utils.preprocess_impedance_data(
+            freq, Z_true, tol_linKK=self.tol_linKK
+        )
+        return freq, Z_true
+
+    def _validate_interpolation_parameters_after_linKK(self, linKK_preprocessed_data: list):
+        """Validate the values of the interpolation parameters (frequency_bounds and
+        frequency_npoints) based on the lin-KK preprocessed data.
+        """
+        # Validate frequency_npoints
+        data_npoints = []
+        for freq, _ in linKK_preprocessed_data:
+            data_npoints.append(len(freq))
+        if self.frequency_npoints is None:
+            if len(set(data_npoints)) > 1:
+                raise ValueError(
+                    "Inconsistent frequency lengths across lin-KK preprocessed data. "
+                    "Please specify 'frequency_npoints' for interpolation."
+                )
+            else:
+                self.frequency_npoints = data_npoints[0]
+
+        # Validate frequency_bounds
+        for freq, _ in linKK_preprocessed_data:
+            lower_bound, upper_bound = self.frequency_bounds
+            msg = (
+                "Cannot do extrapolation. "
+                "Some frequency bounds fall outside the data range. "
+                "Refer to the lin-KK-preprocessed data in "
+                "self._preprocess_trace['linKK_preprocessed_data'] for min/max frequencies."
+            )
+            if lower_bound is not None and lower_bound < np.min(freq):
+                raise ValueError(msg)
+            if upper_bound is not None and upper_bound > np.max(freq):
+                raise ValueError(msg)
 
     # ==================== LOADING EXISTING FILES ====================
     def _load_data(self) -> pd.DataFrame:
@@ -474,6 +633,22 @@ class EISDataPrep:
                     f"EISDataPrep: Pickle file does not contain a pandas DataFrame. "
                     f"Found type: {type(data)}"
                 )
+
+            # Update metadata
+            if "metadata" in data.columns:
+                # Update attributes from metadata
+                print("Metadata found in pickle file. Updating attributes accordingly.")
+                metadata = data["metadata"].iloc[0]
+                self.perform_linKK_validation = metadata.get("perform_linKK_validation", False)
+                self.tol_linKK = metadata.get("tol_linKK", 5e-2)
+                self.frequency_bounds = metadata.get("frequency_bounds", (None, None))
+                self.frequency_npoints = metadata.get("frequency_npoints", None)
+                self.eis_features = metadata.get("eis_features", ["ImZ", "phi", "mag", "nphi"])
+            else:
+                # If metadata is missing, then just leave it as None
+                print("Warning: Pickle file does not contain metadata.")
+                data["metadata"] = [None] * len(data)
+
             return data
 
         if self.file_type == "csv":
@@ -883,6 +1058,20 @@ class EISDataPrep:
             print(f"Dataset saved to {output_path}")
         else:
             raise ValueError(f"Unsupported file_type: {file_type}")
+
+    @property
+    def metadata(self) -> dict:
+        """Get metadata about the data preparation process."""
+        return {
+            "path": str(self.path),
+            "mode": self.mode,
+            "evaluation": self.evaluation,
+            "perform_linKK_validation": self.perform_linKK_validation,
+            "tol_linKK": self.tol_linKK,
+            "frequency_bounds": self.frequency_bounds,
+            "frequency_npoints": self.frequency_npoints,
+            "eis_features": self.eis_features,
+        }
 
 
 # ==================== USAGE EXAMPLES ====================
