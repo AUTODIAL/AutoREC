@@ -179,30 +179,32 @@ agent.save_model("PATH/final_model.keras")
 
 #### Continue training in shorter sessions
 
-Set `num_trials` to the **total experiment horizon** when constructing the agent. For a
-1,000-trial experiment, keep `num_trials=1000` even when each call runs only 100 trials:
+`num_trials` is the number of trials to run in the current session. Retained sessions are
+open-ended; AutoREC does not require a total trial count in advance:
 
 ```python
-# Construct a fresh agent with num_trials=1000, using either approach above.
-for ii in range(10):
-    results = agent.train(additional_trials=100)
-    assert agent.completed_trials == (ii + 1) * 100
+# Construct a fresh agent with num_trials=100, using either approach above.
+agent.train(additional_trials=0)  # Initialize retained state without taking a trial.
+for session in range(3):
+    results = agent.train()
+    assert agent.completed_trials == (session + 1) * 100
 ```
 
-`additional_trials` opts into continuation on the same agent. Replay, optimizer and target
-update counters, histories, environment/cache state, and epsilon/beta progress carry forward.
-The beta schedule continues to use the original horizon, never the length of an individual
-call. After opting in, `agent.train()` without arguments finishes the remaining trials.
+`additional_trials=N` opts into continuation and overrides `num_trials` for one call. Replay,
+optimizer and target-update counters, histories, environment/cache state, and epsilon/beta
+progress carry forward. Counts must be nonnegative integers; zero initializes or reads state
+without taking a step. `completed_trials` is cumulative and read-only.
 
-The count must be a nonnegative integer; exceeding the horizon raises an error.
-`additional_trials=0` initializes or reads the retained state without taking a training step.
-At completion, calls requesting zero or the remaining trials are no-ops. `completed_trials`
-is read-only. Changing the retained horizon or epsilon/beta schedule parameters is rejected.
+Schedules use cumulative trial indices. For an open-ended run, specify beta timing in absolute
+trials, for example `start_jump=400, beta_anneal_trials=595`. The legacy
+`anneal_fraction` remains supported when `beta_anneal_trials` is omitted, but it is resolved
+relative to the `num_trials` used when constructing the agent. The two options are mutually
+exclusive. Changing resolved epsilon/beta schedules during continuation is rejected.
 
 Partial calls return cumulative histories. Treat these as read-only references, not immutable
-snapshots. Final model/results/plots are written at the horizon; intermediate model exports
-keep their existing global trial schedule. Without opting into continuation, repeated
-no-argument `train()` calls keep their existing reset behavior.
+snapshots. The current cumulative model/results/plots are written after every non-empty
+session; intermediate model exports keep their existing global trial schedule. Without opting
+into continuation, repeated no-argument `train()` calls keep their existing reset behavior.
 
 Bounded calls retain state in one live Python process. Complete checkpoints also support
 [fresh-process resumption](docs/checkpointing.md) and recovery from the last saved trial.
@@ -212,19 +214,18 @@ mutate histories, or perform evaluation or other work that changes the training 
 environment/cache, or models. Real-fitting and GPU reproducibility require separate
 qualification; the regression tests use controlled fitting and CPU networks.
 
-See [example/bounded_training.py](example/bounded_training.py) for the configuration-based
-workflow:
+See [example/checkpoint](example/checkpoint/) for the configuration-based workflow:
 
 ```bash
-python example/bounded_training.py --config PATH/config.yaml --trials-per-session 100
+python example/checkpoint/main_factory.py --config example/checkpoint/sequential_config.yaml
 ```
 
-For complete training checkpoints, configure the full horizon once and save at trial boundaries:
+Complete checkpoints save at completed-trial boundaries:
 
 ```python
-agent.train(additional_trials=100, checkpoint_dir="checkpoints", checkpoint_every=100)
-agent = DDQN_ECM.from_checkpoint("checkpoints/trial-00000100")
-agent.train(additional_trials=100, checkpoint_dir="checkpoints", checkpoint_every=100)
+agent.train(checkpoint_dir="checkpoints")  # Uses this agent's num_trials.
+agent = DDQN_ECM.from_checkpoint("checkpoints/trial-00000100", num_trials=100)
+agent.train(checkpoint_dir="checkpoints")
 ```
 
 The CLI accepts `autorec train --resume CHECKPOINT --additional-trials 100`.
@@ -482,6 +483,7 @@ initial_beta: 0.4
 beta_jump: 1.06
 start_jump: null
 anneal_fraction: null
+beta_anneal_trials: null
 final_beta: 0.7
 ```
 

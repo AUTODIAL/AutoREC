@@ -11,13 +11,13 @@ export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
 For routine edits, run the unit tests:
 
 ```bash
-autorec_env/bin/python -m pytest -q -m "not integration"
+autorec_env/bin/python -m pytest -q tests -m "not integration"
 ```
 
 Run the complete regular suite before merging:
 
 ```bash
-autorec_env/bin/python -m pytest -q
+autorec_env/bin/python -m pytest -q tests
 ```
 
 Plain `pytest` and the existing CI command still include integration tests. The marker
@@ -25,7 +25,7 @@ only provides an explicit way to select a faster subset; nothing is deselected b
 To run just the complete-training and fresh-process checks:
 
 ```bash
-autorec_env/bin/python -m pytest -q -m integration
+autorec_env/bin/python -m pytest -q tests -m integration
 ```
 
 The 1,000-trial acceptance test remains opt-in:

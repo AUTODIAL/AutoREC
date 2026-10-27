@@ -1,9 +1,10 @@
 # Training checkpoints
 
 AutoREC can save complete training state at completed-trial boundaries and resume in a
-new Python process. Configure the **total horizon** once: `num_trials=1000` means 1,000
-cumulative trials, even when each session runs only 100. Epsilon and beta schedules keep
-that original horizon. Do not change training settings or reseed after restoration.
+new Python process. `num_trials` is the amount of work requested for the current session;
+the cumulative `completed_trials` counter comes from the checkpoint. Training is open-ended,
+so users can inspect each session and decide whether to continue without declaring a final
+trial count. Do not change training-critical settings or reseed after restoration.
 
 ## Python workflow
 
@@ -17,8 +18,8 @@ export TF_NUM_INTRAOP_THREADS=1 TF_NUM_INTEROP_THREADS=1
 export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
 ```
 
-Create the initial agent using the existing factory. Its YAML `agent.num_trials` is the
-full horizon; `additional_trials` is only the work to perform in this session.
+Create the initial agent using the existing factory. For schedules that must not depend on
+session length, use absolute cumulative-trial settings such as `beta_anneal_trials`.
 
 ```python
 from autorec.runtime import configure_autorec_runtime
@@ -28,12 +29,8 @@ from autorec.factory import pipeline_builder
 from autorec.utils import set_global_seed
 
 set_global_seed(42, deterministic_ops=True)  # Initial run only
-_, _, _, _, agent = pipeline_builder("config.yaml")  # num_trials: 1000
-agent.train(
-    additional_trials=100,
-    checkpoint_dir="checkpoints",
-    checkpoint_every=100,
-)
+_, _, _, _, agent = pipeline_builder("config.yaml")  # num_trials: 100
+agent.train(checkpoint_dir="checkpoints")
 assert agent.completed_trials == 100
 ```
 
@@ -47,14 +44,30 @@ import tensorflow as tf
 from autorec.agent import DDQN_ECM
 
 tf.config.experimental.enable_op_determinism()
-agent = DDQN_ECM.from_checkpoint("checkpoints/trial-00000100")
-agent.train(additional_trials=100, checkpoint_dir="checkpoints", checkpoint_every=100)
+agent = DDQN_ECM.from_checkpoint("checkpoints/trial-00000100", num_trials=100)
+agent.train(checkpoint_dir="checkpoints")
 assert agent.completed_trials == 200
 ```
 
-Repeat with `trial-00000200`, and so on, until 1,000 cumulative trials. Calling
-`agent.train()` on a restored agent completes the remaining horizon. Requesting more than
-the remaining trials raises an error. A completed restored run is a no-op.
+At this point the user can assess the cumulative results and either stop or repeat with
+`trial-00000200`. Calling `agent.train()` on a restored agent advances by its current
+`num_trials`; `additional_trials=N` overrides that count for one invocation. There is no
+cumulative ceiling. A zero-trial call remains a no-op.
+
+The beta scheduler previously accepted only `anneal_fraction`, whose effective duration is
+`num_trials * anneal_fraction`. That legacy option remains supported. Open-ended workflows
+should instead set the mutually exclusive absolute duration, for example:
+
+```yaml
+agent:
+  num_trials: 100
+  start_jump: 400
+  beta_anneal_trials: 595
+```
+
+This produces the same beta trajectory through cumulative trial 1,000 as the legacy
+`num_trials: 1000`, `start_jump: 400`, `anneal_fraction: 0.595` configuration. Beta remains
+at its final value if training continues beyond that point.
 
 Manual snapshots use `agent.save_checkpoint("checkpoints/my-boundary")`. To save before
 the first trial, first call `agent.train(additional_trials=0)`. Zero-trial calls do not
@@ -64,8 +77,8 @@ also saves at cumulative multiples of N. Automatic names use eight digits, for e
 
 Without checkpoint arguments, `agent.train()` and existing model exports retain their
 previous behavior. `save_model()` and `load_model()` remain model-only APIs and cannot
-resume complete training. Existing bounded training calls also remain available without
-writing checkpoints. See [the runnable session example](../example/checkpoint_training.py).
+resume complete training. Every non-empty retained session exports the current cumulative
+model, histories and plots. See [the runnable open-ended example](../example/checkpoint/).
 
 ## CLI workflow
 
@@ -76,23 +89,25 @@ processes; neither preprocessing nor the original dataset paths are needed on re
 # Ordinary training remains supported.
 autorec train --config config.yaml
 
-# Start a 1,000-trial configured run, doing only the first 100 trials.
-autorec train --config config.yaml --additional-trials 100 \
-  --checkpoint-dir checkpoints --checkpoint-every 100
+# Start a configured 100-trial session.
+autorec train --config config.yaml --checkpoint-dir checkpoints
 
 # Perform the next 100 trials using the saved configuration and prepared data.
 autorec train --resume checkpoints/trial-00000100 --additional-trials 100 \
   --checkpoint-dir checkpoints --checkpoint-every 100
 
-# Complete the remaining horizon, optionally relocating result/model outputs.
-autorec train --resume checkpoints/trial-00000200 --output-dir resumed-results
+# Use the stored session length, optionally relocating result/model outputs.
+autorec train --resume checkpoints/trial-00000200 --output-dir resumed-results \
+  --checkpoint-dir checkpoints
 ```
 
 `--config` and `--resume` are mutually exclusive. Resume does not call `set_global_seed`;
 `--seed` applies only to initial training. `--non-deterministic` must agree with the saved
 runtime, but exact reproducibility requires deterministic operations. `--output-dir`
 relocates exported results and the final model; it does not change training configuration.
-Checkpoint paths and frequencies can change freely between sessions.
+Checkpoint paths and frequencies can change freely between sessions. The Python API also
+allows `from_checkpoint(..., num_trials=N)` to change the next session length; the CLI can
+use `--additional-trials N` for the same per-invocation override.
 
 ## Contents and persistence
 
@@ -145,12 +160,13 @@ a new agent; it never partially overwrites an existing one. On failure, the supp
 caller RNG streams are restored. Output directories can have been created before a late
 filesystem/restoration error.
 
-Format version 1 requires identical AutoREC Python source and recorded Python/numerical
+Format version 2 requires identical AutoREC Python source and recorded Python/numerical
 library versions, OS/platform, threading settings, TensorFlow determinism and backend
 settings. This is deliberately conservative: there is no migration or best-effort loading.
 Source edits, including implementation updates between stages, invalidate old checkpoints.
-Output relocation is supported; changing architecture, optimizer, data, hyperparameters or
-the original horizon is not a resume operation. Runtime matching does not prove identical
+Output relocation and session-length changes are supported; changing architecture,
+optimizer, data, or schedule hyperparameters is not a resume operation. Runtime matching
+does not prove identical
 hardware or native-library builds: use the same hardware and software environment as well.
 
 Checkpoint support currently requires CPU execution and ordinary `DDQN_ECM`/
@@ -164,10 +180,12 @@ its existing support for configurations outside this checkpoint subset.
 
 Only completed trials are checkpoint boundaries. An interruption during a trial discards
 work since the last saved boundary; reload that checkpoint. Mid-episode gradients, temporary
-episode histories, and fitting processes are not snapshotted. Do not run evaluation,
-mutate data/caches/history, change settings, or consume global RNG streams between saving
-and the continuation being compared. Shared mutable caches between distinct environments
-and arbitrary external object aliasing are outside the supported configuration.
+episode histories, and fitting processes are not snapshotted. Do not evaluate the live
+training agent, mutate data/caches/history, change settings, or consume its RNG streams before
+continuing it. For inspect-and-decide workflows, load the immutable checkpoint in a separate
+evaluation process and later resume the original checkpoint. Shared mutable caches between
+distinct environments and arbitrary external object aliasing are outside the supported
+configuration.
 
 ## Validation and limits
 
