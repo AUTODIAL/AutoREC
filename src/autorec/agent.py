@@ -281,6 +281,8 @@ class DDQN_ECM:
         self.model_dir.mkdir(exist_ok=True)
 
         if hidden_layers is None:
+            print("No hidden_layers provided. Using default hidden layers configuration:")
+            print("2 hidden dense layers, each with 40 units and ReLU activation.")
             self.hidden_layers = [config.copy() for config in default_hidden_layers]
         else:
             self.hidden_layers = hidden_layers
