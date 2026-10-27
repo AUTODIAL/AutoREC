@@ -75,7 +75,7 @@ python -m http.server --bind 127.0.0.1 --directory doc/_build/html 8000
 Open <http://127.0.0.1:8000/>. Rebuild after editing sources, then refresh the
 browser. Stop the server with `Ctrl+C`.
 
-## Automated builds and review artifacts
+## Automated builds, review artifacts, and deployment
 
 The `Documentation` GitHub Actions workflow in `.github/workflows/docs.yml` runs
 on pull requests, pushes to `main`, and manual dispatch. It uses Python 3.12 in a
@@ -98,9 +98,21 @@ After a successful build, the workflow uploads `doc/_build/html/` as the
 
 4. Open <http://127.0.0.1:8000/> to review the built pages.
 
-The workflow has read-only repository permissions and does not deploy a website.
-An artifact is available only when the build and upload steps succeed. Subsequent
-updates to the same pull request or branch cancel an older in-progress build.
+The build job has read-only repository permissions. An artifact is available
+only when the build and upload steps succeed. Subsequent updates to the same pull
+request or branch cancel an older in-progress build.
+
+Pull requests validate and upload the review artifact but never deploy. A
+successful push to `main`, or a manual run on `main`, also packages the same HTML
+as a GitHub Pages artifact. A separate deployment job has only the `pages: write`
+and OpenID Connect permissions required by GitHub Pages and publishes through
+the protected `github-pages` environment.
+
+Repository administrators must select **GitHub Actions** as the Pages source in
+**Settings → Pages** before the first deployment. The deployment step reports
+the authoritative public URL. The organization Pages domain currently redirects
+the repository URL to <https://autodiallab.ca/AutoREC/>; that path will return
+404 until a successful deployment is available on the default branch.
 
 ## Edit and review pages
 
@@ -214,7 +226,7 @@ without widening the whole page; long navigation labels should wrap.
 
 Keep `conf.py` independent of AutoREC imports and scientific dependencies. The
 documentation uses a `development` release label until release-aware builds are
-introduced. Automated deployment will be added separately.
+introduced.
 
 `doc/requirements.txt` pins both the documentation tools and their resolved
 dependencies. When updating them, resolve the tools in a fresh Python 3.12
