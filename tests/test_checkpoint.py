@@ -98,15 +98,28 @@ def test_unfinished_trial_rejected(agent, tmp_path):
 
 def test_restore_before_optimizer_slots_and_relocate(agent, tmp_path):
     path = checkpoint.save_checkpoint(agent, tmp_path / "checkpoint")
-    restored = checkpoint.load_checkpoint(path, save_dir=tmp_path / "relocated")
+    restored = checkpoint.load_checkpoint(path, save_dir=tmp_path / "relocated", num_trials=3)
     assert restored.completed_trials == 0
     assert restored.training_env is restored.eval_env
     assert restored.optimizer.built is False
     assert restored.save_dir == tmp_path / "relocated"
+    assert restored.num_trials == 3
     assert restored._continuation_mode is True
     assert exact(checkpoint._capture(agent)["training.pkl"]) == exact(
         checkpoint._capture(restored)["training.pkl"]
     )
+
+
+@pytest.mark.parametrize("value", [0, -1, True, 1.5, "3"])
+def test_invalid_restored_session_length_is_rng_inert(agent, tmp_path, value):
+    path = checkpoint.save_checkpoint(agent, tmp_path / "checkpoint")
+    before = rng_state_dict()
+    error = TypeError if value is True or not isinstance(value, int) else ValueError
+
+    with pytest.raises(error, match="num_trials"):
+        checkpoint.load_checkpoint(path, num_trials=value)
+
+    assert pickle.dumps(before) == pickle.dumps(rng_state_dict())
 
 
 def test_failed_reconstruction_restores_caller_rng(agent, tmp_path, monkeypatch):

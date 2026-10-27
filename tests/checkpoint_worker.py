@@ -47,6 +47,8 @@ def exact(value):
 def signature(agent):
     payloads = _capture(agent)
     payloads["config.json"].pop("output")
+    # Session length is intentionally mutable and does not affect cumulative training state.
+    payloads["config.json"]["agent"].pop("num_trials")
     return exact(payloads)
 
 
@@ -54,7 +56,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("directory", type=Path)
     parser.add_argument("--resume", type=Path)
-    parser.add_argument("--horizon", type=int, default=12)
+    parser.add_argument("--schedule-trials", type=int, default=12)
     parser.add_argument("--count", type=int, default=12)
     parser.add_argument("--cache", default="lru")
     parser.add_argument("--save-every", type=int)
@@ -88,22 +90,26 @@ def main():
 
     patches.setattr(DDQN_ECM, "_interact_update", traced)
     if args.resume:
-        agent = DDQN_ECM.from_checkpoint(args.resume, save_dir=args.directory)
+        agent = DDQN_ECM.from_checkpoint(
+            args.resume, save_dir=args.directory, num_trials=args.count
+        )
     else:
         agent = DDQN_ECM(
             make_env(args.cache),
             save_dir=args.directory,
-            num_trials=args.horizon,
+            num_trials=args.count,
             hidden_layers=[{"type": "Dense", "units": 4, "activation": "relu"}],
             action_cap=2,
             batch_size=2,
             buffer_capacity=7,
             NN_sleep=3,
-            train_frequency=3 if args.horizon < 1000 else 197,
-            update_target_frequency=5 if args.horizon < 1000 else 137,
-            epsilon_decay=0.995 if args.horizon < 1000 else 0.99999,
+            train_frequency=3 if args.schedule_trials < 1000 else 197,
+            update_target_frequency=5 if args.schedule_trials < 1000 else 137,
+            epsilon_decay=0.995 if args.schedule_trials < 1000 else 0.99999,
             start_decay=1,
-            save_start=args.horizon + 1,
+            start_jump=(2 / 5) * args.schedule_trials,
+            beta_anneal_trials=0.595 * args.schedule_trials,
+            save_start=args.schedule_trials + 1,
             optimizer={
                 "type": "Adam",
                 "learning_rate": {
@@ -115,7 +121,6 @@ def main():
             },
         )
     agent.train(
-        additional_trials=args.count,
         checkpoint_dir=args.directory / "periodic" if args.save_every else None,
         checkpoint_every=args.save_every,
     )

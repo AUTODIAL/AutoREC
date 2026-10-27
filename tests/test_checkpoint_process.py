@@ -12,13 +12,15 @@ import pytest
 pytestmark = pytest.mark.integration
 
 
-def run_worker(directory, *, resume=None, horizon=12, count=12, cache="lru", save_every=None):
+def run_worker(
+    directory, *, resume=None, schedule_trials=12, count=12, cache="lru", save_every=None
+):
     command = [
         sys.executable,
         str(Path(__file__).with_name("checkpoint_worker.py")),
         str(directory),
-        "--horizon",
-        str(horizon),
+        "--schedule-trials",
+        str(schedule_trials),
         "--count",
         str(count),
         "--cache",
@@ -48,10 +50,14 @@ def run_worker(directory, *, resume=None, horizon=12, count=12, cache="lru", sav
 
 def compare_sessions(tmp_path, *, horizon, counts, cache):
     continuous = run_worker(
-        tmp_path / "continuous", cache=cache, horizon=horizon, count=horizon
+        tmp_path / "continuous", cache=cache, schedule_trials=horizon, count=horizon
     )
     saving = run_worker(
-        tmp_path / "saving", cache=cache, horizon=horizon, count=horizon, save_every=counts[0]
+        tmp_path / "saving",
+        cache=cache,
+        schedule_trials=horizon,
+        count=horizon,
+        save_every=counts[0],
     )
     assert continuous == saving
     resume = None
@@ -63,7 +69,7 @@ def compare_sessions(tmp_path, *, horizon, counts, cache):
             directory,
             resume=resume,
             cache=cache,
-            horizon=horizon,
+            schedule_trials=horizon,
             count=count,
             save_every=counts[0],
         )

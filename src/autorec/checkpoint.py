@@ -236,16 +236,20 @@ def _read_checkpoint(directory):
     return payloads
 
 
-def load_checkpoint(directory, *, save_dir=None):
+def load_checkpoint(directory, *, save_dir=None, num_trials=None):
     """Build a fresh agent from a trusted checkpoint and restore RNG streams LAST.
 
-    Only output relocation is supported in this stage. The next ``train()`` advances by the
-    stored ``num_trials`` session length, while ``train(additional_trials=n)`` overrides that
-    count for one call. Failed loads restore the caller's supported RNG streams and never
-    modify an existing agent.
+    ``save_dir`` may relocate outputs and ``num_trials`` may select the next session length.
+    All training-critical configuration remains checkpoint-owned. Failed loads restore the
+    caller's supported RNG streams and never modify an existing agent.
     """
     from autorec.agent import DDQN_ECM, _TrainingState
 
+    if num_trials is not None:
+        if isinstance(num_trials, bool) or not isinstance(num_trials, int):
+            raise TypeError("num_trials must be a positive integer or None.")
+        if num_trials < 1:
+            raise ValueError("num_trials must be positive.")
     previous_rng = rng_state_dict()
     try:
         payloads = _read_checkpoint(directory)
@@ -265,6 +269,8 @@ def load_checkpoint(directory, *, save_dir=None):
         agent = DDQN_ECM.__new__(DDQN_ECM)
         agent.__dict__.update(config["agent"])
         agent.__dict__.update(training["attributes"])
+        if num_trials is not None:
+            agent.num_trials = num_trials
         agent._training_state = _TrainingState(**training["progress"])
         progress = agent._training_state
         for name in (

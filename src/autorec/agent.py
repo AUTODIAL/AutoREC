@@ -977,13 +977,19 @@ class DDQN_ECM:
         return save_checkpoint(self, directory)
 
     @classmethod
-    def from_checkpoint(cls, directory: str | Path, *, save_dir: str | Path | None = None):
-        """Restore a fresh agent from a trusted checkpoint; optionally relocate outputs."""
+    def from_checkpoint(
+        cls,
+        directory: str | Path,
+        *,
+        save_dir: str | Path | None = None,
+        num_trials: int | None = None,
+    ):
+        """Restore a trusted checkpoint with optional output and session-length overrides."""
         from autorec.checkpoint import load_checkpoint
 
         if cls is not DDQN_ECM:
             raise TypeError("Checkpoint restoration supports DDQN_ECM only.")
-        return load_checkpoint(directory, save_dir=save_dir)
+        return load_checkpoint(directory, save_dir=save_dir, num_trials=num_trials)
 
     def train(
         self,
