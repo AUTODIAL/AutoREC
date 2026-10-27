@@ -242,7 +242,7 @@ def run_training(
         completed = 0
         for count in sessions:
             results = agent.train(additional_trials=count)
-            completed = agent.num_trials if count is None else completed + count
+            completed += agent.num_trials if count is None else count
             assert agent.completed_trials == completed
             assert len(buffers) == 1
             assert agent._replay_buffer is buffers[0]
@@ -281,10 +281,10 @@ def run_training(
     ("sessions", "warmup", "cache_type", "default_beta_schedule"),
     [
         ((1, 1, 1, 1), 3, "lru", False),
-        ((1, None), 5, "clock", True),
+        ((1, 3), 5, "clock", True),
         ((0, 2, 0, 2), 3, "clock", True),
     ],
-    ids=["one-trial-sessions", "finish-after-warmup-boundary", "zero-length-sessions"],
+    ids=["one-trial-sessions", "split-after-warmup-boundary", "zero-length-sessions"],
 )
 def test_continuous_and_split_training_match_exactly(
     tmp_path,
@@ -360,7 +360,7 @@ def continuation_agent(tmp_path, monkeypatch, environment_factory):
 
 @pytest.mark.parametrize(
     ("count", "error"),
-    [(True, TypeError), (1.5, TypeError), ("1", TypeError), (-1, ValueError), (5, ValueError)],
+    [(True, TypeError), (1.5, TypeError), ("1", TypeError), (-1, ValueError)],
 )
 def test_invalid_trial_count_does_not_initialize_or_consume_randomness(
     continuation_agent, count, error
@@ -377,7 +377,7 @@ def test_invalid_trial_count_does_not_initialize_or_consume_randomness(
     agent.model.save.assert_not_called()
 
 
-def test_zero_steps_finish_remaining_and_completed_noop(continuation_agent):
+def test_zero_steps_and_open_ended_default_session_length(continuation_agent):
     agent = continuation_agent
     rng = freeze_state(np.random.get_state()), random.getstate()
     empty = agent.train(additional_trials=0)
@@ -397,57 +397,57 @@ def test_zero_steps_finish_remaining_and_completed_noop(continuation_agent):
     assert not (agent.save_dir / "success_rate.csv").exists()
     assert agent.model.save.call_count == 1  # Original intermediate save at global t=0.
     agent._plot_training_metrics.assert_not_called()
-    rng = freeze_state(np.random.get_state()), random.getstate()
-    with pytest.raises(ValueError, match="exceed"):
-        agent.train(additional_trials=3)
-    unchanged = agent.train(additional_trials=0)
-    assert unchanged["success_rate"] is partial["success_rate"]
-    assert agent.completed_trials == 2
-    assert agent.model.save.call_count == 1
-    assert (freeze_state(np.random.get_state()), random.getstate()) == rng
-
-    complete = agent.train()  # Continuation mode completes the remaining two trials.
-    assert agent.completed_trials == 4
+    complete = agent.train()  # Continuation mode adds num_trials=4 more trials.
+    assert agent.completed_trials == 6
     assert agent._training_state is first_state
     assert agent._replay_buffer is first_buffer
-    assert complete["success_rate"]["t"].tolist() == [0, 1, 2, 3]
+    assert complete["success_rate"]["t"].tolist() == [0, 1, 2, 3, 4, 5]
     assert [call.args[0].name for call in agent.model.save.call_args_list] == [
         "dqn_model_trial_0.keras",
         "dqn_model_trial_2.keras",
-        "dqn_model.keras",
+        "dqn_model_trial_4.keras",
     ]
-    agent._plot_training_metrics.assert_called_once()
-    assert (agent.save_dir / "success_rate.csv").exists()
+    agent._plot_training_metrics.assert_not_called()
+    assert not (agent.save_dir / "success_rate.csv").exists()
     rng = freeze_state(np.random.get_state()), random.getstate()
-    for count in (None, 0):
-        repeated = agent.train(additional_trials=count)
-        assert repeated["success_rate"] is complete["success_rate"]
+    unchanged = agent.train(additional_trials=0)
+    assert unchanged["success_rate"] is complete["success_rate"]
     assert agent.model.save.call_count == 3
-    agent._plot_training_metrics.assert_called_once()
     assert (freeze_state(np.random.get_state()), random.getstate()) == rng
+
+
+def test_num_trials_can_change_between_open_ended_sessions(continuation_agent):
+    agent = continuation_agent
+    agent.train(additional_trials=1)
+    agent.num_trials = 2
+
+    results = agent.train()
+
+    assert agent.completed_trials == 3
+    assert results["success_rate"]["t"].tolist() == [0, 1, 2]
 
 
 @pytest.mark.parametrize(
     "name",
     [
-        "num_trials",
         "start_decay",
         "epsilon_decay",
         "epsilon_min",
         "start_jump",
         "anneal_fraction",
+        "beta_anneal_trials",
         "initial_beta",
         "final_beta",
     ],
 )
-def test_continuation_rejects_changed_horizon_or_schedules(continuation_agent, name):
+def test_continuation_rejects_changed_schedules(continuation_agent, name):
     agent = continuation_agent
     agent.train(additional_trials=1)
     progress = training_progress(agent._training_state)
     replay = array_state(agent._replay_buffer.buffer)
     rng = freeze_state(np.random.get_state()), random.getstate()
     setattr(agent, name, getattr(agent, name) + 1)
-    with pytest.raises(ValueError, match="horizon or epsilon/beta schedules"):
+    with pytest.raises(ValueError, match="epsilon/beta schedules"):
         agent.train(additional_trials=1)
     assert training_progress(agent._training_state) == progress
     assert array_state(agent._replay_buffer.buffer) == replay

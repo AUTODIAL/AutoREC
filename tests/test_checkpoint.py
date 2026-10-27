@@ -140,10 +140,10 @@ def test_checkpoint_interval_requires_directory(agent):
     assert agent.completed_trials == 0
 
 
-def test_public_checkpoint_api_and_completed_run_noop(agent, tmp_path):
-    agent._training_state.completed_trials = agent.num_trials
+def test_public_checkpoint_api_accepts_progress_beyond_session_length(agent, tmp_path):
+    agent._training_state.completed_trials = agent.num_trials + 1
     path = agent.save_checkpoint(tmp_path / "checkpoint")
     restored = DDQN_ECM.from_checkpoint(path, save_dir=tmp_path / "resumed")
     before = exact(checkpoint._capture(restored))
-    restored.train()
+    restored.train(additional_trials=0)
     assert exact(checkpoint._capture(restored)) == before

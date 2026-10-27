@@ -113,7 +113,7 @@ def _capture(agent):
     if not state.at_trial_boundary:
         raise ValueError("Checkpoints require a completed-trial boundary.")
     if state.schedule_config != agent._training_schedule_config():
-        raise ValueError("The training horizon or schedules have changed.")
+        raise ValueError("The epsilon/beta schedules have changed.")
     replay = agent._replay_buffer.state_dict()
     config = {
         "agent": {key: getattr(agent, key) for key in sorted(_CONFIG_FIELDS)},
@@ -239,10 +239,10 @@ def _read_checkpoint(directory):
 def load_checkpoint(directory, *, save_dir=None):
     """Build a fresh agent from a trusted checkpoint and restore RNG streams LAST.
 
-    Only output relocation is supported; training configuration/horizon cannot be
-    overridden. The next ``train()`` finishes the original horizon, while
-    ``train(additional_trials=n)`` advances by n cumulative trials. Failed loads restore
-    the caller's supported RNG streams and never modify an existing agent.
+    Only output relocation is supported in this stage. The next ``train()`` advances by the
+    stored ``num_trials`` session length, while ``train(additional_trials=n)`` overrides that
+    count for one call. Failed loads restore the caller's supported RNG streams and never
+    modify an existing agent.
     """
     from autorec.agent import DDQN_ECM, _TrainingState
 
@@ -277,13 +277,10 @@ def load_checkpoint(directory, *, save_dir=None):
             value = getattr(progress, name)
             if type(value) is not int or value < 0:
                 raise ValueError(f"Invalid checkpoint counter: {name}")
-        if (
-            type(agent.num_trials) is not int
-            or not 0 <= progress.completed_trials <= agent.num_trials
-        ):
-            raise ValueError("Invalid cumulative trial count/horizon.")
+        if type(agent.num_trials) is not int or agent.num_trials < 1:
+            raise ValueError("Invalid num_trials session length.")
         if progress.schedule_config != agent._training_schedule_config():
-            raise ValueError("Checkpoint horizon/schedules are inconsistent.")
+            raise ValueError("Checkpoint schedules are inconsistent.")
         agent.training_env, agent.eval_env, agent._active_env = restore_environment_state(
             payloads["environments.pkl"]
         )

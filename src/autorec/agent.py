@@ -31,7 +31,7 @@ default_optimizer_config = {"type": "Adam", "learning_rate": 0.0005}
 
 @dataclass
 class _TrainingState:
-    """Cross-trial counters and histories, retained across bounded training calls.
+    """Cross-trial counters and histories retained across training sessions.
 
     Counters and histories are synchronized after each completed episode; completed trials
     are recorded after schedule updates. This is not a snapshot of an unfinished episode.
@@ -950,11 +950,10 @@ class DDQN_ECM:
         return self._training_state.completed_trials if self._training_state else 0
 
     def _training_schedule_config(self) -> dict:
-        """Capture the horizon and resolved epsilon/beta schedule parameters."""
+        """Capture resolved epsilon/beta parameters that must not change on resume."""
         return {
             name: getattr(self, name)
             for name in (
-                "num_trials",
                 "start_decay",
                 "epsilon_decay",
                 "epsilon_min",
@@ -993,16 +992,16 @@ class DDQN_ECM:
         checkpoint_dir: str | Path | None = None,
         checkpoint_every: Optional[int] = None,
     ):
-        """Train all trials, or advance a retained run by a bounded number of trials.
+        """Train one session, retaining cumulative state when continuation is enabled.
 
         Parameters
         ----------
         additional_trials : int or None, optional
-            A nonnegative count opts into continuation, preserving replay, counters,
-            histories, and the original ``num_trials`` horizon. Zero initializes or reads
-            state without taking a step. Subsequent calls without a count finish the
-            remaining horizon; calls at completion do nothing. Exceeding the horizon or
-            changing its epsilon/beta schedule configuration raises an error.
+            A nonnegative count opts into continuation and overrides ``num_trials`` for this
+            call. Replay, counters, histories, and resolved schedules are preserved. Zero
+            initializes or reads state without taking a step. In continuation mode, a call
+            without this argument advances by ``num_trials`` additional trials. Training is
+            open-ended; changing a resolved epsilon/beta schedule raises an error.
 
             Without opting in, repeated no-argument calls retain legacy behavior: fresh
             replay, counters, and result histories, with the existing model, optimizer,
@@ -1020,7 +1019,7 @@ class DDQN_ECM:
         -------
         dict
             Cumulative histories for the retained run, referencing its result objects.
-            Final exports and plots are produced only when the horizon is reached.
+            Final exports and plots retain their legacy behavior in this stage.
             Intermediate model saves retain their original global trial schedule.
 
         Notes
@@ -1053,24 +1052,23 @@ class DDQN_ECM:
         stop = self.num_trials
         if continuation:
             if isinstance(self.num_trials, bool) or not isinstance(self.num_trials, int):
-                raise TypeError("Continuation requires an integer num_trials horizon.")
+                raise TypeError("Continuation requires an integer num_trials session length.")
             if self.num_trials < 1:
-                raise ValueError("Continuation requires a positive num_trials horizon.")
+                raise ValueError("Continuation requires a positive num_trials session length.")
             if state is not None:
                 if not state.at_trial_boundary:
                     raise RuntimeError("Cannot continue after an unfinished trial.")
                 if state.schedule_config != self._training_schedule_config():
                     raise ValueError(
-                        "Cannot change the training horizon or epsilon/beta schedules."
+                        "Cannot change epsilon/beta schedules during continuation."
                     )
                 if self._replay_buffer is None:
                     raise RuntimeError("Cannot continue without the retained replay buffer.")
                 start = state.completed_trials
-            stop = self.num_trials if additional_trials is None else start + additional_trials
-            if stop > self.num_trials:
-                raise ValueError(
-                    "additional_trials would exceed the original num_trials horizon."
-                )
+            session_trials = (
+                self.num_trials if additional_trials is None else additional_trials
+            )
+            stop = start + session_trials
 
         self._continuation_mode = continuation
         if continuation and state is not None and start == stop:
