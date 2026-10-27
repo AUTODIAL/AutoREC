@@ -38,7 +38,7 @@ def load_factory(monkeypatch):
     monkeypatch.setitem(sys.modules, "autorec.agent", agent_module)
 
     spec = importlib.util.spec_from_file_location(
-        "factory_under_test", AUTOREC_ROOT / "src" / "autorec" / "factory.py"
+        "factory_under_test", AUTOREC_ROOT / "src" / "autorec" / "factory" / "factory.py"
     )
     factory = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(factory)
@@ -82,3 +82,42 @@ def test_load_dataset_rejects_missing_file(monkeypatch, tmp_path):
 
     with pytest.raises(FileNotFoundError, match="does not exist"):
         factory._load_dataset(tmp_path / "missing.pkl")
+
+
+def test_yaml_factory_forwards_generic_hidden_layer_configs(monkeypatch, tmp_path):
+    factory = load_factory(monkeypatch)
+    patch_dataset_loader(monkeypatch, factory)
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """environment:
+  dataset_path: dataset.pkl
+agent:
+  hidden_layers:
+    - type: Dense
+      units: 24
+      activation: relu
+    - type: Dropout
+      rate: 0.2
+"""
+    )
+
+    _, _, agent = factory.environment_and_agent_builder(config_path)
+
+    assert agent.kwargs["hidden_layers"] == [
+        {"type": "Dense", "units": 24, "activation": "relu"},
+        {"type": "Dropout", "rate": 0.2},
+    ]
+
+
+def test_environment_and_agent_builder_does_not_mutate_dict_config(monkeypatch):
+    factory = load_factory(monkeypatch)
+    patch_dataset_loader(monkeypatch, factory)
+    config = {
+        "environment": {"dataset_path": "dataset.pkl"},
+        "agent": {"hidden_layers": [{"type": "Dropout", "rate": 0.2}]},
+    }
+
+    factory.environment_and_agent_builder(config)
+
+    assert "training_env" not in config["agent"]
+    assert "eval_env" not in config["agent"]
