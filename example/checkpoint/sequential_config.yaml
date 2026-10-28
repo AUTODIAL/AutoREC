@@ -37,6 +37,8 @@ agent:
   save_frequency: 100
   action_cap: null
   random_seed: 42
+  # Trials to run in this session. Generated continuation files retain this value,
+  # but it may be changed before starting the next session.
   num_trials: 100
   episodes_trial: 1
   gamma: 0.99
@@ -68,6 +70,8 @@ agent:
   prioritized_replay_eps: 1.0E-6
   initial_beta: 0.4
   beta_jump: 1.06
+  # Absolute cumulative schedule shared with continuous_config.yaml. These values
+  # do not depend on this session's num_trials.
   start_jump: 400
   beta_anneal_trials: 595
   final_beta: 0.7

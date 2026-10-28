@@ -4,13 +4,21 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import os
 from pathlib import Path
 import pickle
 import subprocess
 import sys
+import traceback
 
-from compare_checkpoints import _difference, compare as compare_checkpoints
+from checkpoint_runtime import deterministic_subprocess_environment
+from compare_checkpoints import (
+    _finalize_report,
+    _print_detailed_report,
+    _print_verdict,
+    _record_comparison,
+    _write_report,
+    checkpoint_report,
+)
 
 
 def _checkpoint_digest(directory):
@@ -44,6 +52,19 @@ def _evaluate(worker, checkpoint, output, args, environment):
         return pickle.load(stream)
 
 
+def _fail_with_report(report, report_path, *details):
+    """Write and print a failed report, then return a nonzero process status."""
+    _write_report(report, report_path)
+    _print_detailed_report(report)
+    _print_verdict(
+        False,
+        report["comparison"],
+        (*details, f"JSON report: {report_path}"),
+        stream=sys.stdout,
+    )
+    raise SystemExit(1)
+
+
 def main():
     directory = Path(__file__).resolve().parent
     parser = argparse.ArgumentParser(description=__doc__)
@@ -65,6 +86,11 @@ def main():
     parser.add_argument(
         "--output-dir", type=Path, default=directory / "outputs/evaluation_comparison"
     )
+    parser.add_argument(
+        "--report",
+        type=Path,
+        help="JSON report destination; defaults to OUTPUT_DIR/comparison_report.json.",
+    )
     args = parser.parse_args()
     if args.num_samples is not None and args.num_samples < 1:
         parser.error("--num-samples must be positive")
@@ -73,40 +99,150 @@ def main():
 
     continuous = args.continuous.resolve()
     sequential = args.sequential.resolve()
-    compare_checkpoints(continuous, sequential)
-    print("Complete final checkpoint comparison passed.")
+    output_dir = args.output_dir.resolve()
+    report_path = (
+        args.report.resolve()
+        if args.report is not None
+        else output_dir / "comparison_report.json"
+    )
+    print("\n[1/2] Comparing complete persisted checkpoint state...", flush=True)
+    persisted = checkpoint_report(continuous, sequential)
+    checks = [
+        {**check, "name": f"Checkpoint / {check['name']}"} for check in persisted["checks"]
+    ]
+    if not persisted["overall_passed"]:
+        report = _finalize_report(
+            "checkpoint state and fresh-process evaluation results",
+            continuous,
+            sequential,
+            checks,
+        )
+        _fail_with_report(
+            report,
+            report_path,
+            "Checkpoint comparison failed; evaluation was not run.",
+        )
+    print("[1/2] PASS: checkpoint state is exactly identical.", flush=True)
     checkpoint_digests = {
         continuous: _checkpoint_digest(continuous),
         sequential: _checkpoint_digest(sequential),
     }
 
-    environment = dict(os.environ)
-    environment.update(
-        CUDA_VISIBLE_DEVICES="-1",
-        PYTHONHASHSEED="0",
-        TF_NUM_INTRAOP_THREADS="1",
-        TF_NUM_INTEROP_THREADS="1",
-        OMP_NUM_THREADS="1",
-        OPENBLAS_NUM_THREADS="1",
-        MKL_NUM_THREADS="1",
-        NUMEXPR_NUM_THREADS="1",
-        MPLBACKEND="Agg",
-    )
-    output_dir = args.output_dir.resolve()
+    environment = deterministic_subprocess_environment()
     worker = directory / "evaluate_checkpoint.py"
-    first = _evaluate(worker, continuous, output_dir / "continuous", args, environment)
-    second = _evaluate(worker, sequential, output_dir / "sequential", args, environment)
-    for checkpoint, digest in checkpoint_digests.items():
-        if _checkpoint_digest(checkpoint) != digest:
-            raise RuntimeError(f"Evaluation modified checkpoint files: {checkpoint}")
-    difference = _difference(first, second, "evaluation")
-    if difference:
-        raise AssertionError(difference)
+    print("\n[2/2] Evaluating identical training rows in fresh processes...", flush=True)
+    try:
+        first = _evaluate(worker, continuous, output_dir / "continuous", args, environment)
+        second = _evaluate(worker, sequential, output_dir / "sequential", args, environment)
+    except Exception as error:
+        traceback.print_exc()
+        checks.append(
+            {
+                "name": "Evaluation / Fresh-process execution",
+                "passed": False,
+                "detail": f"{type(error).__name__}: {error}",
+            }
+        )
+        report = _finalize_report(
+            "checkpoint state and fresh-process evaluation results",
+            continuous,
+            sequential,
+            checks,
+        )
+        _fail_with_report(report, report_path, "Fresh-process evaluation failed.")
 
-    print("Exact online, target, and optimizer variable comparison passed.")
-    print(f"Exact evaluation comparison passed for training rows {first['indices']}.")
-    print(f"Human-readable evaluation CSV files are in {output_dir}.")
+    current_digests = {
+        continuous: _checkpoint_digest(continuous),
+        sequential: _checkpoint_digest(sequential),
+    }
+    _record_comparison(
+        checks,
+        "Evaluation / Checkpoint files remained unchanged",
+        checkpoint_digests,
+        current_digests,
+        "evaluation.checkpoint_digests",
+    )
+    _record_comparison(
+        checks,
+        "Evaluation / Selected training rows",
+        first["indices"],
+        second["indices"],
+        "evaluation.indices",
+    )
+    _record_comparison(
+        checks,
+        "Evaluation / Action limit",
+        first["max_actions"],
+        second["max_actions"],
+        "evaluation.max_actions",
+    )
+    _record_comparison(
+        checks,
+        "Evaluation / Online-network variables",
+        first["online_variables"],
+        second["online_variables"],
+        "evaluation.online_variables",
+    )
+    _record_comparison(
+        checks,
+        "Evaluation / Target-network variables",
+        first["target_variables"],
+        second["target_variables"],
+        "evaluation.target_variables",
+    )
+    _record_comparison(
+        checks,
+        "Evaluation / Optimizer variables",
+        first["optimizer_variables"],
+        second["optimizer_variables"],
+        "evaluation.optimizer_variables",
+    )
+    _record_comparison(
+        checks,
+        "Evaluation / Greedy ECM results",
+        first["results"],
+        second["results"],
+        "evaluation.results",
+    )
+    report = _finalize_report(
+        "checkpoint state and fresh-process evaluation results",
+        continuous,
+        sequential,
+        checks,
+    )
+    if not report["overall_passed"]:
+        failure_count = sum(not check["passed"] for check in checks)
+        category = "category" if failure_count == 1 else "categories"
+        _fail_with_report(
+            report,
+            report_path,
+            f"{failure_count} comparison {category} failed.",
+        )
+
+    _write_report(report, report_path)
+    _print_detailed_report(report)
+    print("[2/2] PASS: restored variables and evaluation results are exactly identical.")
+    _print_verdict(
+        True,
+        "checkpoint state and fresh-process evaluation results",
+        (
+            "Complete persisted checkpoint state is exactly identical.",
+            "Online, target, and optimizer variables are exactly identical.",
+            f"Greedy evaluation results are exactly identical for rows {first['indices']}.",
+            f"Human-readable CSV files: {output_dir}",
+            f"JSON report: {report_path}",
+        ),
+    )
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as error:
+        traceback.print_exc()
+        _print_verdict(
+            False,
+            "checkpoint state and fresh-process evaluation results",
+            (f"{type(error).__name__}: {error}",),
+        )
+        raise SystemExit(1) from None

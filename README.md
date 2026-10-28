@@ -217,8 +217,12 @@ qualification; the regression tests use controlled fitting and CPU networks.
 See [example/checkpoint](example/checkpoint/) for the configuration-based workflow:
 
 ```bash
-python example/checkpoint/main_factory.py --config example/checkpoint/sequential_config.yaml
+cd example/checkpoint
+python run_sequential.py --config sequential_config.yaml --sessions 1
 ```
+
+The example also provides exact checkpoint and fresh-process evaluation comparisons with
+terminal verdicts and machine-readable JSON reports.
 
 Complete checkpoints save at completed-trial boundaries:
 

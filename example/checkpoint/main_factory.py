@@ -9,19 +9,14 @@ from pathlib import Path
 
 import yaml
 
+from checkpoint_runtime import (
+    REPOSITORY_ROOT,
+    configure_cache_environment,
+    configure_tensorflow_for_checkpoint,
+)
+
 
 CHECKPOINT_SECTION = "checkpoint"
-_RUNTIME_CACHE = Path(__file__).resolve().parent / "outputs/runtime_cache"
-
-
-def _configure_cache_environment():
-    """Keep plotting and Julia metadata caches with this experiment."""
-    _RUNTIME_CACHE.mkdir(parents=True, exist_ok=True)
-    os.environ.setdefault("AUTOREC_ROOT", str(Path(__file__).resolve().parents[2]))
-    os.environ.setdefault("XDG_CACHE_HOME", str(_RUNTIME_CACHE))
-    os.environ.setdefault("MPLCONFIGDIR", str(_RUNTIME_CACHE / "matplotlib"))
-    os.environ.setdefault("PYTHON_JULIAPKG_PROJECT", str(_RUNTIME_CACHE / "julia_env"))
-    os.environ.setdefault("JULIA_DEPOT_PATH", str(_RUNTIME_CACHE / "julia_depot"))
 
 
 def _positive_integer(value, name):
@@ -31,6 +26,9 @@ def _positive_integer(value, name):
 
 
 def _read_and_validate(config_path: Path):
+    # YAML examples use ${AUTOREC_ROOT}; define it before expanding the file so this
+    # worker is also usable directly, without requiring prior shell configuration.
+    os.environ.setdefault("AUTOREC_ROOT", str(REPOSITORY_ROOT))
     config = yaml.safe_load(os.path.expandvars(config_path.read_text()))
     if not isinstance(config, dict):
         raise ValueError("The configuration must contain a dictionary at the top level.")
@@ -57,6 +55,14 @@ def _read_and_validate(config_path: Path):
 def _training_environment_config(config):
     environment = config.get("environment", {})
     return environment.get("training", environment)
+
+
+def _normalize_resumed_configuration(config, create_optimizer, get_optimizer_config):
+    """Expand concise YAML optimizer settings to their checkpoint representation."""
+    normalized = deepcopy(config)
+    optimizer = create_optimizer(normalized["agent"]["optimizer"])
+    normalized["agent"]["optimizer"] = get_optimizer_config(optimizer)
+    return normalized
 
 
 def _validate_resumed_configuration(config, agent):
@@ -120,7 +126,7 @@ def _write_next_config(config, completed_trials: int) -> Path:
 
 def run_session(config_path: Path) -> Path:
     config, checkpoint_config = _read_and_validate(config_path)
-    _configure_cache_environment()
+    configure_cache_environment()
 
     from autorec.runtime import configure_autorec_runtime
 
@@ -130,7 +136,7 @@ def run_session(config_path: Path) -> Path:
     import tensorflow as tf
 
     from autorec.agent import DDQN_ECM
-    from autorec.factory import pipeline_builder
+    from autorec.factory import create_optimizer, get_optimizer_config, pipeline_builder
     from autorec.utils import set_global_seed
 
     resume_from = checkpoint_config.get("resume_from")
@@ -140,14 +146,18 @@ def run_session(config_path: Path) -> Path:
         # pipeline_builder ignores the checkpoint section and deep-copies the input.
         _, _, _, _, agent = pipeline_builder(config)
     else:
-        # Enable deterministic kernels without replacing the checkpoint RNG streams.
-        tf.config.experimental.enable_op_determinism()
+        # Match the initial session's deterministic runtime without replacing the
+        # checkpoint RNG streams. The loader restores those streams last.
+        configure_tensorflow_for_checkpoint(tf)
+        normalized_config = _normalize_resumed_configuration(
+            config, create_optimizer, get_optimizer_config
+        )
         agent = DDQN_ECM.from_checkpoint(
             Path(resume_from),
             save_dir=Path(config["agent"]["save_dir"]),
             num_trials=session_trials,
         )
-        _validate_resumed_configuration(config, agent)
+        _validate_resumed_configuration(normalized_config, agent)
 
     start = agent.completed_trials
     agent.train(checkpoint_dir=Path(checkpoint_config["save_dir"]))

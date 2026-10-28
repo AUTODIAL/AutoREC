@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import argparse
-import os
 from pathlib import Path
 import pickle
 import random
+
+from checkpoint_runtime import (
+    configure_cache_environment,
+    configure_tensorflow_for_checkpoint,
+)
 
 
 def _variable_records(variables):
@@ -65,14 +69,7 @@ def main():
     except ValueError as error:
         parser.error(str(error))
 
-    directory = Path(__file__).resolve().parent
-    runtime_cache = directory / "outputs/runtime_cache"
-    runtime_cache.mkdir(parents=True, exist_ok=True)
-    os.environ.setdefault("AUTOREC_ROOT", str(directory.parents[1]))
-    os.environ.setdefault("XDG_CACHE_HOME", str(runtime_cache))
-    os.environ.setdefault("MPLCONFIGDIR", str(runtime_cache / "matplotlib"))
-    os.environ.setdefault("PYTHON_JULIAPKG_PROJECT", str(runtime_cache / "julia_env"))
-    os.environ.setdefault("JULIA_DEPOT_PATH", str(runtime_cache / "julia_depot"))
+    configure_cache_environment()
 
     from autorec.runtime import configure_autorec_runtime
 
@@ -83,7 +80,7 @@ def main():
 
     from autorec.agent import DDQN_ECM
 
-    tf.config.experimental.enable_op_determinism()
+    configure_tensorflow_for_checkpoint(tf)
     output_dir = args.output.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     agent = DDQN_ECM.from_checkpoint(args.checkpoint.resolve(), save_dir=output_dir)

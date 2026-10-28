@@ -37,6 +37,7 @@ agent:
   save_frequency: 100
   action_cap: null
   random_seed: 42
+  # One 1,000-trial session used as the continuous equivalence baseline.
   num_trials: 1000
   episodes_trial: 1
   gamma: 0.99
@@ -68,6 +69,7 @@ agent:
   prioritized_replay_eps: 1.0E-6
   initial_beta: 0.4
   beta_jump: 1.06
+  # Match the sequential experiment's absolute cumulative schedule.
   start_jump: 400
   beta_anneal_trials: 595
   final_beta: 0.7

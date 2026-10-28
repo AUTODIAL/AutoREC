@@ -1,7 +1,9 @@
 """Tests for the open-ended checkpoint example configuration workflow."""
 
 from importlib.util import module_from_spec, spec_from_file_location
+from io import StringIO
 from pathlib import Path
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -9,6 +11,12 @@ import yaml
 
 
 _SCRIPT = Path(__file__).parents[1] / "example" / "checkpoint" / "main_factory.py"
+_RUNTIME_SCRIPT = _SCRIPT.with_name("checkpoint_runtime.py")
+_RUNTIME_SPEC = spec_from_file_location("checkpoint_runtime", _RUNTIME_SCRIPT)
+checkpoint_runtime = module_from_spec(_RUNTIME_SPEC)
+sys.modules[_RUNTIME_SPEC.name] = checkpoint_runtime
+_RUNTIME_SPEC.loader.exec_module(checkpoint_runtime)
+
 _SPEC = spec_from_file_location("checkpoint_example_main", _SCRIPT)
 example = module_from_spec(_SPEC)
 _SPEC.loader.exec_module(example)
@@ -64,6 +72,61 @@ def test_configuration_uses_num_trials_as_current_session_length(tmp_path):
 
     assert loaded["agent"]["num_trials"] == 50
     assert checkpoint_config["resume_from"] is None
+
+
+def test_configuration_defines_repository_root_before_expansion(tmp_path, monkeypatch):
+    value = config(tmp_path)
+    value["agent"]["save_dir"] = "${AUTOREC_ROOT}/checkpoint-results"
+    monkeypatch.delenv("AUTOREC_ROOT", raising=False)
+
+    loaded, _ = example._read_and_validate(write_config(tmp_path, value))
+
+    assert loaded["agent"]["save_dir"] == str(_SCRIPT.parents[2] / "checkpoint-results")
+
+
+def test_checkpoint_runtime_matches_tensorflow_and_subprocess_configuration():
+    calls = []
+    tensorflow = SimpleNamespace(
+        config=SimpleNamespace(
+            experimental=SimpleNamespace(
+                enable_op_determinism=lambda: calls.append("deterministic")
+            ),
+            threading=SimpleNamespace(
+                set_inter_op_parallelism_threads=lambda value: calls.append(("inter", value)),
+                set_intra_op_parallelism_threads=lambda value: calls.append(("intra", value)),
+            ),
+        )
+    )
+
+    checkpoint_runtime.configure_tensorflow_for_checkpoint(tensorflow)
+
+    assert calls == ["deterministic", ("inter", 1), ("intra", 1)]
+    environment = checkpoint_runtime.deterministic_subprocess_environment()
+    assert environment["CUDA_VISIBLE_DEVICES"] == "-1"
+    assert environment["PYTHONHASHSEED"] == "0"
+    assert environment["TF_NUM_INTRAOP_THREADS"] == "1"
+    assert environment["TF_NUM_INTEROP_THREADS"] == "1"
+
+
+def test_resume_normalizes_concise_optimizer_configuration_without_mutating_input(
+    tmp_path,
+):
+    value = config(tmp_path)
+    value["agent"]["optimizer"] = {"type": "Adam", "learning_rate": 0.0005}
+    complete = {
+        "type": "Adam",
+        "learning_rate": 0.0005000000237487257,
+        "beta_1": 0.9,
+    }
+
+    normalized = example._normalize_resumed_configuration(
+        value,
+        lambda optimizer_config: ("optimizer", optimizer_config),
+        lambda optimizer: complete,
+    )
+
+    assert normalized["agent"]["optimizer"] == complete
+    assert value["agent"]["optimizer"] == {"type": "Adam", "learning_rate": 0.0005}
 
 
 @pytest.mark.parametrize("value", [0, -1, True, 1.5, None])
@@ -128,7 +191,7 @@ def test_runner_follows_generated_config_for_open_ended_progress(tmp_path):
     assert runner._next_config(resumed).name == "resume-from-trial-00000050.yaml"
 
 
-def test_checkpoint_comparison_excludes_only_session_and_output_configuration():
+def test_checkpoint_comparison_excludes_only_session_and_output_configuration(tmp_path):
     first = {
         "agent": {"num_trials": 1000, "start_jump": 400, "beta_anneal_trials": 595},
         "output": {"save_dir": "continuous"},
@@ -141,3 +204,20 @@ def test_checkpoint_comparison_excludes_only_session_and_output_configuration():
     assert comparison._comparable_config(first) == comparison._comparable_config(second)
     second["agent"]["beta_anneal_trials"] = 594
     assert comparison._comparable_config(first) != comparison._comparable_config(second)
+
+    output = StringIO()
+    comparison._print_verdict(
+        True, "test comparison", ("values are identical",), stream=output
+    )
+    assert "VERDICT: PASS" in output.getvalue()
+    assert "Comparison: test comparison" in output.getvalue()
+
+    report = comparison._finalize_report(
+        "test comparison",
+        Path("continuous"),
+        Path("sequential"),
+        [{"name": "state", "passed": True, "detail": "Exact match."}],
+    )
+    destination = tmp_path / "reports" / "comparison.json"
+    comparison._write_report(report, destination)
+    assert yaml.safe_load(destination.read_text()) == report

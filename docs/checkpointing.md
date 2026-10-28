@@ -44,6 +44,8 @@ import tensorflow as tf
 from autorec.agent import DDQN_ECM
 
 tf.config.experimental.enable_op_determinism()
+tf.config.threading.set_inter_op_parallelism_threads(1)
+tf.config.threading.set_intra_op_parallelism_threads(1)
 agent = DDQN_ECM.from_checkpoint("checkpoints/trial-00000100", num_trials=100)
 agent.train(checkpoint_dir="checkpoints")
 assert agent.completed_trials == 200
@@ -79,6 +81,9 @@ Without checkpoint arguments, `agent.train()` and existing model exports retain 
 previous behavior. `save_model()` and `load_model()` remain model-only APIs and cannot
 resume complete training. Every non-empty retained session exports the current cumulative
 model, histories and plots. See [the runnable open-ended example](../example/checkpoint/).
+That example also compares continuous and resumed checkpoints exactly. Its faster checkpoint
+comparison and slower fresh-process evaluation comparison print per-category results, finish
+with an overall verdict, and export machine-readable JSON reports.
 
 ## CLI workflow
 

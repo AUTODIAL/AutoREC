@@ -11,6 +11,8 @@ import sys
 
 import yaml
 
+from checkpoint_runtime import deterministic_subprocess_environment
+
 
 CHECKPOINT_SECTION = "checkpoint"
 
@@ -53,18 +55,7 @@ def main():
     os.environ.setdefault("AUTOREC_ROOT", str(Path(__file__).resolve().parents[2]))
     config_path = args.config.resolve()
     worker = Path(__file__).with_name("main_factory.py")
-    environment = dict(os.environ)
-    environment.update(
-        CUDA_VISIBLE_DEVICES="-1",
-        PYTHONHASHSEED="0",
-        TF_NUM_INTRAOP_THREADS="1",
-        TF_NUM_INTEROP_THREADS="1",
-        OMP_NUM_THREADS="1",
-        OPENBLAS_NUM_THREADS="1",
-        MKL_NUM_THREADS="1",
-        NUMEXPR_NUM_THREADS="1",
-        MPLBACKEND="Agg",
-    )
+    environment = deterministic_subprocess_environment()
 
     for session in range(1, args.sessions + 1):
         print(
