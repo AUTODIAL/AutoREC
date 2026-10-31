@@ -66,6 +66,14 @@ guaranteed across arbitrary hardware, TensorFlow/JAX versions, or external
 fitting behavior. Report the configuration, package versions, seed, dataset,
 and model together with scientific results.
 
+Retained training sessions keep replay, schedules, counters, histories,
+environments, and random state alive across calls. Complete checkpoints persist
+that state at completed-trial boundaries so a supported run can continue in a
+fresh process. `num_trials` describes the current session and
+`completed_trials` tracks cumulative progress. See the
+{doc}`checkpoint guide <../user_guide/checkpointing>` for the exact supported
+state and reproducibility constraints.
+
 ```{important}
 A `.keras` file stores the neural-network model. It does not store the replay
 buffer, target-network state, schedules, counters, environment caches, or
@@ -80,4 +88,6 @@ exactly.
   <../user_guide/configuration>`.
 - Understand saved artifacts in {doc}`models and results
   <../user_guide/models_and_results>`.
+- Continue training with the {doc}`checkpoint guide
+  <../user_guide/checkpointing>`.
 - Consult the {doc}`API reference <../api/index>` when extending components.

@@ -50,6 +50,26 @@ After `agent.train()` completes, `save_dir` contains:
 Periodic exports begin at `save_start` and repeat every `save_frequency` trials.
 They are model snapshots, not resumable training-state checkpoints.
 
+## Complete training checkpoints
+
+When `checkpoint_dir` is supplied to `train()`, AutoREC writes an immutable
+`trial-<completed_trials>` directory at the session endpoint and, when
+`checkpoint_every` is set, at matching cumulative intervals. These directories
+preserve the complete supported training state rather than only the online
+network.
+
+Checkpoint payloads include the independent online and target networks,
+optimizer, replay buffer, schedules and counters, histories, prepared
+environments, cache eviction state, and supported random streams. The manifest
+records integrity hashes and a strict runtime/source fingerprint. Checkpoints
+can therefore be much larger than `.keras` model exports, especially when the
+replay allocation and prepared datasets are large.
+
+Do not edit or overwrite a checkpoint directory, and load only trusted
+checkpoints because several payloads use Python pickle. See
+{doc}`checkpointing <checkpointing>` for the exact layout, compatibility rules,
+and restoration workflow.
+
 ## Evaluation outputs
 
 `eval_batch_eis()` returns one row per evaluated spectrum with identifiers,

@@ -1,5 +1,9 @@
 # Training checkpoints
 
+> The documentation website also provides a concise
+> [checkpointing workflow](../doc/user_guide/checkpointing.md). This file is the
+> detailed format, compatibility, and validation reference.
+
 AutoREC can save complete training state at completed-trial boundaries and resume in a
 new Python process. `num_trials` is the amount of work requested for the current session;
 the cumulative `completed_trials` counter comes from the checkpoint. Training is open-ended,

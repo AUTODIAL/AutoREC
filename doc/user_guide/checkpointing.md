@@ -20,8 +20,19 @@ epsilon or beta schedules after training begins.
 ## Python workflow
 
 Configure the same deterministic CPU runtime at the start of every process,
-before importing TensorFlow or other numerical libraries. The initial process
-can then create the configured agent and save a session-end checkpoint:
+before importing TensorFlow or other numerical libraries. For exact-comparison
+runs, establish the process environment before starting Python:
+
+```bash
+export CUDA_VISIBLE_DEVICES=-1
+export PYTHONHASHSEED=0
+export TF_NUM_INTRAOP_THREADS=1 TF_NUM_INTEROP_THREADS=1
+export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1
+```
+
+The initial process can then create the configured agent and save a session-end
+checkpoint:
 
 ```python
 from autorec.runtime import configure_autorec_runtime
@@ -65,6 +76,11 @@ assert agent.completed_trials == 200
 call. `checkpoint_every=N` saves at cumulative multiples of `N` and at the
 session endpoint. Manual snapshots use `agent.save_checkpoint(path)`.
 
+If results must be inspected before deciding whether to continue, evaluate a
+checkpoint in a separate process. Do not evaluate or otherwise consume random
+numbers in the training process between retained sessions. Later resume the
+same immutable checkpoint that was evaluated.
+
 ## CLI workflow
 
 The same workflow is available through the CLI:
@@ -102,6 +118,22 @@ records file sizes and SHA-256 hashes in the manifest, and atomically renames
 the completed directory. Load checkpoints only from trusted sources: integrity
 hashes detect damage but do not make pickle payloads safe to open.
 
+A checkpoint has the following layout:
+
+```text
+checkpoints/trial-00000100/
+├── manifest.json       # Version, trial count, runtime/source identity, hashes
+├── config.json         # Effective agent configuration and output paths
+├── training.pkl        # Progress, histories, replay metadata, and RNG state
+├── environments.pkl    # Prepared data, active environments, and caches
+├── neural.pkl          # Online/target networks and optimizer state
+└── replay.npy          # Complete physical replay allocation
+```
+
+The loader validates the complete file list, sizes, hashes, format version,
+runtime and source fingerprint before restoration. It intentionally rejects
+best-effort loading when exact continuation cannot be supported.
+
 ## Exact-equivalence conditions
 
 Bitwise continuation is supported only under the validated deterministic CPU
@@ -117,3 +149,25 @@ For the complete format, compatibility checks, limitations, and validation
 evidence, read `docs/checkpointing.md` in the repository. The
 `example/checkpoint/` workflow compares one continuous run with sequential
 fresh-process sessions and exports per-category JSON comparison reports.
+
+From `example/checkpoint/`, the complete validation workflow is:
+
+```bash
+python run_continuous.py
+python run_sequential.py --config sequential_config.yaml --sessions 10
+python compare_checkpoints.py
+python compare_results.py
+```
+
+`compare_checkpoints.py` is the faster persisted-state comparison. It checks
+counters, histories, schedules, random streams, environments, caches, online
+and target networks, optimizer state, and the replay buffer. Its default report
+is `outputs/comparison_reports/checkpoint_comparison.json`.
+
+`compare_results.py` includes those checks and additionally restores both
+agents in fresh processes, evaluates identical training rows using greedy
+actions, compares the resulting ECM records exactly, and verifies that
+evaluation did not modify either checkpoint. Its default report is
+`outputs/evaluation_comparison/comparison_report.json`. Both commands print
+named per-check verdicts, finish with a prominent overall verdict, and return a
+nonzero status when comparison fails.

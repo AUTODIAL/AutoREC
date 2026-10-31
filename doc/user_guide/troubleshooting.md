@@ -62,6 +62,29 @@ the supported random generators, but external fitting, numerical libraries,
 parallelism, hardware, and dependency versions can still affect results. A
 `.keras` model is also not a complete resumable training checkpoint.
 
+## Checkpoint loading reports a runtime or source mismatch
+
+Exact resumption deliberately requires the same AutoREC source, Python and
+numerical-library versions, CPU/backend selection, TensorFlow determinism, and
+thread settings used when the checkpoint was created. Configure the process
+before importing numerical libraries and do not edit AutoREC between sessions.
+Use the same environment for every sequential run. A checkpoint created before
+an AutoREC update is not migrated or loaded on a best-effort basis; restart the
+experiment or return to the recorded compatible revision.
+
+If a sequential example fails only after its first process, compare the process
+environment and TensorFlow inter/intra-op settings rather than reseeding. The
+checkpoint restores random state and must not be followed by `set_global_seed`.
+See {doc}`checkpointing <checkpointing>` for the supported runtime setup.
+
+## Checkpoint saving says the destination already exists
+
+Checkpoint directories are immutable and AutoREC never overwrites an existing
+destination. Resume from the existing valid checkpoint, select a new output
+root, or remove an unwanted run only after confirming it is not needed. The
+example runner records the exact previous checkpoint in each generated resume
+configuration instead of relying on a mutable `latest` pointer.
+
 ## Where should I report a problem?
 
 Search the [issue tracker](https://github.com/AUTODIAL/AutoREC/issues), then use

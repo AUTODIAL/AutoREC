@@ -74,6 +74,30 @@ metric CSV files, plots, and a model summary. These exports are not complete
 resumable training checkpoints. Copy the demonstration YAML before changing
 datasets or hyperparameters so the tracked example remains a stable reference.
 
+To save complete state at the end of this 50-trial demonstration session, add a
+checkpoint directory:
+
+```bash
+autorec train \
+  --config configs_yaml/examples/demo_pipeline_config.yaml \
+  --output-dir runs/quickstart-training \
+  --checkpoint-dir runs/quickstart-checkpoints
+```
+
+Continue from that immutable checkpoint in a fresh process with:
+
+```bash
+autorec train \
+  --resume runs/quickstart-checkpoints/trial-00000050 \
+  --additional-trials 50 \
+  --output-dir runs/quickstart-training-resumed \
+  --checkpoint-dir runs/quickstart-checkpoints
+```
+
+This demonstrates the interface; exact numerical continuation additionally
+requires the deterministic CPU and compatibility conditions in the
+{doc}`checkpoint guide <../user_guide/checkpointing>`.
+
 ## Use the Python API
 
 The factory API builds the same data-preparation, environment, and agent objects
@@ -111,5 +135,7 @@ training environment as the evaluation fallback.
   walkthroughs.
 - Review the [example configurations](https://github.com/AUTODIAL/AutoREC/tree/main/configs_yaml/examples)
   before creating an experiment configuration.
+- Use the {doc}`checkpoint guide <../user_guide/checkpointing>` for open-ended
+  cumulative training and fresh-process resumption.
 - Use `autorec <command> --help` for the exact options accepted by
   `preprocess`, `train`, `evaluate`, and its `infer` alias.
