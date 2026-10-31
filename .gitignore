@@ -16,11 +16,13 @@ venv/
 env/
 ENV/
 .conda/
+/.venv-docs/
 .ipynb_checkpoints/
 
 # Packaging/build
 build/
 dist/
+/doc/_build/
 *.egg-info/
 .eggs/
 
