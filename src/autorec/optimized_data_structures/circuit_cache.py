@@ -510,18 +510,16 @@ class HistoryCache:
             "fit_penalty",
         }
         for key, payload in state["entries"]:
-            if len(key) != 4:
-                raise ValueError("HistoryCache keys must have four components.")
+            if len(key) != 2:
+                raise ValueError("HistoryCache keys must have two components.")
             if not fields <= payload.keys():
                 raise ValueError(
                     f"HistoryCache payload is missing fields: {fields - payload.keys()}."
                 )
 
-    def _make_key(
-        self, circuit_code: str, eis_index: int, action_type: str, action_position: int
-    ) -> Tuple:
+    def _make_key(self, circuit_code: str, eis_index: int) -> Tuple:
         """
-        Create cache key from circuit code, EIS index, and action.
+        Create a cache key from the evaluated circuit and EIS measurement.
 
         Parameters
         ----------
@@ -529,20 +527,19 @@ class HistoryCache:
             The circuit coding string (GEP representation).
         eis_index : int
             Index of the EIS measurement in the dataset.
-        action_type : str
-            The element that was mutated (e.g., 'R', 'P', '+').
-        action_position : int
-            Position in the chromosome where mutation occurred.
-
         Returns
         -------
         tuple
             Tuple key for cache lookup.
         """
-        return (circuit_code, eis_index, action_type, action_position)
+        return (circuit_code, eis_index)
 
     def get(
-        self, circuit_code: str, eis_index: int, action_type: str, action_position: int
+        self,
+        circuit_code: str,
+        eis_index: int,
+        action_type: str | None = None,
+        action_position: int | None = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Retrieve cached circuit evaluation result.
@@ -553,17 +550,16 @@ class HistoryCache:
             The circuit coding string.
         eis_index : int
             Index of the EIS measurement.
-        action_type : str
-            The action element type.
-        action_position : int
-            The action position.
-
+        action_type : str, optional
+            Ignored compatibility argument. Cache identity is independent of action path.
+        action_position : int, optional
+            Ignored compatibility argument. Cache identity is independent of action path.
         Returns
         -------
         dict or None
             Dictionary with cached results or None if not found.
         """
-        key = self._make_key(circuit_code, eis_index, action_type, action_position)
+        key = self._make_key(circuit_code, eis_index)
         return self.cache.get(key)
 
     def put(
@@ -591,9 +587,9 @@ class HistoryCache:
         eis_index : int
             Index of the EIS measurement.
         action_type : str
-            The action element type.
+            Ignored compatibility argument. Cache identity is independent of action path.
         action_position : int
-            The action position.
+            Ignored compatibility argument. Cache identity is independent of action path.
         reward : float
             Computed reward value.
         metrics : dict
@@ -611,7 +607,7 @@ class HistoryCache:
         fit_penalty : float
             Penalty for fit issues.
         """
-        key = self._make_key(circuit_code, eis_index, action_type, action_position)
+        key = self._make_key(circuit_code, eis_index)
         value = {
             "reward": reward,
             "metrics": metrics,

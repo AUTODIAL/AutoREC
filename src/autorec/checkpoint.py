@@ -37,6 +37,10 @@ _CONFIG_FIELDS = frozenset(
     "_save_frequency hidden_layers".split()
 )
 _DYNAMIC_FIELDS = frozenset("epsilon prioritized_replay_beta epsilon_list beta_list".split())
+_RECONSTRUCTIBLE_FIELDS = frozenset(
+    "_flatten_z_matrices _action_index_maps _compiled_train_step_signature "
+    "_compiled_train_step".split()
+)
 _COMPONENTS = {"config.json", "training.pkl", "environments.pkl", "neural.pkl", "replay.npy"}
 
 
@@ -105,7 +109,9 @@ def _capture(agent):
             "_continuation_mode",
         }
     )
-    if type(agent) is not DDQN_ECM or set(vars(agent)) != expected:
+    # Performance caches are derived from checkpoint-owned environments, models, and
+    # configuration. They are rebuilt lazily after restoration and must not be serialized.
+    if type(agent) is not DDQN_ECM or set(vars(agent)) - _RECONSTRUCTIBLE_FIELDS != expected:
         raise ValueError("Checkpoints require an unmodified DDQN_ECM agent.")
     state = agent._training_state
     if state is None or agent._replay_buffer is None:

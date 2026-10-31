@@ -215,7 +215,7 @@ def run_training(
         def train_model(gradient_steps, history):
             trace["events"].append(("train", len(trace["transitions"])))
             loss = original_train(gradient_steps, history)
-            trace["last_priorities"] = array_state(history["priority"].to_numpy())
+            trace["last_priorities"] = array_state(history["priority"])
             return loss
 
         def sample(history, beta):
@@ -558,15 +558,11 @@ def test_seeded_training_preserves_trial_update_order_and_is_exactly_repeatable(
     numpy_state = np.random.get_state()
     restored = CircularBuffer.from_state_dict(buffer.state_dict())
     assert freeze_state(np.random.get_state()) == freeze_state(numpy_state)
-    original_sample = agent._sample_experience(
-        buffer.to_dataframe(), agent.prioritized_replay_beta
-    )
+    original_sample = agent._sample_experience(buffer, agent.prioritized_replay_beta)
     after_sample = freeze_state(np.random.get_state())
     np.random.set_state(numpy_state)
-    restored_sample = agent._sample_experience(
-        restored.to_dataframe(), agent.prioritized_replay_beta
-    )
-    pd.testing.assert_frame_equal(original_sample[0], restored_sample[0], check_exact=True)
+    restored_sample = agent._sample_experience(restored, agent.prioritized_replay_beta)
+    np.testing.assert_array_equal(original_sample[0], restored_sample[0])
     assert array_state(original_sample[1]) == array_state(restored_sample[1])
     assert array_state(original_sample[2]) == array_state(restored_sample[2])
     assert freeze_state(np.random.get_state()) == after_sample
@@ -655,7 +651,9 @@ def test_prioritized_sampling_has_known_indices_weights_and_rng_consumption():
     agent = object.__new__(agent_module.DDQN_ECM)
     agent.batch_size = 2
     agent.prioritized_replay_alpha = 0.5
-    history = pd.DataFrame({"priority": np.array([1, 4, 16, 64], dtype=np.float32)})
+    history = CircularBuffer(4, [("priority", "f4")])
+    for priority in (1, 4, 16, 64):
+        history.add(priority=priority)
     np.random.seed(7)
 
     samples, indices, weights = agent._sample_experience(history, prioritized_replay_beta=1)
@@ -663,7 +661,7 @@ def test_prioritized_sampling_has_known_indices_weights_and_rng_consumption():
     # sqrt(priority) gives relative probabilities 1:2:4:8. Seed 7 selects slots 1,3;
     # normalized inverse-probability weights are therefore exactly 1 and 1/4.
     np.testing.assert_array_equal(indices, [1, 3])
-    pd.testing.assert_frame_equal(samples, history.iloc[[1, 3]], check_exact=True)
+    np.testing.assert_array_equal(samples, history.buffer[[1, 3]])
     assert array_state(weights) == array_state(np.array([1.0, 0.25], dtype=np.float32))
     assert np.random.rand() == 0.4384092314408935
 
@@ -685,17 +683,35 @@ def test_ddqn_update_matches_hand_calculated_targets_loss_and_priorities():
             ),
         },
     )()
-    history = pd.DataFrame(
-        {
-            "EIS": [0, 0],
-            "encoded_state": [np.zeros(1), np.zeros(1)],
-            "encoded_new_state": [np.zeros(1), np.zeros(1)],
-            "action_type": ["L", "R"],
-            "action_position": [0, 0],
-            "reward": [0.0, 1.0],
-            "terminal_flag": [0, 1],
-            "priority": np.ones(2, dtype=np.float32),
-        }
+    history = CircularBuffer(
+        2,
+        [
+            ("EIS", "i4"),
+            ("encoded_state", "f4", (1,)),
+            ("encoded_new_state", "f4", (1,)),
+            ("action_index", "i4"),
+            ("reward", "f4"),
+            ("terminal_flag", "i1"),
+            ("priority", "f4"),
+        ],
+    )
+    history.add(
+        EIS=0,
+        encoded_state=np.zeros(1),
+        encoded_new_state=np.zeros(1),
+        action_index=1,
+        reward=0.0,
+        terminal_flag=0,
+        priority=1.0,
+    )
+    history.add(
+        EIS=0,
+        encoded_state=np.zeros(1),
+        encoded_new_state=np.zeros(1),
+        action_index=0,
+        reward=1.0,
+        terminal_flag=1,
+        priority=1.0,
     )
     with agent_module.tf.device("/CPU:0"):
         agent.model = agent_module.tf.keras.Sequential(
@@ -719,7 +735,7 @@ def test_ddqn_update_matches_hand_calculated_targets_loss_and_priorities():
     np.testing.assert_array_equal(agent.model.get_weights()[0], np.zeros((2, 2)))
     np.testing.assert_array_equal(agent.model.get_weights()[1], [1.0, 0.25])
     np.testing.assert_array_equal(agent.target_model.get_weights()[1], [2.0, 4.0])
-    np.testing.assert_array_equal(history["priority"].to_numpy(), [0.875, 0.125])
+    np.testing.assert_array_equal(history["priority"], [0.875, 0.125])
     assert agent.optimizer.iterations.numpy() == 1
 
 

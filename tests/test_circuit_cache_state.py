@@ -260,7 +260,7 @@ def test_history_cache_rejects_bad_keys_missing_payload_and_policy_mismatch():
         HistoryCache.from_state_dict(missing)
     short_key = deepcopy(state)
     short_key["entries"] = [(("a",), payload())]
-    with pytest.raises(ValueError, match="four components"):
+    with pytest.raises(ValueError, match="two components"):
         HistoryCache.from_state_dict(short_key)
     with pytest.raises(ValueError, match="cache_type"):
         HistoryCache.from_state_dict({**state, "cache_type": "other"})

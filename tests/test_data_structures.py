@@ -60,8 +60,7 @@ def test_cache_capacity_must_be_positive():
 def test_history_cache_uses_circuit_and_eis_index_key():
     cache = HistoryCache(capacity=2, cache_type="lru")
 
-    # HistoryCache wraps the low-level caches and builds a key from circuit, EIS,
-    # action type, and action position.
+    # The fitted result depends on the resulting circuit and EIS, not the action path.
     cache.put(
         circuit_code="RPRR",
         eis_index=5,
@@ -74,11 +73,12 @@ def test_history_cache_uses_circuit_and_eis_index_key():
         good_fit=True,
     )
 
-    result = cache.get(circuit_code="RPRR", eis_index=5, action_type="P", action_position=2)
+    result = cache.get(circuit_code="RPRR", eis_index=5, action_type="R", action_position=1)
 
     assert result["reward"] == 0.75
     assert result["metrics"] == {"r2": 0.99}
     assert result["good_fit"] is True
+    assert cache.get(circuit_code="RPRR", eis_index=6) is None
 
 
 def test_history_cache_rejects_unknown_cache_type():

@@ -632,7 +632,7 @@ class DDQN_ECM:
         return value
 
     def _sample_experience(
-        self, history: pd.DataFrame, prioritized_replay_beta: float
+        self, history: CircularBuffer, prioritized_replay_beta: float
     ) -> tuple:
         """
         Sample a batch of experiences from the replay buffer using prioritized sampling (Refer
@@ -645,9 +645,9 @@ class DDQN_ECM:
 
         Parameters
         ----------
-        history : pd.DataFrame
-            The replay buffer containing all stored experiences
-            Must have a 'priority' column with priority values for each experience
+        history : CircularBuffer
+            Replay buffer containing all stored experiences. It must have a
+            ``priority`` field.
 
         prioritized_replay_beta : float
             Importance sampling exponent
@@ -656,8 +656,8 @@ class DDQN_ECM:
 
         Returns
         -------
-        samples : pd.DataFrame
-            Subset of history containing batch_size sampled experiences.
+        samples : np.ndarray
+            Structured array containing ``batch_size`` sampled experiences.
             These are the experiences that will be used for model training.
 
         indices : np.ndarray
@@ -671,7 +671,7 @@ class DDQN_ECM:
             Normalized so max(weights) = 1.0.
             Shape: (batch_size,)
         """
-        priority_powered_alpha = history["priority"].values ** self.prioritized_replay_alpha
+        priority_powered_alpha = history["priority"] ** self.prioritized_replay_alpha
         total_priority = priority_powered_alpha.sum()
 
         # Use the already calculated priority_powered_alpha values
@@ -685,13 +685,92 @@ class DDQN_ECM:
         indices = np.random.choice(
             len(history), size=self.batch_size, p=probabilities, replace=False
         )
-        samples = history.iloc[indices]
+        samples = history[indices]
 
         # NOTE: In case you need to calculate the weights in the future
         weights = (len(history) * probabilities[indices]) ** (-prioritized_replay_beta)
         weights /= weights.max()
 
         return samples, indices, weights
+
+    def _get_flatten_z_matrix(self) -> np.ndarray:
+        """Return a cached dense matrix of flattened EIS inputs for the active dataset."""
+        dataset = self._active_env.dataset
+        cache_key = id(dataset)
+        cache = getattr(self, "_flatten_z_matrices", None)
+        if cache is None:
+            cache = self._flatten_z_matrices = {}
+        if cache_key not in cache:
+            cache[cache_key] = np.stack(dataset["flatten_Z"].to_numpy()).astype(
+                np.float32, copy=False
+            )
+        return cache[cache_key]
+
+    def _get_action_index_map(self) -> dict[tuple[str, int], int]:
+        """Map environment action values to their neural-network output positions."""
+        actions = self._active_env.ACTIONS_LIST
+        cache_key = id(actions)
+        cache = getattr(self, "_action_index_maps", None)
+        if cache is None:
+            cache = self._action_index_maps = {}
+        if cache_key not in cache:
+            cache[cache_key] = {
+                (str(row.action_type), int(row.action_position)): output_index
+                for output_index, row in enumerate(actions.itertuples(index=False))
+            }
+        return cache[cache_key]
+
+    def _get_compiled_train_step(self):
+        """Return a compiled DDQN update bound to the current models and optimizer."""
+        signature = (
+            id(self.model),
+            id(self.target_model),
+            id(self.optimizer),
+            float(self.gamma),
+            float(self.prioritized_replay_eps),
+        )
+        if getattr(self, "_compiled_train_step_signature", None) == signature:
+            return self._compiled_train_step
+
+        model = self.model
+        target_model = self.target_model
+        optimizer = self.optimizer
+        gamma = tf.constant(self.gamma, dtype=tf.float32)
+        priority_eps = tf.constant(self.prioritized_replay_eps, dtype=tf.float32)
+
+        @tf.function(reduce_retracing=True)
+        def train_step(states, next_states, rewards, terminal_flags, action_indices, weights):
+            next_q_values_main = model(next_states, training=False)
+            next_actions = tf.argmax(next_q_values_main, axis=1, output_type=tf.int32)
+            next_q_values_target = target_model(next_states, training=False)
+            max_next_q_values = tf.gather(
+                next_q_values_target, next_actions, axis=1, batch_dims=1
+            )
+            target_q_values = tf.stop_gradient(
+                rewards + (1.0 - terminal_flags) * gamma * max_next_q_values
+            )
+
+            with tf.GradientTape() as tape:
+                q_values = model(states, training=False)
+                selected_q_values = tf.gather(q_values, action_indices, axis=1, batch_dims=1)
+                loss_mean = tf.reduce_mean(
+                    weights * tf.square(target_q_values - selected_q_values)
+                )
+
+            gradients = tape.gradient(loss_mean, model.trainable_variables)
+            optimizer.apply_gradients(zip(gradients, model.trainable_variables))
+
+            # Preserve the existing PER behavior: priorities use TD errors after the update.
+            updated_q_values = model(states, training=False)
+            updated_selected_q_values = tf.gather(
+                updated_q_values, action_indices, axis=1, batch_dims=1
+            )
+            priorities = tf.abs(target_q_values - updated_selected_q_values) + priority_eps
+            return loss_mean, priorities
+
+        self._compiled_train_step_signature = signature
+        self._compiled_train_step = train_step
+        return train_step
 
     def invalid_actions(self, conding_length: int) -> list:
         """
@@ -807,7 +886,9 @@ class DDQN_ECM:
         else:  # Exploit
             encoded_state = np.array(self._active_env.encoded_state)
             NN_state = np.concatenate((flatten_Z, encoded_state))
-            q_values = self.model.predict(NN_state[np.newaxis], verbose=0)
+            q_values = self.model(
+                tf.convert_to_tensor(NN_state[np.newaxis], dtype=tf.float32), training=False
+            ).numpy()
 
             if uniform is True:
                 # Option 1: just select the best action amonge all valid/invalid actions
@@ -829,7 +910,7 @@ class DDQN_ECM:
     def _train_model(
         self,
         gradient_steps: int,
-        history,
+        history: CircularBuffer,
     ):
         """
         Perform one training step using DDQN with prioritized experience replay.
@@ -839,8 +920,8 @@ class DDQN_ECM:
         gradient_steps : int
             Number of replay mini-batches to sample and optimizer updates to perform.
 
-        history : pd.DataFrame
-            DataFrame containing experience replay buffer.
+        history : CircularBuffer
+            NumPy-backed experience replay buffer.
 
         Returns
         -------
@@ -848,99 +929,33 @@ class DDQN_ECM:
             Mean mini-batch loss across all optimizer updates in this training step.
         """
         losses = []
+        flatten_z_matrix = self._get_flatten_z_matrix()
+        train_step = self._get_compiled_train_step()
         for _ in range(gradient_steps):
             samples, sample_indices, weights = self._sample_experience(
                 history, self.prioritized_replay_beta
             )
-            all_states = []
-            all_next_state = []
-            all_rewards = []
-            all_flags = []
-            all_actions = []
+            eis_indices = samples["EIS"].astype(np.intp, copy=False)
+            sample_flatten_z = flatten_z_matrix[eis_indices]
+            states = np.concatenate(
+                (sample_flatten_z, samples["encoded_state"]), axis=1
+            ).astype(np.float32, copy=False)
+            next_states = np.concatenate(
+                (sample_flatten_z, samples["encoded_new_state"]), axis=1
+            ).astype(np.float32, copy=False)
 
-            # Select only the 8 columns needed
-            samples_subset = samples[
-                [
-                    "EIS",
-                    "encoded_state",
-                    "action_type",
-                    "action_position",
-                    "encoded_new_state",
-                    "reward",
-                    "terminal_flag",
-                    "priority",
-                ]
-            ]
-            for (
-                sample_EIS_i,
-                encoded_state,
-                sample_action_type,
-                sample_action_position,
-                encoded_next_state,
-                sample_reward,
-                sample_flag,
-                sample_priority,
-            ) in samples_subset.itertuples(index=False):
-                sample_action = (sample_action_type, sample_action_position)
-                sample_flatten_Z = self._active_env.dataset.iloc[sample_EIS_i]["flatten_Z"]
-
-                # Use pre-encoded states from buffer
-                NN_state = np.concatenate((sample_flatten_Z, encoded_state))
-                NN_next_state = np.concatenate((sample_flatten_Z, encoded_next_state))
-
-                all_states.append(NN_state)
-                all_next_state.append(NN_next_state)
-                all_rewards.append(sample_reward)
-                all_flags.append(sample_flag)
-                all_actions.append(sample_action)
-
-            # NOTE: This part is for the target Q-value
-            # Use the main model for finding the next best action
-            next_q_values_main = self.model.predict(np.array(all_next_state), verbose=0)
-            next_actions = np.argmax(next_q_values_main, axis=1)
-
-            # Use the target model for predicting the Q-values of the best next action
-            next_q_values = self.target_model.predict(np.array(all_next_state), verbose=0)
-            max_next_q_values = next_q_values[np.arange(self.batch_size), next_actions]
-
-            # Calculate target Q-values
-            target_q_values = (
-                np.array(all_rewards)
-                + (1 - np.array(all_flags)) * self.gamma * max_next_q_values
+            loss_mean, priorities = train_step(
+                states,
+                next_states,
+                samples["reward"].astype(np.float32, copy=False),
+                samples["terminal_flag"].astype(np.float32, copy=False),
+                samples["action_index"].astype(np.int32, copy=False),
+                weights.astype(np.float32, copy=False),
             )
-
-            # NOTE: This part is for Predicted Q-value and loss calculation (Predicted Q-value
-            # is also know as Selected Q-value as it is the Q-value for the selected/sampled
-            # action of that state)
-            # find action indices (labels)
-            action_indices = []
-            counter = 0
-            ACTIONS_LIST = self._active_env.ACTIONS_LIST
-            for action in all_actions:
-                indices = ACTIONS_LIST.loc[
-                    (ACTIONS_LIST["action_type"] == action[0])
-                    & (ACTIONS_LIST["action_position"] == action[1])
-                ].index
-                action_indices.append([counter, indices[0]])
-                counter += 1
-
-            # Gradient descent step to update the main model
-            with tf.GradientTape() as tape:
-                q_values = self.model(np.array(all_states))
-                selected_q_values = tf.gather_nd(q_values, action_indices)
-                loss = weights * tf.square(target_q_values - selected_q_values)
-                loss_mean = tf.reduce_mean(loss)
-            grads = tape.gradient(loss_mean, self.model.trainable_variables)
-            self.optimizer.apply_gradients(zip(grads, self.model.trainable_variables))
-            losses.append(loss_mean.numpy())
-
-            # Calculate the loss and then calculate/update the priority for PER
-            q_values = self.model(np.array(all_states))
-            selected_q_values = tf.gather_nd(q_values, action_indices)
-
-            td_errors = np.abs(target_q_values - selected_q_values.numpy())
-            priority = (td_errors + self.prioritized_replay_eps).astype(np.float32)
-            history.loc[sample_indices, "priority"] = priority
+            losses.append(float(loss_mean.numpy()))
+            history.buffer["priority"][sample_indices] = priorities.numpy().astype(
+                np.float32, copy=False
+            )
 
         return np.mean(losses)
 
@@ -1189,6 +1204,7 @@ class DDQN_ECM:
                 ),  # ADDED THIS
                 ("action_type", "U10"),
                 ("action_position", "i4"),
+                ("action_index", "i4"),
                 ("new_state", "U50"),
                 (
                     "encoded_new_state",
@@ -1326,6 +1342,7 @@ class DDQN_ECM:
         terminal_flag = 1 if good_fit else 0
 
         new_encoded_state = self._active_env.encoded_state.copy()
+        action_index = self._get_action_index_map()[(str(action_type), int(action_position))]
 
         # Add experience to buffer with priority
         priority = buffer.buffer["priority"][: buffer.size].max() if len(buffer) > 0 else 1.0
@@ -1336,6 +1353,7 @@ class DDQN_ECM:
             encoded_state=prev_encoded_state,  # NEW: Store encoded state
             action_type=action_type,
             action_position=action_position,
+            action_index=action_index,
             new_state=self._active_env.state,
             encoded_new_state=new_encoded_state,  # NEW: Store encoded next state
             reward=reward,
@@ -1402,13 +1420,8 @@ class DDQN_ECM:
         )
 
         if run_training:
-            history_buffer_df = buffer.to_dataframe()
-            loss = self._train_model(gradient_steps, history_buffer_df)
+            loss = self._train_model(gradient_steps, buffer)
             memory = 0
-            # Update buffer priorities
-            for idx in range(len(history_buffer_df)):
-                if idx < buffer.size:
-                    buffer.buffer["priority"][idx] = history_buffer_df.iloc[idx]["priority"]
 
         else:
             # Update memory counter
@@ -2083,6 +2096,7 @@ class DDQN_ECM:
             "batch_size": self.batch_size,
             "train_frequency": self.train_frequency,
             "update_target_frequency": self.update_target_frequency,
+            "gradient_steps": self.gradient_steps,
             "NN_sleep": self.NN_sleep,
             "buffer_capacity": self.buffer_capacity,
             "optimizer": self.optimizer_config,

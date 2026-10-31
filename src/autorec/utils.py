@@ -1,5 +1,6 @@
 from collections.abc import Iterable, Mapping
 import contextlib
+from functools import lru_cache
 import glob
 import io
 import logging
@@ -30,6 +31,12 @@ class DivergenceError(Exception):
 
 
 ec = ae.core.ec
+
+
+@lru_cache(maxsize=256)
+def _get_compiled_circuit_fn(circuit: str):
+    """Return a bounded, reusable JAX circuit function for a circuit topology."""
+    return generate_circuit_fn(circuit, jit=True)
 
 
 def save_evaluation_results(
@@ -635,7 +642,7 @@ def fit_circuit_parameters_NEW(
     assert method in ["UW", "X2", "PW", "B", "log-B", "log-BW"], msg
     assert len(freq) == len(Z), "Length of frequency and impedance data must match."
 
-    fn = generate_circuit_fn(circuit, jit=True)
+    fn = _get_compiled_circuit_fn(circuit)
     obj = {
         "UW": obj_UW,
         "X2": obj_X2,

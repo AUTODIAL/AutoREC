@@ -117,3 +117,21 @@ def test_get_parameter_bounds_maps_autoeis_parameter_types(monkeypatch):
 
     assert lower == (0.0, 0.0, 0.0, 0.0)
     assert upper == (1e9, 1e9, 1.0, 10.0)
+
+
+def test_compiled_circuit_function_is_reused_by_topology(monkeypatch):
+    calls = []
+
+    def generate(circuit, jit):
+        calls.append((circuit, jit))
+        return object()
+
+    utils._get_compiled_circuit_fn.cache_clear()
+    monkeypatch.setattr(utils, "generate_circuit_fn", generate)
+
+    first = utils._get_compiled_circuit_fn("R1-[R2,P3]")
+    second = utils._get_compiled_circuit_fn("R1-[R2,P3]")
+
+    assert first is second
+    assert calls == [("R1-[R2,P3]", True)]
+    utils._get_compiled_circuit_fn.cache_clear()

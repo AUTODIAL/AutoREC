@@ -52,6 +52,20 @@ def test_save_read_is_exact_and_rng_inert(agent, tmp_path):
         checkpoint.save_checkpoint(agent, path)
 
 
+def test_reconstructible_performance_caches_are_not_checkpoint_state(agent):
+    before = checkpoint._capture(agent)
+    agent._flatten_z_matrices = {}
+    agent._action_index_maps = {}
+    agent._compiled_train_step_signature = ("derived",)
+    agent._compiled_train_step = object()
+
+    assert exact(checkpoint._capture(agent)) == exact(before)
+
+    agent.unexpected_state = object()
+    with pytest.raises(ValueError, match="unmodified DDQN_ECM"):
+        checkpoint._capture(agent)
+
+
 @pytest.mark.parametrize("problem", ["missing", "corrupt", "version", "runtime", "incomplete"])
 def test_invalid_checkpoint_rejected_before_unpickling(agent, tmp_path, monkeypatch, problem):
     path = checkpoint.save_checkpoint(agent, tmp_path / "checkpoint")

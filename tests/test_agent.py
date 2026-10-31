@@ -223,24 +223,33 @@ def test_train_model_resamples_and_performs_requested_gradient_steps():
             "ACTIONS_LIST": pd.DataFrame([{"action_type": "R", "action_position": 0}]),
         },
     )()
-    history = pd.DataFrame(
-        {
-            "EIS": [0],
-            "encoded_state": [np.array([0.0])],
-            "action_type": ["R"],
-            "action_position": [0],
-            "encoded_new_state": [np.array([0.0])],
-            "reward": [1.0],
-            "terminal_flag": [1],
-            "priority": [1.0],
-        }
+    history = agent_module.CircularBuffer(
+        capacity=1,
+        dtypes=[
+            ("EIS", "i4"),
+            ("encoded_state", "f4", (1,)),
+            ("action_index", "i4"),
+            ("encoded_new_state", "f4", (1,)),
+            ("reward", "f4"),
+            ("terminal_flag", "i1"),
+            ("priority", "f4"),
+        ],
+    )
+    history.add(
+        EIS=0,
+        encoded_state=np.array([0.0]),
+        action_index=0,
+        encoded_new_state=np.array([0.0]),
+        reward=1.0,
+        terminal_flag=1,
+        priority=1.0,
     )
     sample_count = 0
 
     def sample_experience(replay, beta):
         nonlocal sample_count
         sample_count += 1
-        return replay, np.array([0]), np.ones(1)
+        return replay.buffer[:1], np.array([0]), np.ones(1)
 
     agent._sample_experience = sample_experience
 
@@ -249,7 +258,33 @@ def test_train_model_resamples_and_performs_requested_gradient_steps():
     assert sample_count == 3
     assert agent.optimizer.iterations.numpy() == 3
     assert np.isfinite(loss)
-    assert history.loc[0, "priority"] != 1.0
+    assert history["priority"][0] != 1.0
+
+
+def test_check_and_train_passes_numpy_buffer_without_dataframe_conversion():
+    agent = object.__new__(agent_module.DDQN_ECM)
+    agent.NN_sleep = 10
+    agent.train_frequency = 5
+    buffer = agent_module.CircularBuffer(capacity=1, dtypes=[("priority", "f4")])
+    buffer.add(priority=1.0)
+
+    def fail_if_converted():
+        raise AssertionError("training must not convert replay to a DataFrame")
+
+    buffer.to_dataframe = fail_if_converted
+    received = []
+
+    def train_model(gradient_steps, replay):
+        received.append((gradient_steps, replay))
+        return 0.25
+
+    agent._train_model = train_model
+
+    loss, memory = agent._check_and_train(3, buffer, iteration=10, memory=4)
+
+    assert received == [(3, buffer)]
+    assert loss == pytest.approx(0.25)
+    assert memory == 0
 
 
 def test_default_hidden_layer_configs_are_not_shared(light_agent, tmp_path):
@@ -441,6 +476,7 @@ def test_agent_metadata_records_configuration(light_agent, tmp_path):
         "batch_size": 32,
         "train_frequency": 2,
         "update_target_frequency": 50,
+        "gradient_steps": 1,
         "NN_sleep": 40,
         "buffer_capacity": 500,
         "prioritized_replay_alpha": 0.7,
