@@ -198,13 +198,15 @@ configuration.
 
 ## Validation and limits
 
-Regular tests compare 12 continuous trials, the same run with periodic saves, and three
-fresh-process sessions of 3, 4 and 5 trials, for both LRU and Clock. They compare exact
-numerical bytes and ordered state for networks, optimizer, replay, caches, environments,
-RNG streams, schedules, counters and histories, plus transition and replay-sampling traces.
-The expensive 1,000-trial test uses ten fresh 100-trial processes and a continuous saving
-control. It uses sparse optimizer updates to keep runtime practical while crossing warm-up,
-target updates, replay wrapping and schedule boundaries.
+The routine fresh-process test compares 8 continuous trials with fresh-process sessions of
+3 and 5 trials using the more stateful Clock cache. The split sessions perform periodic
+saves, and every worker verifies that its final save is state-inert. The test compares exact
+numerical bytes and ordered state for networks, optimizer, replay, cache, environments, RNG
+streams, schedules, counters and histories, plus transition and replay-sampling traces.
+Separate component and same-process integration tests cover both LRU and Clock behavior. The
+expensive 1,000-trial test additionally uses a continuous periodic-saving control alongside
+ten fresh 100-trial processes. It uses sparse optimizer updates to keep runtime practical
+while crossing warm-up, target updates, replay wrapping and schedule boundaries.
 
 Both use a controlled, RNG-consuming fitter and real RL/TensorFlow updates. Circuit helper
 calls and model/plot output are replaced. These tests establish checkpoint equivalence

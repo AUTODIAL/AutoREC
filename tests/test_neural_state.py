@@ -191,9 +191,8 @@ def test_snapshots_are_independent_and_frozen_layers_are_preserved():
     assert arrays(restored_optimizer.variables) == arrays(optimizer.variables)
 
 
-@pytest.mark.parametrize(
-    "damage",
-    [
+def test_invalid_state_does_not_partially_restore_networks():
+    damage_cases = [
         "version",
         "runtime",
         "missing",
@@ -208,72 +207,69 @@ def test_snapshots_are_independent_and_frozen_layers_are_preserved():
         "built",
         "optimizer_type",
         "iterations",
-    ],
-)
-def test_invalid_state_does_not_partially_restore_networks(damage):
+    ]
     online, target = models()
     optimizer = tf.keras.optimizers.Adam()
     step(online, optimizer)
-    state = neural_state_dict(online, target, optimizer)
-    destination, destination_target = models()
-    before = arrays(destination.variables), arrays(destination_target.variables)
-    if damage == "version":
-        state["version"] = 2
-    elif damage == "runtime":
-        state["keras_version"] = "incompatible"
-    elif damage == "missing":
-        del state["target"]
-    elif damage == "model_count":
-        state["online"]["variables"].pop()
-    elif damage == "target_dtype":
-        record = state["target"]["variables"][0]
-        record["value"] = record["value"].astype(np.float64)
-    elif damage == "shape":
-        state["online"]["variables"][0]["value"] = np.zeros(1, dtype=np.float32)
-    elif damage == "name":
-        state["target"]["variables"][0]["name"] = "wrong"
-    elif damage == "trainable":
-        state["online"]["variables"][0]["trainable"] = False
-    elif damage == "architecture":
-        state["online"]["config"]["layers"][1]["config"]["activation"] = "relu"
-    elif damage == "optimizer_count":
-        state["optimizer"]["variables"].pop()
-    elif damage == "optimizer_dtype":
-        state["optimizer"]["variables"][0] = np.array(1, dtype=np.int32)
-    elif damage == "built":
-        state["optimizer"]["built"] = False
-    elif damage == "optimizer_type":
-        state["optimizer"]["config"]["type"] = "CustomOptimizer"
-    elif damage == "iterations":
-        state["optimizer"]["variables"][0][...] = -1
-    python_state, numpy_state = random.getstate(), np.random.get_state()
-    with pytest.raises((ValueError, TypeError)):
-        restore_neural_state(state, destination, destination_target)
-    assert (arrays(destination.variables), arrays(destination_target.variables)) == before
-    assert random.getstate() == python_state
-    np.testing.assert_equal(np.random.get_state(), numpy_state)
+    valid_state = neural_state_dict(online, target, optimizer)
+    for damage in damage_cases:
+        state = deepcopy(valid_state)
+        destination, destination_target = models()
+        before = arrays(destination.variables), arrays(destination_target.variables)
+        if damage == "version":
+            state["version"] = 2
+        elif damage == "runtime":
+            state["keras_version"] = "incompatible"
+        elif damage == "missing":
+            del state["target"]
+        elif damage == "model_count":
+            state["online"]["variables"].pop()
+        elif damage == "target_dtype":
+            record = state["target"]["variables"][0]
+            record["value"] = record["value"].astype(np.float64)
+        elif damage == "shape":
+            state["online"]["variables"][0]["value"] = np.zeros(1, dtype=np.float32)
+        elif damage == "name":
+            state["target"]["variables"][0]["name"] = "wrong"
+        elif damage == "trainable":
+            state["online"]["variables"][0]["trainable"] = False
+        elif damage == "architecture":
+            state["online"]["config"]["layers"][1]["config"]["activation"] = "relu"
+        elif damage == "optimizer_count":
+            state["optimizer"]["variables"].pop()
+        elif damage == "optimizer_dtype":
+            state["optimizer"]["variables"][0] = np.array(1, dtype=np.int32)
+        elif damage == "built":
+            state["optimizer"]["built"] = False
+        elif damage == "optimizer_type":
+            state["optimizer"]["config"]["type"] = "CustomOptimizer"
+        elif damage == "iterations":
+            state["optimizer"]["variables"][0][...] = -1
+        python_state, numpy_state = random.getstate(), np.random.get_state()
+        with pytest.raises((ValueError, TypeError)):
+            restore_neural_state(state, destination, destination_target)
+        assert (arrays(destination.variables), arrays(destination_target.variables)) == before
+        assert random.getstate() == python_state
+        np.testing.assert_equal(np.random.get_state(), numpy_state)
 
 
-@pytest.mark.parametrize(
-    "kind", ["ema", "accumulation", "scaling", "exclusions", "binding", "callable"]
-)
-def test_unsupported_optimizer_state_is_rejected(kind):
+def test_unsupported_optimizer_state_is_rejected():
     online, target = models()
-    config = {
+    for kind, config in {
         "ema": {"use_ema": True},
         "accumulation": {"gradient_accumulation_steps": 2},
         "scaling": {"loss_scale_factor": 2.0},
         "exclusions": {},
         "binding": {},
         "callable": {"learning_rate": lambda: 0.01},
-    }[kind]
-    optimizer = tf.keras.optimizers.Adam(**config)
-    if kind == "exclusions":
-        optimizer.exclude_from_weight_decay(var_list=online.trainable_variables[:1])
-    if kind == "binding":
-        optimizer.build(target.trainable_variables)
-    with pytest.raises(ValueError):
-        neural_state_dict(online, target, optimizer)
+    }.items():
+        optimizer = tf.keras.optimizers.Adam(**config)
+        if kind == "exclusions":
+            optimizer.exclude_from_weight_decay(var_list=online.trainable_variables[:1])
+        if kind == "binding":
+            optimizer.build(target.trainable_variables)
+        with pytest.raises(ValueError):
+            neural_state_dict(online, target, optimizer)
 
 
 def test_shared_models_and_unsupported_layer_are_rejected():

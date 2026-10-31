@@ -237,9 +237,8 @@ def test_pipeline_builder_uses_environment_dataset_without_dataprep(factory):
     assert agent.kwargs["eval_env"] is None
 
 
-@pytest.mark.parametrize(
-    ("config", "error_type", "message"),
-    [
+def test_validate_pipeline_config_rejects_invalid_structures(factory):
+    cases = (
         ([], TypeError, "must be a dictionary"),
         ({"agent": {}}, KeyError, "include an 'environment' section"),
         (
@@ -262,13 +261,10 @@ def test_pipeline_builder_uses_environment_dataset_without_dataprep(factory):
             KeyError,
             "include an 'agent' section",
         ),
-    ],
-)
-def test_validate_pipeline_config_rejects_invalid_structure(
-    factory, config, error_type, message
-):
-    with pytest.raises(error_type, match=message):
-        factory._validate_pipeline_config(config)
+    )
+    for config, error_type, message in cases:
+        with pytest.raises(error_type, match=message):
+            factory._validate_pipeline_config(config)
 
 
 def test_yaml_pipeline_forwards_generic_model_and_optimizer_configs(factory, tmp_path):

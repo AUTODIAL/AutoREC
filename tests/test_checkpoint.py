@@ -66,27 +66,29 @@ def test_reconstructible_performance_caches_are_not_checkpoint_state(agent):
         checkpoint._capture(agent)
 
 
-@pytest.mark.parametrize("problem", ["missing", "corrupt", "version", "runtime", "incomplete"])
-def test_invalid_checkpoint_rejected_before_unpickling(agent, tmp_path, monkeypatch, problem):
-    path = checkpoint.save_checkpoint(agent, tmp_path / "checkpoint")
-    manifest_path = path / "manifest.json"
-    manifest = json.loads(manifest_path.read_text())
-    if problem == "missing":
-        (path / "neural.pkl").unlink()
-    elif problem == "corrupt":
-        (path / "training.pkl").write_bytes(b"broken")
-    elif problem == "version":
-        manifest["format_version"] = 100
-    elif problem == "runtime":
-        manifest["runtime"]["python"] = "incompatible"
-    else:
-        manifest["files"].pop("replay.npy")
-    manifest_path.write_text(json.dumps(manifest))
+def test_invalid_checkpoints_are_rejected_before_unpickling(agent, tmp_path, monkeypatch):
     monkeypatch.setattr(
         checkpoint.pickle, "load", lambda *_: pytest.fail("Unpickled before validation")
     )
-    with pytest.raises(ValueError):
-        checkpoint._read_checkpoint(path)
+
+    for problem in ("missing", "corrupt", "version", "runtime", "incomplete"):
+        path = checkpoint.save_checkpoint(agent, tmp_path / f"checkpoint-{problem}")
+        manifest_path = path / "manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        if problem == "missing":
+            (path / "neural.pkl").unlink()
+        elif problem == "corrupt":
+            (path / "training.pkl").write_bytes(b"broken")
+        elif problem == "version":
+            manifest["format_version"] = 100
+        elif problem == "runtime":
+            manifest["runtime"]["python"] = "incompatible"
+        else:
+            manifest["files"].pop("replay.npy")
+        manifest_path.write_text(json.dumps(manifest))
+
+        with pytest.raises(ValueError):
+            checkpoint._read_checkpoint(path)
 
 
 def test_interrupted_write_preserves_previous_checkpoint(agent, tmp_path, monkeypatch):
@@ -124,16 +126,17 @@ def test_restore_before_optimizer_slots_and_relocate(agent, tmp_path):
     )
 
 
-@pytest.mark.parametrize("value", [0, -1, True, 1.5, "3"])
-def test_invalid_restored_session_length_is_rng_inert(agent, tmp_path, value):
+def test_invalid_restored_session_lengths_are_rng_inert(agent, tmp_path):
     path = checkpoint.save_checkpoint(agent, tmp_path / "checkpoint")
-    before = rng_state_dict()
-    error = TypeError if value is True or not isinstance(value, int) else ValueError
 
-    with pytest.raises(error, match="num_trials"):
-        checkpoint.load_checkpoint(path, num_trials=value)
+    for value in (0, -1, True, 1.5, "3"):
+        before = rng_state_dict()
+        error = TypeError if value is True or not isinstance(value, int) else ValueError
 
-    assert pickle.dumps(before) == pickle.dumps(rng_state_dict())
+        with pytest.raises(error, match="num_trials"):
+            checkpoint.load_checkpoint(path, num_trials=value)
+
+        assert pickle.dumps(before) == pickle.dumps(rng_state_dict())
 
 
 def test_failed_reconstruction_restores_caller_rng(agent, tmp_path, monkeypatch):
@@ -154,11 +157,11 @@ def test_failed_reconstruction_restores_caller_rng(agent, tmp_path, monkeypatch)
     assert pickle.dumps(before) == pickle.dumps(rng_state_dict())
 
 
-@pytest.mark.parametrize("every", [0, -1, True, 1.5])
-def test_invalid_checkpoint_interval_does_not_advance(agent, tmp_path, every):
-    with pytest.raises(ValueError, match="positive integer"):
-        agent.train(additional_trials=1, checkpoint_dir=tmp_path, checkpoint_every=every)
-    assert agent.completed_trials == 0
+def test_invalid_checkpoint_intervals_do_not_advance(agent, tmp_path):
+    for every in (0, -1, True, 1.5):
+        with pytest.raises(ValueError, match="positive integer"):
+            agent.train(additional_trials=1, checkpoint_dir=tmp_path, checkpoint_every=every)
+        assert agent.completed_trials == 0
 
 
 def test_checkpoint_interval_requires_directory(agent):

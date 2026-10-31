@@ -45,15 +45,20 @@ runtime is much larger than most validation tests, despite having few pytest cas
   RNG state, environment identity, neural variables and optimizer state, and rejection of
   malformed or unsupported checkpoints.
 - Shared validators use representative field/type combinations rather than every Cartesian
-  product. Policy-specific checks remain separate. Both optimizer classes retain unbuilt,
-  built and trained coverage; every supported learning-rate schedule and AMSGrad still has
-  a trained-state round trip and exact subsequent-update comparison.
+  product. Equivalent malformed-input cases run as a table inside one test instead of
+  appearing as dozens of separate collected items. Policy-specific checks remain separate.
+  Both optimizer classes retain unbuilt, built and trained coverage; every supported
+  learning-rate schedule and AMSGrad still has a trained-state round trip and exact
+  subsequent-update comparison.
 - Same-process integration tests retain repeated single-trial sessions, continuation across
   warm-up, default/custom schedules, zero-length sessions, and fixed expectations for
   replay insertion, learning and target-update timing.
-- Fresh-process integration tests compare continuous training, continuous saving, and repeated
-  restoration for both LRU and Clock, using exact final states and transition/sampling traces.
-  These replace the older component-only neural/cache restoration variants of full training.
+- The routine fresh-process integration test compares continuous training with restoration
+  across one process boundary using the more stateful Clock policy. The split sessions perform
+  periodic saves, and every worker separately checks that its final save is state-inert. The
+  test uses exact final states and transition/sampling traces. Component and same-process
+  integration tests retain separate coverage of both LRU and Clock behavior. The opt-in
+  1,000-trial test additionally retains a continuous periodic-saving control.
 
 The suite deliberately no longer runs every optimizer configuration in every slot phase,
 every invalid value against every metadata field, or every cache policy against the same

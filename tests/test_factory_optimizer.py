@@ -22,9 +22,8 @@ def test_create_optimizer_builds_builtin_optimizer_without_mutating_config():
     assert config == {"type": "SGD", "learning_rate": 0.01, "momentum": 0.9}
 
 
-@pytest.mark.parametrize(
-    ("config", "error_type", "message"),
-    [
+def test_create_optimizer_rejects_invalid_configs():
+    cases = (
         ([], TypeError, "must be a dictionary"),
         ({"learning_rate": 0.001}, ValueError, "must contain a 'type'"),
         ({"type": 42}, ValueError, "must be a non-empty string"),
@@ -35,11 +34,10 @@ def test_create_optimizer_builds_builtin_optimizer_without_mutating_config():
             ValueError,
             "Failed to create Keras optimizer",
         ),
-    ],
-)
-def test_create_optimizer_rejects_invalid_configs(config, error_type, message):
-    with pytest.raises(error_type, match=message):
-        create_optimizer(config)
+    )
+    for config, error_type, message in cases:
+        with pytest.raises(error_type, match=message):
+            create_optimizer(config)
 
 
 def test_optimizer_config_round_trip_preserves_builtin_optimizer_settings():
@@ -93,9 +91,8 @@ def test_create_lr_schedule_builds_schedule_without_mutating_config():
     }
 
 
-@pytest.mark.parametrize(
-    ("config", "error_type", "message"),
-    [
+def test_create_lr_schedule_rejects_invalid_configs():
+    cases = (
         ([], TypeError, "must be a dictionary"),
         ({}, ValueError, "must contain a 'type'"),
         ({"type": 42}, ValueError, "must be a non-empty string"),
@@ -111,11 +108,10 @@ def test_create_lr_schedule_builds_schedule_without_mutating_config():
             ValueError,
             "Failed to create learning-rate schedule",
         ),
-    ],
-)
-def test_create_lr_schedule_rejects_invalid_configs(config, error_type, message):
-    with pytest.raises(error_type, match=message):
-        create_lr_schedule(config)
+    )
+    for config, error_type, message in cases:
+        with pytest.raises(error_type, match=message):
+            create_lr_schedule(config)
 
 
 def test_lr_schedule_config_round_trip_preserves_settings():

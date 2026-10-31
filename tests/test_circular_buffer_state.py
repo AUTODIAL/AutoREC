@@ -121,21 +121,23 @@ def test_export_and_restore_leave_rng_streams_unchanged():
     np.testing.assert_equal(np.random.get_state(), numpy_state)
 
 
-@pytest.mark.parametrize(
-    ("name", "value"),
-    [("version", True), ("capacity", 1.5), ("size", "1"), ("position", np.bool_(False))],
-)
-def test_noninteger_metadata_is_rejected(name, value):
+def test_noninteger_metadata_is_rejected():
+    cases = [
+        ("version", True),
+        ("capacity", 1.5),
+        ("size", "1"),
+        ("position", np.bool_(False)),
+    ]
     # All metadata fields use the same type check: cover each field/type without a product.
-    state = CircularBuffer(3, DTYPE).state_dict()
-    state[name] = value
-    with pytest.raises(TypeError, match=f"{name} must be an integer"):
-        CircularBuffer.from_state_dict(state)
+    for name, value in cases:
+        state = CircularBuffer(3, DTYPE).state_dict()
+        state[name] = value
+        with pytest.raises(TypeError, match=f"{name} must be an integer"):
+            CircularBuffer.from_state_dict(state)
 
 
-@pytest.mark.parametrize(
-    ("updates", "message"),
-    [
+def test_invalid_metadata_or_array_is_rejected_without_modifying_input():
+    cases = [
         ({"version": 2}, "version"),
         ({"capacity": 0}, "capacity"),
         ({"size": -1}, "size"),
@@ -147,15 +149,14 @@ def test_noninteger_metadata_is_rejected(name, value):
         ({"buffer": np.zeros((3, 1), dtype=DTYPE)}, "shape"),
         ({"buffer": np.zeros(3)}, "structured dtype"),
         ({"buffer": np.zeros(3, dtype=[])}, "structured dtype"),
-    ],
-)
-def test_invalid_metadata_or_array_is_rejected_without_modifying_input(updates, message):
-    state = CircularBuffer(3, DTYPE).state_dict()
-    state.update(updates)
-    before = state["buffer"].tobytes()
-    with pytest.raises(ValueError, match=message):
-        CircularBuffer.from_state_dict(state)
-    assert state["buffer"].tobytes() == before
+    ]
+    for updates, message in cases:
+        state = CircularBuffer(3, DTYPE).state_dict()
+        state.update(updates)
+        before = state["buffer"].tobytes()
+        with pytest.raises(ValueError, match=message):
+            CircularBuffer.from_state_dict(state)
+        assert state["buffer"].tobytes() == before
 
 
 def test_missing_keys_are_rejected():
@@ -175,11 +176,11 @@ def test_extra_keys_and_wrong_payload_types_are_rejected():
         CircularBuffer.from_state_dict({**state, "buffer": state["buffer"].tolist()})
 
 
-@pytest.mark.parametrize("dtype", [[("value", object)], [("nested", [("value", object)])]])
-def test_object_fields_are_rejected_on_export_and_restore(dtype):
-    unsupported = CircularBuffer(3, dtype)
-    with pytest.raises(TypeError, match="Python objects"):
-        unsupported.state_dict()
-    state = CircularBuffer(3, DTYPE).state_dict()
-    with pytest.raises(TypeError, match="Python objects"):
-        CircularBuffer.from_state_dict({**state, "buffer": unsupported.buffer})
+def test_object_fields_are_rejected_on_export_and_restore():
+    for dtype in [[("value", object)], [("nested", [("value", object)])]]:
+        unsupported = CircularBuffer(3, dtype)
+        with pytest.raises(TypeError, match="Python objects"):
+            unsupported.state_dict()
+        state = CircularBuffer(3, DTYPE).state_dict()
+        with pytest.raises(TypeError, match="Python objects"):
+            CircularBuffer.from_state_dict({**state, "buffer": unsupported.buffer})

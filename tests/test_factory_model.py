@@ -22,19 +22,17 @@ def test_create_layer_builds_builtin_layer_without_mutating_config():
     assert config == {"type": "Dropout", "rate": 0.25, "seed": 7}
 
 
-@pytest.mark.parametrize(
-    ("config", "error_type", "message"),
-    [
+def test_create_layer_rejects_invalid_configs():
+    cases = (
         ([], TypeError, "must be a dictionary"),
         ({"units": 4}, ValueError, "must contain a 'type'"),
         ({"type": 42}, ValueError, "must be a non-empty string"),
         ({"type": "NotAKerasLayer"}, ValueError, "Unknown Keras layer type"),
         ({"type": "Dense", "not_an_argument": 1}, ValueError, "Failed to create"),
-    ],
-)
-def test_create_layer_rejects_invalid_configs(config, error_type, message):
-    with pytest.raises(error_type, match=message):
-        create_layer(config)
+    )
+    for config, error_type, message in cases:
+        with pytest.raises(error_type, match=message):
+            create_layer(config)
 
 
 def test_create_model_builds_generic_sequential_stack():

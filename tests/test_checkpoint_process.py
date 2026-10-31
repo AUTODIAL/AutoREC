@@ -13,7 +13,7 @@ pytestmark = pytest.mark.integration
 
 
 def run_worker(
-    directory, *, resume=None, schedule_trials=12, count=12, cache="lru", save_every=None
+    directory, *, resume=None, schedule_trials=8, count=8, cache="clock", save_every=None
 ):
     command = [
         sys.executable,
@@ -48,18 +48,19 @@ def run_worker(
         return pickle.load(stream)
 
 
-def compare_sessions(tmp_path, *, horizon, counts, cache):
+def compare_sessions(tmp_path, *, horizon, counts, cache, saving_control=False):
     continuous = run_worker(
         tmp_path / "continuous", cache=cache, schedule_trials=horizon, count=horizon
     )
-    saving = run_worker(
-        tmp_path / "saving",
-        cache=cache,
-        schedule_trials=horizon,
-        count=horizon,
-        save_every=counts[0],
-    )
-    assert continuous == saving
+    if saving_control:
+        saving = run_worker(
+            tmp_path / "saving",
+            cache=cache,
+            schedule_trials=horizon,
+            count=horizon,
+            save_every=counts[0],
+        )
+        assert continuous == saving
     resume = None
     trace = []
     completed = 0
@@ -81,9 +82,8 @@ def compare_sessions(tmp_path, *, horizon, counts, cache):
     assert continuous["trace"] == trace
 
 
-@pytest.mark.parametrize("cache", ["lru", "clock"])
-def test_fresh_process_continuation(tmp_path, cache):
-    compare_sessions(tmp_path, horizon=12, counts=[3, 4, 5], cache=cache)
+def test_fresh_process_continuation(tmp_path):
+    compare_sessions(tmp_path, horizon=8, counts=[3, 5], cache="clock")
 
 
 @pytest.mark.skipif(
@@ -91,4 +91,10 @@ def test_fresh_process_continuation(tmp_path, cache):
     reason="Opt-in 1000-trial fresh-process acceptance test",
 )
 def test_1000_trials_vs_ten_fresh_process_sessions(tmp_path):
-    compare_sessions(tmp_path, horizon=1000, counts=[100] * 10, cache="clock")
+    compare_sessions(
+        tmp_path,
+        horizon=1000,
+        counts=[100] * 10,
+        cache="clock",
+        saving_control=True,
+    )

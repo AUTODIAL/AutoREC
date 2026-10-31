@@ -137,15 +137,15 @@ def test_absolute_beta_schedule_matches_legacy_horizon(light_agent, tmp_path):
     assert legacy.prioritized_replay_beta == absolute.prioritized_replay_beta
 
 
-@pytest.mark.parametrize("value", [0, -1, True, "595"])
-def test_absolute_beta_schedule_rejects_invalid_duration(light_agent, tmp_path, value):
-    error = TypeError if value is True or isinstance(value, str) else ValueError
-    with pytest.raises(error, match="beta_anneal_trials"):
-        light_agent(
-            training_env=DummyEnv(),
-            save_dir=tmp_path,
-            beta_anneal_trials=value,
-        )
+def test_absolute_beta_schedule_rejects_invalid_durations(light_agent, tmp_path):
+    for index, value in enumerate((0, -1, True, "595")):
+        error = TypeError if value is True or isinstance(value, str) else ValueError
+        with pytest.raises(error, match="beta_anneal_trials"):
+            light_agent(
+                training_env=DummyEnv(),
+                save_dir=tmp_path / str(index),
+                beta_anneal_trials=value,
+            )
 
 
 def test_absolute_and_fractional_beta_schedules_are_mutually_exclusive(light_agent, tmp_path):
@@ -179,24 +179,20 @@ def test_agent_forwards_custom_model_configuration(light_agent, tmp_path):
     assert agent.model_setup == (str(model_path), hidden_layers)
 
 
-@pytest.mark.parametrize(
-    ("gradient_steps", "exception", "message"),
-    [
+def test_agent_rejects_invalid_gradient_steps(light_agent, tmp_path):
+    cases = (
         (0, ValueError, "at least 1"),
         (-1, ValueError, "at least 1"),
         (1.5, TypeError, "must be an integer"),
         (True, TypeError, "must be an integer"),
-    ],
-)
-def test_agent_rejects_invalid_gradient_steps(
-    light_agent, tmp_path, gradient_steps, exception, message
-):
-    with pytest.raises(exception, match=message):
-        light_agent(
-            training_env=DummyEnv(),
-            save_dir=tmp_path,
-            gradient_steps=gradient_steps,
-        )
+    )
+    for index, (gradient_steps, exception, message) in enumerate(cases):
+        with pytest.raises(exception, match=message):
+            light_agent(
+                training_env=DummyEnv(),
+                save_dir=tmp_path / str(index),
+                gradient_steps=gradient_steps,
+            )
 
 
 def test_train_model_resamples_and_performs_requested_gradient_steps():

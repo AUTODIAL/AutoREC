@@ -176,9 +176,8 @@ def test_cache_payload_preserves_cpu_jax_scalars(cache_class):
     assert np.asarray(value).tobytes() == np.asarray(scalar).tobytes()
 
 
-@pytest.mark.parametrize(
-    ("updates", "error", "message"),
-    [
+def test_invalid_common_state_is_rejected():
+    cases = [
         ({"version": 2}, ValueError, "version"),
         ({"version": True}, TypeError, "integer"),
         ({"capacity": 0}, ValueError, "capacity"),
@@ -193,16 +192,15 @@ def test_cache_payload_preserves_cpu_jax_scalars(cache_class):
         ({"entries": [("a", {})]}, TypeError, "hashable tuples"),
         ({"entries": [(([1],), {})]}, TypeError, "hashable tuples"),
         ({"entries": [(("a",), None)]}, TypeError, "payloads"),
-    ],
-)
-def test_invalid_common_state_is_rejected(updates, error, message):
+    ]
     # Both policies call the same common validator. Clock-specific metadata is tested below.
-    state = LRUCache(3).state_dict()
-    state.update(deepcopy(updates))
-    before = frozen(state)
-    with pytest.raises(error, match=message):
-        LRUCache.from_state_dict(state)
-    assert frozen(state) == before
+    for updates, error, message in cases:
+        state = LRUCache(3).state_dict()
+        state.update(deepcopy(updates))
+        before = frozen(state)
+        with pytest.raises(error, match=message):
+            LRUCache.from_state_dict(state)
+        assert frozen(state) == before
 
 
 @pytest.mark.parametrize("cache_class", [LRUCache, ClockCache])
@@ -226,9 +224,8 @@ def test_wrong_policy_extra_fields_and_nondict_are_rejected(cache_class):
         cache_class.from_state_dict({**state, "cache_type": np.array("lru")})
 
 
-@pytest.mark.parametrize(
-    ("updates", "error", "message"),
-    [
+def test_invalid_clock_state_is_rejected():
+    cases = [
         ({"hand": True}, TypeError, "integer"),
         ({"hand": -1}, ValueError, "hand"),
         ({"hand": 3}, ValueError, "hand"),
@@ -239,15 +236,14 @@ def test_wrong_policy_extra_fields_and_nondict_are_rejected(cache_class):
         ({"reference_bits": []}, TypeError, "dictionary"),
         ({"reference_bits": {}}, ValueError, "match entry keys"),
         ({"reference_bits": {("a",): 1}}, TypeError, "booleans"),
-    ],
-)
-def test_invalid_clock_state_is_rejected(updates, error, message):
-    cache = ClockCache(3)
-    cache.put(("a",), {})
-    state = cache.state_dict()
-    state.update(updates)
-    with pytest.raises(error, match=message):
-        ClockCache.from_state_dict(state)
+    ]
+    for updates, error, message in cases:
+        cache = ClockCache(3)
+        cache.put(("a",), {})
+        state = cache.state_dict()
+        state.update(updates)
+        with pytest.raises(error, match=message):
+            ClockCache.from_state_dict(state)
 
 
 def test_history_cache_rejects_bad_keys_missing_payload_and_policy_mismatch():

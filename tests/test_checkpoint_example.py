@@ -129,10 +129,14 @@ def test_resume_normalizes_concise_optimizer_configuration_without_mutating_inpu
     assert value["agent"]["optimizer"] == {"type": "Adam", "learning_rate": 0.0005}
 
 
-@pytest.mark.parametrize("value", [0, -1, True, 1.5, None])
-def test_configuration_rejects_invalid_session_length(tmp_path, value):
-    with pytest.raises(ValueError, match="agent.num_trials"):
-        example._read_and_validate(write_config(tmp_path, config(tmp_path, num_trials=value)))
+def test_configuration_rejects_invalid_session_lengths(tmp_path):
+    for index, value in enumerate((0, -1, True, 1.5, None)):
+        case_path = tmp_path / str(index)
+        case_path.mkdir()
+        with pytest.raises(ValueError, match="agent.num_trials"):
+            example._read_and_validate(
+                write_config(case_path, config(case_path, num_trials=value))
+            )
 
 
 def test_next_configuration_preserves_settings_and_uses_exact_checkpoint(tmp_path):
