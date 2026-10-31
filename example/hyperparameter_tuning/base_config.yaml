@@ -70,7 +70,7 @@ agent:
   # Saving the results
   save_dir: ./
   save_start: 0
-  save_frequency: 500
+  save_frequency: 100
 
   # Simulation parameters
   action_cap: null  # After action_cap actions, start_state is seen again.

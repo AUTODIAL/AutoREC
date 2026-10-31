@@ -50,7 +50,7 @@ agent:
   random_seed: 42
 
   # RL parameters
-  num_trials: 1000
+  num_trials: 10000
   episodes_trial: 1  # The initial state is visited num_episodes times
   gamma: 0.99  # Discount factor: close to 1 values future states highly, close to 0 values immediate states in path more
   continuous_deadloop: 2  # Performes n repetitive actions. Note that the deadloop is detected only after NN_sleep.
