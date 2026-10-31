@@ -57,6 +57,14 @@ def _parse_args() -> argparse.Namespace:
         type=Path,
         default=WORK_DIR / "search_space.yaml",
     )
+    parser.add_argument(
+        "--login-node",
+        default=None,
+        help=(
+            "SSH host used to submit and monitor child Slurm jobs. Omit when runner.py "
+            "is executed directly on a login node."
+        ),
+    )
     parser.add_argument("--num-initial", type=_positive_integer, default=10)
     parser.add_argument("--num-iterations", type=_positive_integer, default=5)
     parser.add_argument("--batch-size", type=_positive_integer, default=5)
@@ -167,6 +175,7 @@ def _submit_stage(
     python_file: Path,
     job_name_prefix: str,
     sbatch_options: dict,
+    login_node: str | None,
 ) -> None:
     job_ids = []
     submitted_config_ids = set()
@@ -185,12 +194,13 @@ def _submit_stage(
             options,
             script_args=("--target-trials", target_trials),
             archive_models=target_trials == max_trials,
+            login_node=login_node,
             submit=True,
         )
         if job_id is None:
             raise RuntimeError(f"Slurm did not return a job ID for config {config_id}.")
         job_ids.append(job_id)
-    block_until_completed(job_ids)
+    block_until_completed(job_ids, login_node=login_node)
 
 
 def _score_candidate(candidate: dict, target_trials: int, reward_sample_size: int):
@@ -211,6 +221,7 @@ def _run_baseline(
     python_file: Path,
     job_name_prefix: str,
     sbatch_options: dict,
+    login_node: str | None,
     reward_sample_size: int,
     rung_rows: list[dict],
 ) -> None:
@@ -232,6 +243,7 @@ def _run_baseline(
             python_file,
             job_name_prefix,
             sbatch_options,
+            login_node,
         )
         final_score, components = _score_candidate(candidate, target, reward_sample_size)
         intermediate_values[target] = float(final_score)
@@ -272,6 +284,7 @@ def _run_candidate_group(
     python_file: Path,
     job_name_prefix: str,
     sbatch_options: dict,
+    login_node: str | None,
     reward_sample_size: int,
     rung_rows: list[dict],
 ) -> None:
@@ -298,6 +311,7 @@ def _run_candidate_group(
             python_file,
             job_name_prefix,
             sbatch_options,
+            login_node,
         )
         scores = {}
         components_by_trial = {}
@@ -380,6 +394,7 @@ def main() -> None:
     print(f"Results: {results_dir}")
     print(f"Cumulative targets: {targets}")
     print(f"Promotion targets: {promotion_targets}")
+    print(f"Slurm control host: {args.login_node or 'local node'}")
     print("The baseline is protected from pruning and runs to the maximum budget.")
     pprint(handler.search_space_bounds, sort_dicts=False)
 
@@ -392,6 +407,7 @@ def main() -> None:
         python_file,
         job_name_prefix,
         sbatch_options,
+        args.login_node,
         reward_sample_size,
         rung_rows,
     )
@@ -418,6 +434,7 @@ def main() -> None:
             python_file,
             job_name_prefix,
             sbatch_options,
+            args.login_node,
             reward_sample_size,
             rung_rows,
         )

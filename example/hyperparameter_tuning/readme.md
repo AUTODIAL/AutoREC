@@ -45,14 +45,16 @@ pip install -r requirements.txt
 ```
 
 The orchestrator assumes a Slurm cluster. Cluster-specific module and virtual-environment
-settings are defined near the top of `tuning_utils.py`; adjust them for your system.
+settings are defined near the top of `tuning_utils.py`; adjust them for your system. Running
+the orchestrator itself as a Slurm job additionally requires passwordless, non-interactive
+SSH from its compute node to a login node and a filesystem shared by both nodes.
 
 Checkpoint continuation currently has a strict deterministic CPU runtime contract. Each
 Slurm job disables GPUs, fixes thread counts, and enables deterministic TensorFlow
 operations. A checkpoint can only be restored with the same AutoREC source and supported
 numerical-library/runtime metadata. See `docs/checkpointing.md` for the complete contract.
 
-## Running the workflow
+## Running the workflow directly on a login node
 
 From this directory, run:
 
@@ -70,11 +72,62 @@ python runner.py \
   --reduction-factor 2
 ```
 
+When `--login-node` is omitted, `runner.py` executes `sbatch` and `sacct` directly. This
+preserves the original login-node workflow.
+
+## Running the orchestrator as a Slurm job
+
+`runner_job.sh` requests one core, 16 GB of memory, and seven days for the mostly idle
+orchestration process. Before submission, edit the user-configuration variables near the top
+of the script. These include the login-node hostname, result and configuration paths, Optuna
+batch sizes, and multi-fidelity budgets. Then submit it from the login node without passing
+runner arguments on the command line:
+
+```bash
+sbatch runner_job.sh
+```
+
+The wrapper runs the equivalent of:
+
+```bash
+python runner.py \
+  --login-node "$LOGIN_NODE" \
+  --target-dir "$TARGET_DIR" \
+  --base-config "$BASE_CONFIG" \
+  --search-space "$SEARCH_SPACE" \
+  [remaining configured arguments]
+```
+
+With `--login-node`, nested `sbatch` submissions and `sacct` status queries are routed as
+non-interactive SSH commands. For example, submission is effectively performed as
+`ssh login1 "sbatch /shared/path/to/submit.sh"`. Direct command execution remains the
+default when the option is absent.
+
+Before starting a long run, verify these cluster-specific requirements:
+
+1. The compute node can run `ssh -o BatchMode=yes login1 true` without a password, host-key
+   prompt, or multi-factor prompt.
+2. The repository, generated configurations, job scripts, checkpoints, and result directory
+   use absolute paths on storage visible at the same paths from the compute and login nodes.
+3. A non-interactive SSH session on the login node can find `sbatch` and `sacct` in `PATH`.
+4. The `#SBATCH` directives in `runner_job.sh`, including the seven-day limit, account, and
+   node constraint, are accepted by the cluster. They currently match the training-job
+   template and should be edited for a different cluster.
+5. `MODULE_SAVELIST_NAME` and `PYTHON_ENV_PATH` match the cluster. They default to `default`
+   and `$HOME/autorec_env`, and may be exported when submitting the wrapper job.
+
+SSH uses batch mode and a 30-second connection timeout so authentication problems fail
+clearly instead of leaving the orchestrator waiting for interactive input. Cancelling the
+orchestrator job does not automatically cancel child jobs that it already submitted; inspect
+and cancel those Slurm jobs separately if needed.
+
 The arguments controlling candidate generation are:
 
 - `--num-initial`: size of the first group, including the protected baseline.
 - `--num-iterations`: total number of groups, including the initial group.
 - `--batch-size`: number of suggestions in each later group.
+- `--login-node`: optional SSH host for Slurm submission and monitoring when `runner.py`
+  itself runs on a compute node.
 
 The multi-fidelity arguments are:
 
@@ -146,6 +199,7 @@ errors rather than treated as completed trials.
 
 - `runner.py`: proposes candidates, submits each fidelity stage, performs synchronous
   promotion, reports final/pruned trials to Optuna, and exports summaries.
+- `runner_job.sh`: long-running, low-resource Slurm wrapper for `runner.py`.
 - `main_factory.py`: trains or restores one candidate to one cumulative trial target, then
   evaluates the validation dataset.
 - `tuning_utils.py`: configuration handling, Slurm submission/monitoring, promotion helpers,
