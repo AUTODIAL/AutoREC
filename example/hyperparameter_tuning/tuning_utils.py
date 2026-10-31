@@ -10,10 +10,12 @@ at ``~/autorec_env``. If your setup differs, modify ``MODULE_SAVELIST_NAME`` and
 
 from pathlib import Path
 from glob import glob
-from typing import Optional, Tuple, Union
+from typing import Optional, Sequence, Tuple, Union
 import copy
+import math
 import yaml
 import re
+import shlex
 import subprocess
 import time
 
@@ -28,6 +30,50 @@ from autorec.parser import _simplify_P, simplify
 # Variables to specify the presetup environments
 MODULE_SAVELIST_NAME = "default"
 PYTHON_ENV_PATH = "$HOME/autorec_env"
+
+
+def cumulative_trial_targets(max_trials: int, session_trials: int) -> list[int]:
+    """Return cumulative evaluation/checkpoint targets for fixed-size sessions."""
+    for value, name in ((max_trials, "max_trials"), (session_trials, "session_trials")):
+        if type(value) is not int or value < 1:
+            raise ValueError(f"{name} must be a positive integer.")
+    if max_trials % session_trials:
+        raise ValueError("max_trials must be divisible by session_trials.")
+    return list(range(session_trials, max_trials + 1, session_trials))
+
+
+def promotion_trial_targets(
+    max_trials: int,
+    grace_trials: int,
+    reduction_factor: int,
+) -> list[int]:
+    """Return geometric cumulative budgets where synchronous pruning occurs."""
+    if type(grace_trials) is not int or grace_trials < 1:
+        raise ValueError("grace_trials must be a positive integer.")
+    if type(reduction_factor) is not int or reduction_factor < 2:
+        raise ValueError("reduction_factor must be an integer of at least 2.")
+    if grace_trials >= max_trials:
+        raise ValueError("grace_trials must be smaller than max_trials.")
+
+    targets = []
+    target = grace_trials
+    while target < max_trials:
+        targets.append(target)
+        target *= reduction_factor
+    return targets
+
+
+def select_promoted_config_ids(scores: dict[int, float], reduction_factor: int) -> set[int]:
+    """Select the highest-scoring fraction with deterministic config-ID tie breaking."""
+    if not scores:
+        return set()
+    if type(reduction_factor) is not int or reduction_factor < 2:
+        raise ValueError("reduction_factor must be an integer of at least 2.")
+    if not all(np.isfinite(score) for score in scores.values()):
+        raise ValueError("Promotion scores must be finite.")
+    count = max(1, math.ceil(len(scores) / reduction_factor))
+    ranked = sorted(scores, key=lambda config_id: (-scores[config_id], config_id))
+    return set(ranked[:count])
 
 
 class CustomLogScaler:
@@ -413,6 +459,8 @@ def write_job_script(
     python_file: Union[str, Path],
     config_file: Union[str, Path],
     sbatch_options: dict,
+    script_args: Optional[Sequence[Union[str, int, Path]]] = None,
+    archive_models: bool = True,
     submit: bool = False,
 ) -> Optional[str]:
     """Write a Slurm job submission script with the specified options and parameters.
@@ -429,6 +477,11 @@ def write_job_script(
     sbatch_options : dict
         A dictionary containing Slurm options such as time, cpus_per_task, nodes,
         mem_per_cpu, and job_name.
+    script_args : sequence, optional
+        Additional command-line arguments passed to the training script after ``--config``.
+    archive_models : bool, optional
+        Archive and remove intermediate model exports after the job. Disable this for
+        non-final multi-fidelity sessions.
     submit : bool, optional
         Whether to submit the job immediately after writing the script, by default False.
 
@@ -443,6 +496,19 @@ def write_job_script(
     nodes = sbatch_options.get("nodes", 1)
     mem_per_cpu = sbatch_options.get("mem_per_cpu", "4G")
     job_name = sbatch_options.get("job_name", "hyperparameter_tuning")
+    arguments = ["--config", str(config_file), *(script_args or ())]
+    argument_array = " ".join(shlex.quote(str(value)) for value in arguments)
+
+    archive_lines = []
+    if archive_models:
+        archive_lines = [
+            "# TAR INTERMEDIATE MODELS",
+            "echo 'Archiving intermediate models...'",
+            f"cd {shlex.quote(str(save_dir))}",
+            "if [ -d models ]; then tar -czf models.tar.gz models && rm -rf models; fi",
+            "cd - >/dev/null",
+            "",
+        ]
 
     submit_script = "\n".join(
         [
@@ -473,28 +539,30 @@ def write_job_script(
             f"PYTHON_ENV_PATH={PYTHON_ENV_PATH}",
             "",
             "# Load necessary modules and activate environment",
+            "export CUDA_VISIBLE_DEVICES=-1",
+            "export PYTHONHASHSEED=0",
+            "export TF_NUM_INTRAOP_THREADS=1",
+            "export TF_NUM_INTEROP_THREADS=1",
             "export OMP_NUM_THREADS=1",
+            "export OPENBLAS_NUM_THREADS=1",
+            "export MKL_NUM_THREADS=1",
+            "export NUMEXPR_NUM_THREADS=1",
+            "export MPLBACKEND=Agg",
             "module restore ${MODULE_SAVELIST_NAME}",
             "source ${PYTHON_ENV_PATH}/bin/activate",
             "",
             "# RUN YOUR PYTHON SCRIPT",
             "# DEFINE YOUR PYTHON SCRIPT PARAMETERS HERE",
-            f"SCRIPTS='{python_file}'",
-            f"ARGS='-c {config_file}'",
+            f"SCRIPTS={shlex.quote(str(python_file))}",
+            f"ARGS=({argument_array})",
             "",
             "# Run calculation",
             "echo 'Running script: ${SCRIPTS}'",
-            "echo 'Arguments: ${ARGS}'",
+            'echo "Arguments: ${ARGS[*]}"',
             "",
-            "time python ${SCRIPTS} ${ARGS}",
+            'time python "$SCRIPTS" "${ARGS[@]}"',
             "",
-            "# TAR INTERMEDIATE MODELS",
-            "echo 'Archiving intermediate models...'",
-            f"cd {save_dir}",
-            "tar -czvf models.tar.gz models",
-            "rm -rf models",
-            "cd -",
-            "",
+            *archive_lines,
             "echo 'All done!'",
             "echo 'Job ended at: `date`'",
             "echo '------------------------------------------------------------'",
@@ -507,19 +575,22 @@ def write_job_script(
 
     if submit:
         # Submit the job
-        submit_command = f"sbatch {save_dir / 'submit.sh'}"
+        submit_command = ["sbatch", str(save_dir / "submit.sh")]
         submit_process = subprocess.run(
-            submit_command, shell=True, capture_output=True, text=True
+            submit_command, capture_output=True, text=True, check=False
         )
         output = submit_process.stdout.strip()
-        print(f"Submitted job with command: {submit_command}")
+        print(f"Submitted job with command: {shlex.join(submit_command)}")
         print(f"Output: {output}")
+        if submit_process.returncode:
+            raise RuntimeError(f"Slurm submission failed: {submit_process.stderr.strip()}")
         # Get the job ID from the output
         match = re.search(r"Submitted batch job (\d+)", output)
         if match:
             job_id = match.group(1)
             print(f"Job ID: {job_id}")
             return job_id
+        raise RuntimeError(f"Could not parse a Slurm job ID from: {output!r}")
 
 
 def block_until_completed(jobid_list: list, poll_interval: int = 60) -> None:
@@ -567,6 +638,8 @@ def block_until_completed(jobid_list: list, poll_interval: int = 60) -> None:
             text=True,
             check=False,
         )
+        if result.returncode:
+            raise RuntimeError(f"Could not query Slurm jobs: {result.stderr.strip()}")
 
         # Track the *best* (final) state per job
         job_states = {}
@@ -575,7 +648,7 @@ def block_until_completed(jobid_list: list, poll_interval: int = 60) -> None:
             # Ignore job steps (e.g. 12345.batch)
             if "." in jobid_raw:
                 continue
-            job_states[jobid_raw] = state
+            job_states[jobid_raw] = state.split()[0].rstrip("+")
 
         for jobid in completed:
             if not completed[jobid]:
@@ -591,7 +664,15 @@ def block_until_completed(jobid_list: list, poll_interval: int = 60) -> None:
         if all(completed.values()):
             print("All jobs have completed.")
             time.sleep(60)  # ensure files are flushed
-            break
+            failed = {
+                jobid: state
+                for jobid, state in job_states.items()
+                if jobid in completed and state != "COMPLETED"
+            }
+            if failed:
+                details = ", ".join(f"{jobid}={state}" for jobid, state in failed.items())
+                raise RuntimeError(f"One or more Slurm jobs failed: {details}")
+            return
 
         time.sleep(poll_interval)
 
@@ -602,6 +683,7 @@ def compute_score(
     reward_range: list = [-12, 12],
     include_exact_rate: bool = True,
     simplify_redundancy: bool = False,
+    evaluation_results: Optional[Union[str, Path]] = None,
 ) -> Tuple[float, Tuple[float, float, float]]:
     """Compute the score to maximize for hyperparameter tuning.
 
@@ -625,6 +707,9 @@ def compute_score(
     simplify_redundancy : bool, optional
         Whether to simplify circuits by removing redundant resistors before checking
         equivalence, by default False.
+    evaluation_results : str or Path, optional
+        Rung-specific evaluation pickle. Defaults to ``eval_results.pkl`` in
+        ``results_dir`` for backward compatibility.
 
     Returns
     -------
@@ -643,7 +728,12 @@ def compute_score(
     score_mean_reward = (mean_reward_last - min_reward) / (max_reward - min_reward)
 
     # Compute the contributions based on agent success
-    eval_results = pd.read_pickle(results_dir / "eval_results.pkl")
+    evaluation_results = (
+        results_dir / "eval_results.pkl"
+        if evaluation_results is None
+        else Path(evaluation_results)
+    )
+    eval_results = pd.read_pickle(evaluation_results)
     score_success_rate = eval_results["found_solution"].mean()
     # Success exact
     success_exact_count = 0

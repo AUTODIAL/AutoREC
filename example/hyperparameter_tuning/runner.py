@@ -1,323 +1,435 @@
-"""Here we try hyperparameter tuning using Optuna. Note that we already have some
-precomputed scores that we can use to initially train Optuna.
+"""Run synchronous multi-fidelity hyperparameter tuning on a Slurm cluster."""
 
-Usage:
-```bash
-    $ python runner.py \
-        --target-dir ./hyperparameter_tuning \
-        --base-config ./base_config.yaml \
-        --search-space ./search_space.yaml \
-        --num-initial 5 \
-        --num-iterations 10 \
-        --batch-size 5 \
-```
+from __future__ import annotations
 
-Arguments:
-    --target-dir: Target directory to store results
-    --base-config: Base configuration file to use for generating new configs
-    --search-space: Search space definition file
-    --num-initial: Number of initial trials
-    --num-iterations: Number of iterations to run
-    --batch-size: Batch size for each iteration
-"""
-
-from pathlib import Path
 import argparse
-import yaml
+import copy
+from pathlib import Path
 from pprint import pprint
 
-import numpy as np
-import optuna
-
-from tuning_utils import (
-    ConfigurationHandler,
-    write_job_script,
-    block_until_completed,
-    compute_score,
-)
-
-# For result visualization analysis
 import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import optuna
 import optuna.visualization.matplotlib as vis_matplotlib
+import pandas as pd
+import yaml
 
-
-seed = 42
-np.random.seed(seed)
-
-# Directories
-WORK_DIR = Path(__file__).parent
-
-
-# Command-line arguments
-parser = argparse.ArgumentParser()
-parser.add_argument(
-    "--target-dir",
-    type=str,
-    default="./hyperparameter_tuning",
-    help="Target directory to store results",
+from tuning_utils import (
+    ConfigurationHandler,
+    block_until_completed,
+    compute_score,
+    cumulative_trial_targets,
+    promotion_trial_targets,
+    select_promoted_config_ids,
+    write_job_script,
 )
-parser.add_argument(
-    "--base-config",
-    type=str,
-    default="./base_config.yaml",
-    help="Base configuration file to use for generating new configs",
-)
-parser.add_argument(
-    "--search-space",
-    "-s",
-    type=str,
-    default="./search_space.yaml",
-    help="Search space definition file",
-)
-parser.add_argument("--num-initial", type=int, default=10, help="Number of initial trials")
-parser.add_argument(
-    "--num-iterations", type=int, default=5, help="Number of iterations to run"
-)
-parser.add_argument("--batch-size", type=int, default=5, help="Batch size for each iteration")
-args = parser.parse_args()
 
 
-# Hyperparameter tuning settings
-RESULTS_DIR = Path(args.target_dir)
-RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-configs_dir = RESULTS_DIR / "configs"
-JOB_NAME_PREFIX = RESULTS_DIR.name
-num_initial = args.num_initial
-batch_size = args.batch_size
-num_iterations = args.num_iterations
-# Other variables not exposed to command line
-nlast = 1000  # How many last episodes to average over for mean reward
-ndata_per_circuit = 270  # Number of data points per circuit in the dataset
-python_file = "main_factory.py"  # The training script to use
-base_config_file = Path(args.base_config)
-base_sbatch_options = {"time": "72:00:00", "mem_per_cpu": "12G"}
+SEED = 42
+WORK_DIR = Path(__file__).resolve().parent
 
-# Hyperparameter search space
-search_space_file = Path(args.search_space)
-if not search_space_file.exists():
-    raise FileNotFoundError(f"Search space file {search_space_file} not found.")
-with open(search_space_file, "r") as f:
-    search_space = yaml.safe_load(f)
-if not isinstance(search_space, dict) or not search_space:
-    raise ValueError(
-        f"Search space file {search_space_file} must define a non-empty mapping of "
-        "parameter names to {bounds: [low, high], type: int|float}."
+
+def _positive_integer(value: str) -> int:
+    parsed = int(value)
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("value must be a positive integer")
+    return parsed
+
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--target-dir",
+        type=Path,
+        default=Path("./hyperparameter_tuning_results"),
+        help="Directory in which configurations and results are stored.",
     )
-for name, spec in search_space.items():
-    if not isinstance(spec, dict) or "bounds" not in spec or "type" not in spec:
-        raise ValueError(
-            f"Invalid search space entry for '{name}': expected keys 'bounds' and 'type'."
+    parser.add_argument(
+        "--base-config",
+        type=Path,
+        default=WORK_DIR / "base_config.yaml",
+    )
+    parser.add_argument(
+        "--search-space",
+        "-s",
+        type=Path,
+        default=WORK_DIR / "search_space.yaml",
+    )
+    parser.add_argument("--num-initial", type=_positive_integer, default=10)
+    parser.add_argument("--num-iterations", type=_positive_integer, default=5)
+    parser.add_argument("--batch-size", type=_positive_integer, default=5)
+    parser.add_argument(
+        "--max-trials",
+        type=_positive_integer,
+        default=10_000,
+        help="Maximum cumulative training budget per promoted candidate.",
+    )
+    parser.add_argument(
+        "--session-trials",
+        type=_positive_integer,
+        default=1_000,
+        help="Trials added before each checkpoint and validation score.",
+    )
+    parser.add_argument(
+        "--grace-trials",
+        type=_positive_integer,
+        default=2_000,
+        help="First cumulative trial count at which candidates may be pruned.",
+    )
+    parser.add_argument(
+        "--reduction-factor",
+        type=_positive_integer,
+        default=2,
+        help="Keep the best ceil(1 / factor) candidates at each promotion rung.",
+    )
+    return parser.parse_args()
+
+
+def _load_search_space(path: Path) -> tuple[dict, list[str]]:
+    with path.open() as stream:
+        definitions = yaml.safe_load(stream)
+    if not isinstance(definitions, dict) or not definitions:
+        raise ValueError(f"Search space {path} must define a non-empty mapping.")
+    for name, specification in definitions.items():
+        if (
+            not isinstance(specification, dict)
+            or set(specification) != {"bounds", "type"}
+            or not isinstance(specification["bounds"], list)
+            or len(specification["bounds"]) != 2
+            or str(specification["type"]).lower() not in {"int", "float"}
+        ):
+            raise ValueError(f"Invalid search-space entry: {name}")
+    bounds = {name: specification["bounds"] for name, specification in definitions.items()}
+    integers = [
+        name
+        for name, specification in definitions.items()
+        if str(specification["type"]).lower() == "int"
+    ]
+    return bounds, integers
+
+
+def _optuna_distributions(handler: ConfigurationHandler) -> dict:
+    return {
+        name: (
+            optuna.distributions.IntDistribution(*bounds)
+            if name in handler.integer_variables
+            else optuna.distributions.FloatDistribution(*bounds)
         )
-search_space_bounds = {name: spec["bounds"] for name, spec in search_space.items()}
-integer_variables = [
-    name for name, spec in search_space.items() if str(spec["type"]).lower() == "int"
-]
-# Instantiate configuration handler
-config_handler = ConfigurationHandler(
-    base_config=base_config_file,
-    configs_dir=configs_dir,
-    search_space_bounds=search_space_bounds,
-    integer_variables=integer_variables,
-)
+        for name, bounds in handler.search_space_bounds.items()
+    }
 
 
-# Print out some information
-print("=====================================")
-print("# HYPERPARAMETER TUNING WITH OPTUNA #")
-print("=====================================\n")
-
-print("Results will be stored in:", RESULTS_DIR)
-print("Configuration files will be stored in:", configs_dir, "\n")
-
-print("Number of initial trials:", num_initial)
-print("Number of iterations:", num_iterations)
-print("Batch size per iteration:", batch_size, "\n")
-
-print("Using base configuration file:", base_config_file)
-pprint(config_handler.base_config, sort_dicts=False)
-print()
-print("Hyperparameter search space bounds:")
-pprint(config_handler.search_space_bounds, sort_dicts=False)
-print()
+def _stage_paths(save_dir: Path, target_trials: int) -> tuple[Path, Path]:
+    checkpoint = save_dir / "checkpoints" / f"trial-{target_trials:08d}"
+    evaluation = save_dir / f"eval_results_trial-{target_trials:08d}.pkl"
+    return checkpoint, evaluation
 
 
-##########################################################################################
-# HYPERPARAMETER TUNING WITH OPTUNA: INITIAL TRIALS
-##########################################################################################
-print("Starting initial trials of hyperparameter tuning with Optuna...")
-
-# For storing the results
-all_params = {}
-all_scores = {}
-
-# Search space
-search_space = {
-    name: (
-        optuna.distributions.IntDistribution(*bounds)
-        if name in config_handler.integer_variables
-        else optuna.distributions.FloatDistribution(*bounds)
+def _stage_complete(save_dir: Path, target_trials: int) -> bool:
+    checkpoint, evaluation = _stage_paths(save_dir, target_trials)
+    return (
+        (checkpoint / "manifest.json").is_file()
+        and evaluation.is_file()
+        and evaluation.with_suffix(".csv").is_file()
     )
-    for name, bounds in config_handler.search_space_bounds.items()
-}
-# Create an Optuna study
-sampler = optuna.samplers.TPESampler(n_startup_trials=num_initial, seed=seed)
-study = optuna.create_study(sampler=sampler, direction="maximize")
-
-# Check files to skip running jobs if these results already exist
-# These files are for computing the scores
-check_files = ["dqn_model.keras", "statistical_analysis.pkl", "eval_results.pkl"]
-
-# MAKE SURE TO INCLUDE THE ORIGINAL HYPERPARAMETER SET
-print("We make sure that the original hyperparameter set is included in the initial trials.")
-config_id, config_file, config = config_handler.write_config(
-    config_handler.base_config, RESULTS_DIR
-)
-SAMPLE_DIR = Path(config["agent"]["save_dir"])
-# Write and submit job script
-training_done = all([(SAMPLE_DIR / ff).exists() for ff in check_files])
-if not training_done:
-    print("Submitting job for the original hyperparameter set...")
-    sbatch_options = base_sbatch_options.copy()
-    sbatch_options["job_name"] = f"{JOB_NAME_PREFIX}_init_{config_id}"
-    jobid = write_job_script(SAMPLE_DIR, python_file, config_file, sbatch_options, submit=True)
-    # Block until all jobs are finished
-    print("Waiting for all initial jobs to finish...")
-    block_until_completed([jobid])
-# Compute the score
-avg_score, score_elements = compute_score(SAMPLE_DIR, nlast)
-# Tell Optuna about the result
-print("Inserting the original hyperparameter set into the study...")
-params = config_handler.config_to_sample(config)
-assert set(params.keys()) == set(search_space.keys())
-study.add_trial(
-    optuna.trial.create_trial(params=params, distributions=search_space, value=avg_score)
-)
-print(f"Inserted original hyperparameter set with score {avg_score:.4f}\n")
-# Store the resuts
-all_params[config_id] = params
-all_scores[config_id] = np.append([avg_score], score_elements)
 
 
-# INITIAL TRIALS
-num_initial -= 1  # Already did one above using the original hyperparameter set
-print(f"Performing initial trials for {num_initial} configurations...")
-trials = [study.ask(search_space) for _ in range(num_initial)]
-config_id_list = []
-jobid_list = []
-for trial in trials:
-    # Write the configuration file
-    config_id, config_file, config = config_handler.write_config(
-        config_handler.sample_to_config(trial.params), RESULTS_DIR
+def _write_csv_atomic(rows: list[dict], destination: Path) -> None:
+    temporary = destination.with_name(f".{destination.name}.tmp")
+    pd.DataFrame(rows).to_csv(temporary, index=False)
+    temporary.replace(destination)
+
+
+def _export_study(study: optuna.Study, results_dir: Path) -> None:
+    study.trials_dataframe().to_csv(results_dir / "optuna_trials.csv", index=False)
+    plotters = (
+        (vis_matplotlib.plot_optimization_history, "optimization_history.png"),
+        (vis_matplotlib.plot_param_importances, "param_importances.png"),
     )
-    config_id_list.append(config_id)
-    SAMPLE_DIR = Path(config["agent"]["save_dir"])
-    # Write and submit job script
-    training_done = all([(SAMPLE_DIR / ff).exists() for ff in check_files])
-    if not training_done:
-        sbatch_options = base_sbatch_options.copy()
-        sbatch_options["job_name"] = f"{JOB_NAME_PREFIX}_init_{config_id}"
-        jobid = write_job_script(
-            SAMPLE_DIR, python_file, config_file, sbatch_options, submit=True
+    for plotter, filename in plotters:
+        try:
+            axes = plotter(study)
+        except (RuntimeError, ValueError, ZeroDivisionError) as error:
+            print(f"Skipping {filename}: {error}")
+            continue
+        figure = axes.figure
+        figure.tight_layout()
+        figure.savefig(results_dir / filename, dpi=300, bbox_inches="tight")
+        plt.close(figure)
+
+
+def _submit_stage(
+    candidates: list[dict],
+    target_trials: int,
+    max_trials: int,
+    python_file: Path,
+    job_name_prefix: str,
+    sbatch_options: dict,
+) -> None:
+    job_ids = []
+    submitted_config_ids = set()
+    for candidate in candidates:
+        config_id = candidate["config_id"]
+        save_dir = candidate["save_dir"]
+        if config_id in submitted_config_ids or _stage_complete(save_dir, target_trials):
+            continue
+        submitted_config_ids.add(config_id)
+        options = dict(sbatch_options)
+        options["job_name"] = f"{job_name_prefix}_{config_id}_{target_trials}"
+        job_id = write_job_script(
+            save_dir,
+            python_file,
+            candidate["config_file"],
+            options,
+            script_args=("--target-trials", target_trials),
+            archive_models=target_trials == max_trials,
+            submit=True,
         )
-        jobid_list.append(jobid)
-if len(jobid_list) > 0:
-    # Block until all jobs are finished
-    print("Waiting for all initial jobs to finish...")
-    block_until_completed(jobid_list)
-
-# Collect results from initial trials
-print("Collecting results from initial trials...")
-score_list = []
-for ii, config_id in enumerate(config_id_list):
-    SAMPLE_DIR = config_handler.configs_list[config_id]["agent"]["save_dir"]
-    avg_score, score_elements = compute_score(SAMPLE_DIR, nlast)
-    print("Config ID:", config_id, "Score:", avg_score)
-    score_list.append(avg_score)
-    # Add to the list of results
-    all_params[config_id] = trials[ii].params
-    all_scores[config_id] = np.append([avg_score], score_elements)
-
-# Tell Optuna about the results from initial trials
-for trial, score in zip(trials, score_list):
-    study.tell(trial, score)
+        if job_id is None:
+            raise RuntimeError(f"Slurm did not return a job ID for config {config_id}.")
+        job_ids.append(job_id)
+    block_until_completed(job_ids)
 
 
-##########################################################################################
-# HYPERPARAMETER TUNING WITH OPTUNA: CONTINUED TRIALS
-##########################################################################################
-print("Continuing hyperparameter tuning with Optuna...")
+def _score_candidate(candidate: dict, target_trials: int, reward_sample_size: int):
+    _, evaluation = _stage_paths(candidate["save_dir"], target_trials)
+    return compute_score(
+        candidate["save_dir"],
+        reward_sample_size,
+        evaluation_results=evaluation,
+    )
 
-for iteration in range(num_iterations - 1):
-    print(f"Starting iteration {iteration + 2}/{num_iterations}...")
-    trials = [study.ask(search_space) for _ in range(batch_size)]
-    config_id_list = []
-    jobid_list = []
+
+def _run_baseline(
+    study: optuna.Study,
+    handler: ConfigurationHandler,
+    distributions: dict,
+    results_dir: Path,
+    targets: list[int],
+    python_file: Path,
+    job_name_prefix: str,
+    sbatch_options: dict,
+    reward_sample_size: int,
+    rung_rows: list[dict],
+) -> None:
+    config_id, config_file, config = handler.write_config(
+        copy.deepcopy(handler.base_config), results_dir
+    )
+    candidate = {
+        "config_id": config_id,
+        "config_file": config_file.resolve(),
+        "save_dir": Path(config["agent"]["save_dir"]).resolve(),
+    }
+    intermediate_values = {}
+    final_score = None
+    for target in targets:
+        _submit_stage(
+            [candidate],
+            target,
+            targets[-1],
+            python_file,
+            job_name_prefix,
+            sbatch_options,
+        )
+        final_score, components = _score_candidate(candidate, target, reward_sample_size)
+        intermediate_values[target] = float(final_score)
+        rung_rows.append(
+            {
+                "group": "baseline",
+                "trial_number": 0,
+                "config_id": config_id,
+                "target_trials": target,
+                "score": final_score,
+                "mean_reward_score": components[0],
+                "success_rate": components[1],
+                "exact_rate": components[2],
+                "status": "complete" if target == targets[-1] else "continued",
+            }
+        )
+        _write_csv_atomic(rung_rows, results_dir / "rung_scores.csv")
+    params = handler.config_to_sample(config)
+    study.add_trial(
+        optuna.trial.create_trial(
+            params=params,
+            distributions=distributions,
+            value=float(final_score),
+            intermediate_values=intermediate_values,
+        )
+    )
+
+
+def _run_candidate_group(
+    group_name: str,
+    trials: list[optuna.trial.Trial],
+    study: optuna.Study,
+    handler: ConfigurationHandler,
+    results_dir: Path,
+    targets: list[int],
+    promotion_targets: set[int],
+    reduction_factor: int,
+    python_file: Path,
+    job_name_prefix: str,
+    sbatch_options: dict,
+    reward_sample_size: int,
+    rung_rows: list[dict],
+) -> None:
+    candidates = []
     for trial in trials:
-        # Write the configuration file
-        config_id, config_file, config = config_handler.write_config(
-            config_handler.sample_to_config(trial.params), RESULTS_DIR
+        config_id, config_file, config = handler.write_config(
+            handler.sample_to_config(trial.params), results_dir
         )
-        config_id_list.append(config_id)
-        SAMPLE_DIR = Path(config["agent"]["save_dir"])
-        # Write and submit job script
-        training_done = all([(SAMPLE_DIR / ff).exists() for ff in check_files])
-        if not training_done:
-            sbatch_options = base_sbatch_options.copy()
-            sbatch_options["job_name"] = f"{JOB_NAME_PREFIX}_{config_id}"
-            jobid = write_job_script(
-                SAMPLE_DIR, python_file, config_file, sbatch_options, submit=True
+        candidates.append(
+            {
+                "trial": trial,
+                "config_id": config_id,
+                "config_file": config_file.resolve(),
+                "save_dir": Path(config["agent"]["save_dir"]).resolve(),
+            }
+        )
+
+    active = candidates
+    for target in targets:
+        _submit_stage(
+            active,
+            target,
+            targets[-1],
+            python_file,
+            job_name_prefix,
+            sbatch_options,
+        )
+        scores = {}
+        components_by_trial = {}
+        for candidate in active:
+            score, components = _score_candidate(candidate, target, reward_sample_size)
+            trial = candidate["trial"]
+            trial.report(float(score), step=target)
+            scores[trial.number] = float(score)
+            components_by_trial[trial.number] = components
+
+        promoted = set(scores)
+        if target in promotion_targets:
+            promoted = select_promoted_config_ids(scores, reduction_factor)
+
+        next_active = []
+        for candidate in active:
+            trial = candidate["trial"]
+            components = components_by_trial[trial.number]
+            if target == targets[-1]:
+                status = "complete"
+                study.tell(trial, scores[trial.number])
+            elif trial.number in promoted:
+                status = "promoted" if target in promotion_targets else "continued"
+                next_active.append(candidate)
+            else:
+                status = "pruned"
+                study.tell(trial, state=optuna.trial.TrialState.PRUNED)
+            rung_rows.append(
+                {
+                    "group": group_name,
+                    "trial_number": trial.number,
+                    "config_id": candidate["config_id"],
+                    "target_trials": target,
+                    "score": scores[trial.number],
+                    "mean_reward_score": components[0],
+                    "success_rate": components[1],
+                    "exact_rate": components[2],
+                    "status": status,
+                }
             )
-            jobid_list.append(jobid)
-    if len(jobid_list) > 0:
-        # Block until all jobs are finished
-        print(f"Waiting for all jobs in iteration {iteration + 2} to finish...")
-        block_until_completed(jobid_list)
-    # Collect results from trials
-    print(f"Collecting results from iteration {iteration + 2}...")
-    score_list = []
-    for ii, config_id in enumerate(config_id_list):
-        SAMPLE_DIR = config_handler.configs_list[config_id]["agent"]["save_dir"]
-        avg_score, score_elements = compute_score(SAMPLE_DIR, nlast)
-        print("Config ID:", config_id, "Score:", avg_score)
-        score_list.append(avg_score)
-        # Add to the list of results
-        all_params[config_id] = trials[ii].params
-        all_scores[config_id] = np.append([avg_score], score_elements)
-    # Tell Optuna about the results from trials
-    for trial, score in zip(trials, score_list):
-        study.tell(trial, score)
-
-    # Export the study results
-    study_df = study.trials_dataframe()
-    study_df.to_csv(RESULTS_DIR / "optuna_trials.csv", index=False)
-    # Visualization analysis
-    print("Generating visualization analysis")
-    print("- Optimization history")
-    ax = vis_matplotlib.plot_optimization_history(study)
-    fig = ax.figure
-    fig.tight_layout()
-    fig.savefig(RESULTS_DIR / "optimization_history.png", dpi=300, bbox_inches="tight")
-    plt.close(fig)
-    print("- Parameter importances")
-    ax = vis_matplotlib.plot_param_importances(study)
-    fig = ax.figure
-    fig.tight_layout()
-    fig.savefig(RESULTS_DIR / "param_importances.png", dpi=300, bbox_inches="tight")
-    plt.close(fig)
-
-print("Hyperparameter tuning with Optuna completed.")
+        _write_csv_atomic(rung_rows, results_dir / "rung_scores.csv")
+        active = next_active
 
 
-# Final step: Print the best hyperparameter set found
-best_trial = study.best_trial
-print("\nBest hyperparameter set found:")
-best_params = best_trial.params
-best_config = config_handler.sample_to_config(best_params)
-best_config_id = config_handler.get_config_id(best_config)
-print(f"Configuration ID: {best_config_id}")
-pprint(best_params, sort_dicts=False)
-# pprint(best_config, sort_dicts=False)
-print(f"\nWith score: {best_trial.value:.4f}")
+def main() -> None:
+    args = _parse_args()
+    if args.reduction_factor < 2:
+        raise ValueError("--reduction-factor must be at least 2.")
+    targets = cumulative_trial_targets(args.max_trials, args.session_trials)
+    promotion_targets = promotion_trial_targets(
+        args.max_trials, args.grace_trials, args.reduction_factor
+    )
+    if not set(promotion_targets).issubset(targets):
+        raise ValueError("Every promotion budget must align with a session boundary.")
+
+    results_dir = args.target_dir.resolve()
+    results_dir.mkdir(parents=True, exist_ok=True)
+    bounds, integer_variables = _load_search_space(args.search_space.resolve())
+    handler = ConfigurationHandler(
+        base_config=args.base_config.resolve(),
+        configs_dir=results_dir / "configs",
+        search_space_bounds=bounds,
+        integer_variables=integer_variables,
+    )
+    if handler.base_config["agent"]["num_trials"] != args.session_trials:
+        raise ValueError("agent.num_trials must equal --session-trials.")
+
+    distributions = _optuna_distributions(handler)
+    sampler = optuna.samplers.TPESampler(n_startup_trials=args.num_initial, seed=SEED)
+    study = optuna.create_study(sampler=sampler, direction="maximize")
+    python_file = WORK_DIR / "main_factory.py"
+    job_name_prefix = results_dir.name
+    sbatch_options = {"time": "72:00:00", "mem_per_cpu": "12G"}
+    reward_sample_size = args.session_trials
+    rung_rows = []
+
+    print("============================================")
+    print("# MULTI-FIDELITY HYPERPARAMETER TUNING #")
+    print("============================================")
+    print(f"Results: {results_dir}")
+    print(f"Cumulative targets: {targets}")
+    print(f"Promotion targets: {promotion_targets}")
+    print("The baseline is protected from pruning and runs to the maximum budget.")
+    pprint(handler.search_space_bounds, sort_dicts=False)
+
+    _run_baseline(
+        study,
+        handler,
+        distributions,
+        results_dir,
+        targets,
+        python_file,
+        job_name_prefix,
+        sbatch_options,
+        reward_sample_size,
+        rung_rows,
+    )
+    _export_study(study, results_dir)
+
+    group_sizes = [args.num_initial - 1] + [
+        args.batch_size for _ in range(args.num_iterations - 1)
+    ]
+    for group_index, group_size in enumerate(group_sizes, start=1):
+        if group_size == 0:
+            continue
+        group_name = "initial" if group_index == 1 else f"iteration_{group_index}"
+        print(f"Starting {group_name} with {group_size} candidates...")
+        trials = [study.ask(fixed_distributions=distributions) for _ in range(group_size)]
+        _run_candidate_group(
+            group_name,
+            trials,
+            study,
+            handler,
+            results_dir,
+            targets,
+            set(promotion_targets),
+            args.reduction_factor,
+            python_file,
+            job_name_prefix,
+            sbatch_options,
+            reward_sample_size,
+            rung_rows,
+        )
+        _export_study(study, results_dir)
+
+    best_trial = study.best_trial
+    best_config = handler.sample_to_config(best_trial.params)
+    print("Hyperparameter tuning completed.")
+    print(f"Best score: {best_trial.value:.6f}")
+    print(f"Best configuration ID: {handler.get_config_id(best_config)}")
+    pprint(best_trial.params, sort_dicts=False)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,43 +1,70 @@
 dataprep:
-  path: ${AUTOREC_ROOT}/data/examples/training_dataset.pkl  # Path to dataset file or folder
-  mode: load  # Use "process" to preprocess data, e.g. a folder containing .csv files
-  evaluation: false
+  training:
+    path: ${AUTOREC_ROOT}/example/hyperparameter_tuning/data/training_dataset.pkl
+    mode: load
+    evaluation: true
+    perform_linKK_validation: false
+    tol_linKK: 5.0E-2
+    frequency_bounds:
+      - null
+      - null
+    frequency_npoints: null
+    eis_features:
+      - ImZ
+      - phi
+      - mag
+      - nphi
 
-  # For lin-KK preprocessing
-  perform_linKK_validation: false
-  tol_linKK: 5.0E-2
-
-  # For frequency-based interpolation
-  frequency_bounds:
-    - null
-    - null
-  frequency_npoints: null
-
-  # EIS features to include in the flatten_Z representation
-  eis_features:
-    - ImZ
-    - phi
-    - mag
-    - nphi
+  eval:
+    path: ${AUTOREC_ROOT}/example/hyperparameter_tuning/data/validation_dataset.pkl
+    mode: load
+    evaluation: true
+    perform_linKK_validation: false
+    tol_linKK: 5.0E-2
+    frequency_bounds:
+      - null
+      - null
+    frequency_npoints: null
+    eis_features:
+      - ImZ
+      - phi
+      - mag
+      - nphi
 
 environment:
-  elements:
-    - "+"
-    - "/"
-    - R
-    - L
-    - P
-  initial_state:
-    - +RRRRRR
-    - ++RRRRRR
-    - +++RRRRRR
-  seed: 42
-  chromosome_HEAD_len: 10
+  training:
+    elements:
+      - "+"
+      - "/"
+      - R
+      - L
+      - P
+    initial_state:
+      - +RRRRRR
+      - ++RRRRRR
+      - +++RRRRRR
+    seed: 42
+    chromosome_HEAD_len: 10
+    cache_enabled: true
+    cache_capacity: 20000
+    cache_type: lru  # lru or clock
 
-  # Cache configuration
-  cache_enabled: true
-  cache_capacity: 20000
-  cache_type: lru  # lru or clock
+  eval:
+    elements:
+      - "+"
+      - "/"
+      - R
+      - L
+      - P
+    initial_state:
+      - +RRRRRR
+      - ++RRRRRR
+      - +++RRRRRR
+    seed: 42
+    chromosome_HEAD_len: 10
+    cache_enabled: true
+    cache_capacity: 20000
+    cache_type: lru  # lru or clock
 
 agent:
   # Saving the results
@@ -88,7 +115,7 @@ agent:
   prioritized_replay_eps: 1.0E-6
   initial_beta: 0.4  # The larger the beta, the lower weights we multiply to the loss
   beta_jump: 1.06
-  start_jump: null  # Or start when mean_loss < 1. If null, computed as (2/5) * num_trials
-  anneal_fraction: null  # Legacy fraction relative to num_trials; mutually exclusive with beta_anneal_trials
-  beta_anneal_trials: null  # Preferred absolute cumulative-trial duration for open-ended training
+  start_jump: 4000  # Equivalent to the legacy 2/5 schedule for a 10000-trial run
+  anneal_fraction: null  # Legacy option; mutually exclusive with beta_anneal_trials
+  beta_anneal_trials: 5950  # Equivalent to the legacy schedule for a 10000-trial run
   final_beta: 0.7

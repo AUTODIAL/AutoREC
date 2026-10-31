@@ -1,130 +1,159 @@
-# Hyperparameter Tuning Example for Training an RL Agent
+# Multi-fidelity hyperparameter tuning
 
-This example demonstrates how to perform hyperparameter tuning for training an AutoREC reinforcement learning agent using [`Optuna`](https://optuna.org/).
-The example provides scripts for defining the hyperparameter search space, submitting training jobs on an HPC cluster, and collecting the tuning results.
+This example tunes AutoREC with [Optuna](https://optuna.org/) and Slurm without training
+every suggested configuration for the full 10,000-trial budget. Training is split into
+checkpointed 1,000-trial sessions. Unpromising configurations are stopped early, while
+promoted configurations resume from their most recent complete checkpoint.
 
+The default policy is synchronous successive halving:
 
+| Cumulative trials | Action |
+|---:|---|
+| 1,000 | Score every candidate; continue all candidates |
+| 2,000 | Keep the best half |
+| 3,000 | Score the survivors |
+| 4,000 | Keep the best half |
+| 5,000–7,000 | Score the survivors every 1,000 trials |
+| 8,000 | Keep the best half |
+| 9,000–10,000 | Score the survivors; 10,000 is the maximum budget |
 
-## Prerequisites
+The baseline hyperparameters from `base_config.yaml` are protected from pruning and always
+run to 10,000 trials. Suggested configurations are ranked only against other candidates in
+the same synchronous batch. Ties are resolved deterministically by Optuna trial number.
 
-The hyperparameter tuning script in this example is intended to be run on an HPC cluster using the Slurm workload manager.
+## Data separation and objective
 
-The dependencies for this example can be installed with:
+The `data/` directory has three processed datasets:
+
+- `training_dataset.pkl` is used for RL interactions and the learning-curve component.
+- `validation_dataset.pkl` is used for success-rate and exact-circuit evaluation at every
+  fidelity stage.
+- `test_dataset.pkl` is reserved for final assessment after hyperparameter selection. The
+  tuning scripts never load it.
+
+`tuning_utils.compute_score` combines the mean episodic cumulative reward over the most
+recent 1,000 training episodes, validation success rate, and validation exact-circuit rate.
+Because the validation set is consulted repeatedly, it must not be reported as an unbiased
+test result.
+
+## Requirements
+
+Install the additional example dependencies:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-Depending on your cluster environment, you may also need to load the appropriate Python, Julia, CUDA, or MPI modules before installing the dependencies or running the scripts.
+The orchestrator assumes a Slurm cluster. Cluster-specific module and virtual-environment
+settings are defined near the top of `tuning_utils.py`; adjust them for your system.
 
+Checkpoint continuation currently has a strict deterministic CPU runtime contract. Each
+Slurm job disables GPUs, fixes thread counts, and enables deterministic TensorFlow
+operations. A checkpoint can only be restored with the same AutoREC source and supported
+numerical-library/runtime metadata. See `docs/checkpointing.md` for the complete contract.
 
+## Running the workflow
 
-## How to run
-
-To run the hyperparameter tuning workflow, execute:
+From this directory, run:
 
 ```bash
 python runner.py \
   --target-dir ./hyperparameter_tuning_results \
   --base-config ./base_config.yaml \
-  --search-space search_space.yaml \
+  --search-space ./search_space.yaml \
   --num-initial 5 \
   --num-iterations 10 \
-  --batch-size 5
+  --batch-size 5 \
+  --max-trials 10000 \
+  --session-trials 1000 \
+  --grace-trials 2000 \
+  --reduction-factor 2
 ```
 
-Arguments:
+The arguments controlling candidate generation are:
 
-- `--target-dir`: Directory where the tuning results will be saved.
-- `--base-config`: Path to the base configuration file for training the RL agent.
-- `--search-space`: Path to the YAML file defining the hyperparameter search space for tuning.
-- `--num-initial`: Number of initial random configurations to evaluate before starting the optimization process.
-- `--num-iterations`: Number of optimization iterations to perform.
-- `--batch-size`: Number of configurations to evaluate in parallel during each optimization iteration.
+- `--num-initial`: size of the first group, including the protected baseline.
+- `--num-iterations`: total number of groups, including the initial group.
+- `--batch-size`: number of suggestions in each later group.
 
+The multi-fidelity arguments are:
 
+- `--max-trials`: maximum cumulative budget for a promoted candidate.
+- `--session-trials`: trials added before each checkpoint and score.
+- `--grace-trials`: first cumulative budget at which pruning is allowed.
+- `--reduction-factor`: at each promotion budget, retain
+  `ceil(candidate_count / reduction_factor)` candidates.
 
-## Contents
+`max-trials` must be divisible by `session-trials`. Every geometric promotion budget
+(`grace-trials`, then repeated multiplication by `reduction-factor`) must coincide with a
+session boundary. `agent.num_trials` in the base configuration must equal
+`--session-trials`.
 
-- `runner.py`: Main script that orchestrates the hyperparameter tuning workflow.
-  This script creates an Optuna study, writes and submits Slurm jobs for evaluating different hyperparameter configurations, and collects the results.
+## How continuation is kept reproducible
 
-- `tuning_utils.py`: Utility functions for the tuning process.
-  This file includes functions for writing Slurm job scripts, submitting jobs, computing the objective function to maximize, and defining the hyperparameter search space.
+`main_factory.py` performs exactly one cumulative stage. For example:
 
-  **Note:** To run this example on a different HPC cluster, you may need to modify the job script template in the `write_job_script` function to match the requirements of your cluster's job submission system.
+```bash
+python main_factory.py --config configs/config_0001.yaml --target-trials 3000
+```
 
-- `main_factory.py`: Script that trains the RL agent for a given set of hyperparameters.
+The worker finds the newest checkpoint at or below 3,000 trials, restores it, trains only
+the missing trials, and writes `checkpoints/trial-00003000/`. It saves the checkpoint
+*before* validation. Validation changes RNG, environment, and cache state, so the next stage
+always restores the immutable pre-validation checkpoint rather than continuing from the
+evaluated in-memory agent. This keeps validation from changing the later training path.
 
-- `base_config.yaml`: Base configuration file for training the RL agent.
-  This file serves three purposes:
-
-  1. Provides values for hyperparameters that are not tuned.
-  2. Provides a template for the configuration files generated during tuning.
-  3. Provides baseline values for the hyperparameters that are tuned and later overridden by the tuning process.
-
-- `search_space.yaml`: YAML file that defines the hyperparameter search space for tuning.
-  This file specifies the hyperparameters to be tuned and their corresponding search spaces, specified by keys:
-
-  * `bounds`: A list of two values specifying the lower and upper bounds (both inclusive) of the hyperparameter.
-  * `type`: A string specifying the type of the hyperparameter, which can be either `int` or `float`.
-
-  **Note:** The tuning workflow in `runner.py` first runs training using the baseline configuration from `base_config.yaml`.
-  This provides a reference point before evaluating optimized hyperparameter configurations.
-
-
-
-## Expected workflow
-
-The hyperparameter tuning workflow is handled by `runner.py`.
-When executed, the workflow proceeds as follows:
-
-1. A baseline training run is submitted using the hyperparameter values specified in `base_config.yaml`.
-2. An initial set of random hyperparameter configurations is generated and evaluated.
-3. For each tuning iteration, `runner.py` uses Optuna to propose a batch of new hyperparameter configurations.
-4. For each configuration in the batch, `runner.py` generates a corresponding configuration file and Slurm job script.
-5. The Slurm jobs for the current batch are submitted to the HPC cluster.
-6. `runner.py` waits until all jobs in the current batch are completed.
-7. After the batch is completed, the results from each training run are collected and used to compute the objective values.
-8. The objective values are reported back to the Optuna study.
-9. Optuna uses the completed trials to propose the next batch of hyperparameter configurations.
-10. Steps 3--9 are repeated until the requested number of tuning iterations is completed.
-
-
+The 1,000-trial session length must not redefine schedules intended for the full experiment.
+Consequently, `base_config.yaml` uses the explicit cumulative schedule values
+`start_jump: 4000` and `beta_anneal_trials: 5950`; these match the former default schedule
+for a 10,000-trial run. `anneal_fraction` remains `null` for legacy compatibility.
 
 ## Outputs
 
-The tuning results are saved in the directory specified by `--target-dir`.
-Each training run is stored in a separate subdirectory inside the target directory.
-The directory name follows the format:
+Each unique configuration has a stable ID:
 
 ```text
-run_0000/  # Using baseline configuration from base_config.yaml
-run_0001/
-run_0002/
-...
+hyperparameter_tuning_results/
+├── configs/
+│   ├── config_0000.yaml
+│   └── config_0001.yaml
+├── run_0000/
+│   ├── checkpoints/
+│   │   ├── trial-00001000/
+│   │   └── ...
+│   ├── eval_results_trial-00001000.pkl
+│   ├── eval_results_trial-00001000.csv
+│   ├── eval_results.pkl
+│   ├── eval_results.csv
+│   └── statistical_analysis.pkl
+├── optuna_trials.csv
+├── rung_scores.csv
+├── optimization_history.png
+└── param_importances.png
 ```
 
-where the index corresponds to the hyperparameter configuration used for that run.
-The corresponding configuration file for each run is stored in:
+The trial-specific evaluation files preserve the score used at each rung.
+`eval_results.pkl` and `eval_results.csv` are refreshed as compatibility aliases for the
+latest completed stage. `rung_scores.csv` records each objective component, promotion or
+pruning status, Optuna trial number, configuration ID, and cumulative budget.
 
-```text
-configs/config_0000.yaml  # Baseline configuration from base_config.yaml
-configs/config_0001.yaml
-configs/config_0002.yaml
-...
-```
+The worker is idempotent for a stage whose checkpoint and both evaluation files already
+exist. If a checkpoint exists but its evaluation output does not, the worker restores that
+checkpoint and performs validation without retraining. Slurm failures are reported as
+errors rather than treated as completed trials.
 
-For example, the training result in `run_0005/` was generated using the hyperparameter configuration stored in `configs/config_0005.yaml`
+## Files
 
-Each `run_XXXX/` directory contains the outputs from training and evaluation.
-The main output files are:
+- `runner.py`: proposes candidates, submits each fidelity stage, performs synchronous
+  promotion, reports final/pruned trials to Optuna, and exports summaries.
+- `main_factory.py`: trains or restores one candidate to one cumulative trial target, then
+  evaluates the validation dataset.
+- `tuning_utils.py`: configuration handling, Slurm submission/monitoring, promotion helpers,
+  and objective computation.
+- `base_config.yaml`: training/validation pipeline and untuned baseline values.
+- `search_space.yaml`: hyperparameters and Optuna bounds.
 
-- `dqn_model.keras`: Final trained DQN model from the training run.
-- `statistical_analysis.pkl`: Training statistics, including reward information collected during training.
-- `eval_results.pkl`: Evaluation results obtained by evaluating the final model on the training set. These results are used to compute metrics such as the success rate and exact rate.
-- Other intermediate outputs, such as models saved during training, neural-network loss values, and additional training logs.
-
-The best-performing hyperparameter configuration is not exported as a separate configuration file by default.
-Instead, it can be identified from the collected tuning results by finding the run with the best objective value.
-The corresponding hyperparameter configuration can then be retrieved from the matching file in the `configs/` directory.
+Early scores can be noisy, and successive halving can discard a configuration that would
+have improved late in training. The grace budget and reduction factor therefore represent a
+compute-versus-selection-risk tradeoff; the defaults are a starting policy, not a scientific
+guarantee that the globally best 10,000-trial configuration will survive.
