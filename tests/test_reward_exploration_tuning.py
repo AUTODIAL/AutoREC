@@ -61,7 +61,7 @@ def test_shared_reward_tuning_targets_scoring_and_slurm_script(tmp_path):
     assert "test_dataset" not in script
 
 
-@pytest.mark.parametrize("case_name", CASES[:3])
+@pytest.mark.parametrize("case_name", CASES)
 def test_tuning_configuration_and_entrypoints_are_isolated(case_name):
     case_dir = REWARD_ROOT / case_name
     config = yaml.safe_load((case_dir / "tuning_base_config.yaml").read_text())
@@ -98,5 +98,22 @@ def test_discrete_fim_tuning_keeps_reward_definition_fixed():
         assert config["environment"][environment_name]["identifiability_thresh"] == 1e-6
     search_space = yaml.safe_load((case_dir / "tuning_search_space.yaml").read_text())
     assert "identifiability_thresh" not in search_space
+    worker = (case_dir / "tuning_main_factory.py").read_text()
+    assert "prepare_runtime_function=prepare_experimental_runtime" in worker
+
+
+def test_continuous_fim_tuning_keeps_reward_definition_fixed():
+    case_dir = REWARD_ROOT / CASES[3]
+    config = yaml.safe_load((case_dir / "tuning_base_config.yaml").read_text())
+    expected = {
+        "identifiability_thresh": 1e-6,
+        "penalty_sharpness": 2.0,
+        "penalty_scale": 2.0,
+    }
+    for environment_name in ("training", "eval"):
+        environment = config["environment"][environment_name]
+        assert {name: environment[name] for name in expected} == expected
+    search_space = yaml.safe_load((case_dir / "tuning_search_space.yaml").read_text())
+    assert expected.keys().isdisjoint(search_space)
     worker = (case_dir / "tuning_main_factory.py").read_text()
     assert "prepare_runtime_function=prepare_experimental_runtime" in worker
