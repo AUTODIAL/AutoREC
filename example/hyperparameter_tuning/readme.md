@@ -87,6 +87,11 @@ runner arguments on the command line:
 sbatch runner_job.sh
 ```
 
+Submit from the `example/hyperparameter_tuning/` directory. Slurm runs a copied job script
+from an internal spool directory, so the wrapper changes back to `$SLURM_SUBMIT_DIR` before
+starting `runner.py`. Relative result and configuration paths are therefore resolved from
+the directory where `sbatch runner_job.sh` was invoked.
+
 The wrapper runs the equivalent of:
 
 ```bash

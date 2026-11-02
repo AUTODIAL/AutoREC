@@ -198,6 +198,8 @@ def test_slurm_script_passes_stage_target_and_preserves_intermediate_models(
     assert "NUM_INITIAL=5" in wrapper
     assert "MAX_TRIALS=10000" in wrapper
     assert '--login-node "$LOGIN_NODE"' in wrapper
+    assert 'RUN_DIR=${SLURM_SUBMIT_DIR:-"$SCRIPT_DIR"}' in wrapper
+    assert 'cd "$RUN_DIR"' in wrapper
     assert 'python runner.py "${RUNNER_ARGUMENTS[@]}"' in wrapper
 
 

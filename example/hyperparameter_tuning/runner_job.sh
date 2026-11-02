@@ -15,6 +15,10 @@
 set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+# Slurm executes a copied script from its spool directory. Prefer the original
+# submission directory so runner.py and relative configuration paths resolve
+# where the user invoked `sbatch runner_job.sh`.
+RUN_DIR=${SLURM_SUBMIT_DIR:-"$SCRIPT_DIR"}
 
 # USER CONFIGURATION
 LOGIN_NODE='login1'
@@ -63,7 +67,7 @@ module restore "$MODULE_SAVELIST_NAME"
 source "$PYTHON_ENV_PATH/bin/activate"
 
 # RUN THE HYPERPARAMETER-TUNING ORCHESTRATOR
-cd "$SCRIPT_DIR"
+cd "$RUN_DIR"
 echo 'Running script: runner.py'
 echo "Login node: $LOGIN_NODE"
 echo "Arguments: ${RUNNER_ARGUMENTS[*]}"
