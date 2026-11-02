@@ -151,6 +151,8 @@ def test_slurm_script_passes_stage_target_and_preserves_intermediate_models(
     assert "--target-trials 1000" in script
     assert "CUDA_VISIBLE_DEVICES=-1" in script
     assert "TF_NUM_INTRAOP_THREADS=1" in script
+    assert f"WORK_DIR={EXAMPLE_DIR}" in script
+    assert 'cd "$WORK_DIR"' in script
     assert "tar -czf" not in script
 
     commands = []
@@ -184,6 +186,8 @@ def test_slurm_script_passes_stage_target_and_preserves_intermediate_models(
     wrapper = (EXAMPLE_DIR / "runner_job.sh").read_text()
     assert 'RUN_DIR=${SLURM_SUBMIT_DIR:-"$SCRIPT_DIR"}' in wrapper
     assert 'cd "$RUN_DIR"' in wrapper
+    assert 'MODULE_SAVELIST_NAME="default"' in wrapper
+    assert 'PYTHON_ENV_PATH="$HOME/autorec_env"' in wrapper
     assert 'python runner.py "${RUNNER_ARGUMENTS[@]}"' in wrapper
 
 
@@ -211,6 +215,31 @@ def test_base_config_uses_session_budget_and_separate_validation_data():
     assert config["agent"]["start_jump"] == 4_000
     assert config["agent"]["anneal_fraction"] is None
     assert config["agent"]["beta_anneal_trials"] == 5_950
-    assert config["dataprep"]["training"]["path"].endswith("training_dataset.pkl")
-    assert config["dataprep"]["eval"]["path"].endswith("validation_dataset.pkl")
+    assert config["dataprep"]["training"]["path"] == "./data/training_dataset.pkl"
+    assert config["dataprep"]["eval"]["path"] == "./data/validation_dataset.pkl"
     assert "test_dataset" not in (EXAMPLE_DIR / "base_config.yaml").read_text()
+
+
+def test_generated_config_preserves_working_directory_relative_data_paths(
+    tmp_path, tuning_utils
+):
+    base_config = {
+        "dataprep": {
+            "training": {"path": "./data/training_dataset.pkl"},
+            "eval": {"path": "./data/validation_dataset.pkl"},
+        },
+        "agent": {"num_trials": 1_000, "save_dir": "./"},
+    }
+    base_config_file = tmp_path / "base_config.yaml"
+    base_config_file.write_text(yaml.safe_dump(base_config))
+
+    handler = tuning_utils.ConfigurationHandler(
+        base_config=base_config_file,
+        configs_dir=tmp_path / "results" / "configs",
+        search_space_bounds={},
+        integer_variables=[],
+    )
+    _, generated_file, _ = handler.write_config(handler.base_config, tmp_path / "results")
+    generated_config = yaml.safe_load(generated_file.read_text())
+    assert generated_config["dataprep"]["training"]["path"] == ("./data/training_dataset.pkl")
+    assert generated_config["dataprep"]["eval"]["path"] == ("./data/validation_dataset.pkl")

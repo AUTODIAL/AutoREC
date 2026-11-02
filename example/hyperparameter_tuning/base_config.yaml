@@ -1,6 +1,6 @@
 dataprep:
   training:
-    path: ${AUTOREC_ROOT}/example/hyperparameter_tuning/data/training_dataset.pkl
+    path: ./data/training_dataset.pkl
     mode: load
     evaluation: true
     perform_linKK_validation: false
@@ -16,7 +16,7 @@ dataprep:
       - nphi
 
   eval:
-    path: ${AUTOREC_ROOT}/example/hyperparameter_tuning/data/validation_dataset.pkl
+    path: ./data/validation_dataset.pkl
     mode: load
     evaluation: true
     perform_linKK_validation: false

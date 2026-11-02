@@ -31,6 +31,13 @@ The `data/` directory has three processed datasets:
 - `test_dataset.pkl` is reserved for final assessment after hyperparameter selection. The
   tuning scripts never load it.
 
+The training and validation paths in `base_config.yaml` are relative to the directory from
+which the calculation runs. Generated candidate configurations preserve those relative
+paths. Each generated Slurm script explicitly changes to the directory containing
+`main_factory.py` before starting Python, so copying the complete
+`example/hyperparameter_tuning/` directory to any shared location also copies the data root
+used by `./data/...`.
+
 `tuning_utils.compute_score` combines the mean episodic cumulative reward over the most
 recent 1,000 training episodes, validation success rate, and validation exact-circuit rate.
 Because the validation set is consulted repeatedly, it must not be reported as an unbiased
@@ -102,8 +109,8 @@ Before starting a long run, verify these cluster-specific requirements:
 3. The `#SBATCH` directives in `runner_job.sh`, including the seven-day limit, account, and
    node constraint, are accepted by the cluster. They currently match the training-job
    template and should be edited for a different cluster.
-4. `MODULE_SAVELIST_NAME` and `PYTHON_ENV_PATH` match the cluster. They default to `default`
-   and `$HOME/autorec_env`, and may be exported when submitting the wrapper job.
+4. `MODULE_SAVELIST_NAME` and `PYTHON_ENV_PATH` in `runner_job.sh` match the cluster. They are
+   currently set to `default` and `$HOME/autorec_env`.
 
 Cancelling the orchestrator job does not automatically cancel child jobs that it already
 submitted; inspect and cancel those Slurm jobs separately if needed.
