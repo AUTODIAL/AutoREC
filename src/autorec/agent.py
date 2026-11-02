@@ -297,6 +297,7 @@ class DDQN_ECM:
         self._replay_buffer: Optional[CircularBuffer] = None
         self._training_state: Optional[_TrainingState] = None
         self._continuation_mode = False
+        self._checkpoint_series_id = None
 
         # Prioritized replay parameters
         self.prioritized_replay_alpha = prioritized_replay_alpha

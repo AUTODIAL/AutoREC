@@ -14,6 +14,7 @@ import pickle
 import platform
 import re
 import tempfile
+import uuid
 
 import numpy as np
 import tensorflow as tf
@@ -109,6 +110,7 @@ def _capture(agent):
             "_replay_buffer",
             "_training_state",
             "_continuation_mode",
+            "_checkpoint_series_id",
         }
     )
     # Performance caches are derived from checkpoint-owned environments, models, and
@@ -169,6 +171,12 @@ def save_checkpoint(agent, destination) -> Path:
     destination = Path(destination)
     if destination.exists() or destination.is_symlink():
         raise FileExistsError(f"Checkpoint already exists: {destination}")
+    if agent._checkpoint_series_id is None:
+        agent._checkpoint_series_id = uuid.uuid4().hex
+    if not isinstance(agent._checkpoint_series_id, str) or not re.fullmatch(
+        r"[0-9a-f]{32}", agent._checkpoint_series_id
+    ):
+        raise ValueError("Checkpoint series ID is invalid.")
     runtime = _runtime()
     payloads = _capture(agent)
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -187,7 +195,8 @@ def save_checkpoint(agent, destination) -> Path:
                 stream.flush()
                 os.fsync(stream.fileno())
         manifest = {
-            "format_version": 2,
+            "format_version": 3,
+            "series_id": agent._checkpoint_series_id,
             "completed_trials": agent.completed_trials,
             "runtime": runtime,
             "files": {name: _digest(temporary / name) for name in sorted(_COMPONENTS)},
@@ -217,10 +226,15 @@ def _read_manifest(directory):
     except (OSError, json.JSONDecodeError) as error:
         raise ValueError(f"Checkpoint manifest is unreadable: {manifest_path}") from error
     if (
-        set(manifest) != {"format_version", "completed_trials", "runtime", "files"}
-        or manifest["format_version"] != 2
+        set(manifest)
+        != {"format_version", "series_id", "completed_trials", "runtime", "files"}
+        or manifest["format_version"] != 3
     ):
         raise ValueError("Unsupported checkpoint manifest/version.")
+    if not isinstance(manifest["series_id"], str) or not re.fullmatch(
+        r"[0-9a-f]{32}", manifest["series_id"]
+    ):
+        raise ValueError("Checkpoint manifest has an invalid series ID.")
     completed_trials = manifest["completed_trials"]
     if isinstance(completed_trials, bool) or not isinstance(completed_trials, int):
         raise ValueError("Checkpoint manifest has an invalid completed-trial count.")
@@ -265,6 +279,7 @@ def find_latest_checkpoint(directory, *, target_trials=None):
         raise ValueError(f"Checkpoint root must be a regular directory: {directory}")
 
     candidates = []
+    series_id = None
     for path in directory.iterdir():
         if path.name.startswith("."):
             continue
@@ -277,6 +292,10 @@ def find_latest_checkpoint(directory, *, target_trials=None):
             raise ValueError(f"Checkpoint path must be a regular directory: {path}")
         named_trials = int(match.group(1))
         manifest = _read_manifest(path)
+        if series_id is None:
+            series_id = manifest["series_id"]
+        elif manifest["series_id"] != series_id:
+            raise ValueError("Checkpoint root contains multiple training series.")
         if manifest["completed_trials"] != named_trials:
             raise ValueError(f"Checkpoint directory and manifest trial counts differ: {path}")
         if target_trials is not None and named_trials > target_trials:
@@ -312,6 +331,7 @@ def _read_checkpoint(directory):
         or progress["completed_trials"] != manifest["completed_trials"]
     ):
         raise ValueError("Checkpoint progress does not match its boundary/manifest.")
+    payloads["manifest.json"] = manifest
     return payloads
 
 
@@ -332,6 +352,7 @@ def load_checkpoint(directory, *, save_dir=None, num_trials=None):
     previous_rng = rng_state_dict()
     try:
         payloads = _read_checkpoint(directory)
+        manifest = payloads.pop("manifest.json")
         config = payloads["config.json"]
         training = payloads["training.pkl"]
         if set(config) != {"agent", "output"} or set(config["agent"]) != _CONFIG_FIELDS:
@@ -391,6 +412,7 @@ def load_checkpoint(directory, *, save_dir=None, num_trials=None):
             ):
                 raise ValueError("Checkpoint network dimensions do not match the environment.")
         agent._continuation_mode = True
+        agent._checkpoint_series_id = manifest["series_id"]
         output = config["output"]
         agent.save_dir = Path(output["save_dir"] if save_dir is None else save_dir)
         agent.model_dir = agent.save_dir / "models"

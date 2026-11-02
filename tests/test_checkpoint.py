@@ -48,6 +48,7 @@ def test_save_read_is_exact_and_rng_inert(agent, tmp_path):
     assert payloads["config.json"]["agent"]["num_trials"] == 12
     assert payloads["config.json"]["agent"]["beta_anneal_trials"] == pytest.approx(7.14)
     assert payloads["training.pkl"]["progress"]["completed_trials"] == 0
+    assert payloads["manifest.json"]["series_id"] == agent._checkpoint_series_id
     with pytest.raises(FileExistsError):
         checkpoint.save_checkpoint(agent, path)
 
@@ -121,6 +122,32 @@ def test_find_latest_checkpoint_handles_missing_empty_and_valid_roots(agent, tmp
     assert checkpoint.find_latest_checkpoint(root, target_trials=10) == latest
     assert checkpoint.find_latest_checkpoint(root) == latest
     assert first.is_dir()
+
+
+def test_checkpoint_series_is_preserved_and_mixed_roots_are_rejected(
+    agent, tmp_path, environment_factory
+):
+    root = tmp_path / "checkpoints"
+    first = checkpoint.save_checkpoint(agent, root / "trial-00000000")
+    series_id = json.loads((first / "manifest.json").read_text())["series_id"]
+    restored = checkpoint.load_checkpoint(first, save_dir=tmp_path / "restored")
+    restored._training_state.completed_trials = 1
+    second = checkpoint.save_checkpoint(restored, root / "trial-00000001")
+
+    assert json.loads((second / "manifest.json").read_text())["series_id"] == series_id
+    assert checkpoint.find_latest_checkpoint(root) == second
+
+    other = DDQN_ECM(
+        environment_factory(),
+        save_dir=tmp_path / "other-output",
+        num_trials=1,
+        hidden_layers=[{"type": "Dense", "units": 4, "activation": "relu"}],
+    )
+    other.train(additional_trials=0)
+    other._training_state.completed_trials = 2
+    checkpoint.save_checkpoint(other, root / "trial-00000002")
+    with pytest.raises(ValueError, match="multiple training series"):
+        checkpoint.find_latest_checkpoint(root)
 
 
 def test_find_latest_checkpoint_rejects_unsafe_candidates(agent, tmp_path):
