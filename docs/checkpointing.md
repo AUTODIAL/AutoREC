@@ -197,7 +197,7 @@ a new agent; it never partially overwrites an existing one. On failure, the supp
 caller RNG streams are restored. Output directories can have been created before a late
 filesystem/restoration error.
 
-Format version 5 requires identical AutoREC Python source and recorded Python/numerical
+Format version 6 requires identical AutoREC Python source and recorded Python/numerical
 library versions, OS/platform, threading settings, TensorFlow determinism and backend
 settings. This is deliberately conservative: there is no migration or best-effort loading.
 Source edits, including implementation updates between stages, invalidate old checkpoints.

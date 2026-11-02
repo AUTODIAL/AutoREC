@@ -16,6 +16,7 @@ class EIS_ECM_Env(BaseEISECMEnv):
     """
 
     CHECKPOINT_FIELDS = frozenset()
+    CHECKPOINT_SOURCE_MODULES = ()
 
     def _calculate_reward(
         self,

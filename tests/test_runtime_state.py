@@ -12,6 +12,7 @@ from test_training_baseline import environment_factory as _environment_factory
 from autorec.environment import EIS_ECM_Env
 from autorec.runtime_state import (
     environment_state_dict,
+    environment_source_modules,
     restore_environment_state,
     restore_rng_state,
     rng_state_dict,
@@ -23,6 +24,7 @@ environment_factory = _environment_factory
 
 class CheckpointEnvironment(EIS_ECM_Env):
     CHECKPOINT_FIELDS = frozenset({"reward_scale"})
+    CHECKPOINT_SOURCE_MODULES = ("autorec.parser",)
 
 
 class UndeclaredCheckpointEnvironment(EIS_ECM_Env):
@@ -132,6 +134,7 @@ def test_declared_environment_subclass_state_roundtrips_without_constructor(
     assert restored is evaluation is active
     assert type(restored) is CheckpointEnvironment
     assert restored.reward_scale == 2.5
+    assert environment_source_modules(env) == ("autorec.parser", __name__)
 
 
 def test_environment_subclass_requires_declared_complete_state(environment_factory):

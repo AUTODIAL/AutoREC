@@ -44,6 +44,26 @@ def _checkpoint_fields(environment_class) -> frozenset[str]:
     return fields
 
 
+def environment_source_modules(*environments) -> tuple[str, ...]:
+    """Return custom environment and declared dependency modules to fingerprint."""
+    modules = set()
+    for env in environments:
+        environment_class = type(env)
+        _checkpoint_fields(environment_class)
+        if environment_class is EIS_ECM_Env:
+            continue
+        dependencies = environment_class.__dict__.get("CHECKPOINT_SOURCE_MODULES")
+        if type(dependencies) is not tuple or not all(
+            type(name) is str and name for name in dependencies
+        ):
+            raise ValueError(
+                "Environment subclasses must declare CHECKPOINT_SOURCE_MODULES as a tuple."
+            )
+        modules.add(environment_class.__module__)
+        modules.update(dependencies)
+    return tuple(sorted(modules))
+
+
 def _environment_class_record(environment_class) -> dict:
     fields = _checkpoint_fields(environment_class)
     return {

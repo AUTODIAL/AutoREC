@@ -25,6 +25,7 @@ class EIS_ECM_Env(BaseEISECMEnv):
     """Replace the standard component penalty with simplified-circuit FIM rank loss."""
 
     CHECKPOINT_FIELDS = frozenset({"identifiability_thresh"})
+    CHECKPOINT_SOURCE_MODULES = (compute_fim.__module__,)
 
     def __init__(
         self,

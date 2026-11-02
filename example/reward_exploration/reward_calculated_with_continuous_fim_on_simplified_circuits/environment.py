@@ -58,6 +58,7 @@ class EIS_ECM_Env(BaseEISECMEnv):
     CHECKPOINT_FIELDS = frozenset(
         {"identifiability_thresh", "penalty_sharpness", "penalty_scale"}
     )
+    CHECKPOINT_SOURCE_MODULES = (compute_fim.__module__,)
 
     def __init__(
         self,

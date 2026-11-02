@@ -9,10 +9,16 @@ from test_training_baseline import environment_factory as _environment_factory
 from checkpoint_worker import exact
 from autorec.agent import DDQN_ECM
 from autorec import checkpoint
+from autorec.environment import EIS_ECM_Env
 from autorec.runtime_state import rng_state_dict, restore_rng_state
 
 
 environment_factory = _environment_factory
+
+
+class CheckpointEnvironment(EIS_ECM_Env):
+    CHECKPOINT_FIELDS = frozenset({"reward_scale"})
+    CHECKPOINT_SOURCE_MODULES = ()
 
 
 @pytest.fixture
@@ -72,7 +78,14 @@ def test_invalid_checkpoints_are_rejected_before_unpickling(agent, tmp_path, mon
         checkpoint.pickle, "load", lambda *_: pytest.fail("Unpickled before validation")
     )
 
-    for problem in ("missing", "corrupt", "version", "runtime", "incomplete"):
+    for problem in (
+        "missing",
+        "corrupt",
+        "version",
+        "runtime",
+        "extension-source",
+        "incomplete",
+    ):
         path = checkpoint.save_checkpoint(agent, tmp_path / f"checkpoint-{problem}")
         manifest_path = path / "manifest.json"
         manifest = json.loads(manifest_path.read_text())
@@ -84,6 +97,10 @@ def test_invalid_checkpoints_are_rejected_before_unpickling(agent, tmp_path, mon
             manifest["format_version"] = 100
         elif problem == "runtime":
             manifest["runtime"]["python"] = "incompatible"
+        elif problem == "extension-source":
+            manifest["runtime"]["environment_sources"] = [
+                {"module": "autorec.environment", "sha256": "0" * 64}
+            ]
         else:
             manifest["files"].pop("replay.npy")
         manifest_path.write_text(json.dumps(manifest))
@@ -233,6 +250,21 @@ def test_restore_before_optimizer_slots_and_relocate(agent, tmp_path):
     assert restored._continuation_mode is True
     assert exact(checkpoint._capture(agent)["training.pkl"]) == exact(
         checkpoint._capture(restored)["training.pkl"]
+    )
+
+
+def test_custom_environment_source_and_state_restore_exactly(agent, tmp_path):
+    agent.training_env.__class__ = CheckpointEnvironment
+    agent.training_env.reward_scale = 2.5
+    path = checkpoint.save_checkpoint(agent, tmp_path / "checkpoint")
+
+    restored = checkpoint.load_checkpoint(path, save_dir=tmp_path / "restored")
+
+    assert type(restored.training_env) is CheckpointEnvironment
+    assert restored.training_env.reward_scale == 2.5
+    assert (
+        checkpoint._read_manifest(path)["runtime"]["environment_sources"][0]["module"]
+        == __name__
     )
 
 
