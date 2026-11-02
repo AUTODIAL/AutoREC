@@ -1,51 +1,56 @@
-"""Run one open-ended session, then optionally resume it with --resume.
+"""Run checkpointed training through AutoREC's supported training command.
 
-Set deterministic CPU/thread/hash environment variables before starting Python, as
-described in docs/checkpointing.md. YAML ``num_trials`` is the current session length;
-``--additional-trials`` can override it for one invocation.
+Use ``--resume`` for an explicit immutable checkpoint, or combine ``--config`` with
+``--resume-latest`` to recover automatically toward cumulative ``agent.num_trials``.
 """
+
+from __future__ import annotations
 
 import argparse
 from pathlib import Path
+from typing import Sequence
 
 
-def main():
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--config", type=Path)
     source.add_argument("--resume", type=Path)
+    parser.add_argument("--resume-latest", action="store_true")
     parser.add_argument("--additional-trials", type=int)
     parser.add_argument("--checkpoint-dir", type=Path, default=Path("checkpoints"))
     parser.add_argument("--checkpoint-every", type=int, default=100)
     parser.add_argument("--output-dir", type=Path)
-    args = parser.parse_args()
+    return parser
 
-    from autorec.runtime import configure_autorec_runtime
 
-    configure_autorec_runtime(thread_count=1)
-    import tensorflow as tf
-    from autorec.agent import DDQN_ECM
-    from autorec.factory import config_reader, pipeline_builder
-    from autorec.utils import set_global_seed
+def main(argv: Sequence[str] | None = None) -> int:
+    args = _build_parser().parse_args(argv)
+    if args.resume_latest and args.config is None:
+        raise ValueError("--resume-latest requires --config.")
+    if args.resume_latest and args.additional_trials is not None:
+        raise ValueError("--resume-latest cannot be combined with --additional-trials.")
 
-    tf.config.experimental.enable_op_determinism()
-    if args.resume:
-        agent = DDQN_ECM.from_checkpoint(args.resume, save_dir=args.output_dir)
-    else:
-        set_global_seed(42)
-        config = config_reader(args.config)
-        if args.output_dir is not None:
-            config["agent"] = config.get("agent") or {}
-            config["agent"]["save_dir"] = args.output_dir
-        _, _, _, _, agent = pipeline_builder(config)
-    agent.train(
-        additional_trials=args.additional_trials,
-        checkpoint_dir=args.checkpoint_dir,
-        checkpoint_every=args.checkpoint_every,
-    )
-    print(f"Completed cumulative trial {agent.completed_trials}.")
-    print(f"Default next session length: {agent.num_trials} trials.")
+    command = [
+        "train",
+        "--config" if args.config is not None else "--resume",
+        str(args.config if args.config is not None else args.resume),
+        "--checkpoint-dir",
+        str(args.checkpoint_dir),
+        "--checkpoint-every",
+        str(args.checkpoint_every),
+    ]
+    if args.resume_latest:
+        command.append("--resume-latest")
+    if args.additional_trials is not None:
+        command.extend(("--additional-trials", str(args.additional_trials)))
+    if args.output_dir is not None:
+        command.extend(("--output-dir", str(args.output_dir)))
+
+    from autorec.cli import main as autorec_main
+
+    return autorec_main(command)
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
