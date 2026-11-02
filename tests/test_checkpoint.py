@@ -177,6 +177,33 @@ def test_find_latest_checkpoint_rejects_unsafe_candidates(agent, tmp_path):
             checkpoint.find_latest_checkpoint(root, target_trials=target)
 
 
+@pytest.mark.parametrize("completed", [None, 4, 10])
+def test_plan_training_recovery_is_cumulative_and_side_effect_free(agent, tmp_path, completed):
+    root = tmp_path / "checkpoints"
+    if completed is not None:
+        agent._training_state.completed_trials = completed
+        checkpoint.save_checkpoint(agent, root / f"trial-{completed:08d}")
+    before = rng_state_dict()
+
+    plan = checkpoint.plan_training_recovery(root, target_trials=10)
+
+    expected_checkpoint = None if completed is None else root / f"trial-{completed:08d}"
+    assert plan.checkpoint == expected_checkpoint
+    assert plan.completed_trials == (0 if completed is None else completed)
+    assert plan.target_trials == 10
+    assert plan.additional_trials == 10 - (0 if completed is None else completed)
+    assert pickle.dumps(before) == pickle.dumps(rng_state_dict())
+
+
+@pytest.mark.parametrize(
+    ("target", "error"),
+    [(0, ValueError), (-1, ValueError), (True, TypeError), (1.5, TypeError)],
+)
+def test_plan_training_recovery_rejects_invalid_targets(tmp_path, target, error):
+    with pytest.raises(error, match="target_trials"):
+        checkpoint.plan_training_recovery(tmp_path, target)
+
+
 def test_unfinished_trial_rejected(agent, tmp_path):
     agent._training_state.at_trial_boundary = False
     with pytest.raises(ValueError, match="boundary"):

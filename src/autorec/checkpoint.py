@@ -4,7 +4,7 @@ Checksums detect incomplete/corrupt files, not malicious pickle payloads. Compon
 snapshots are explicit dictionaries; live agents and environments are never pickled.
 """
 
-from dataclasses import fields
+from dataclasses import dataclass, fields
 import hashlib
 import importlib.metadata
 import json
@@ -45,6 +45,16 @@ _RECONSTRUCTIBLE_FIELDS = frozenset(
 )
 _COMPONENTS = {"config.json", "training.pkl", "environments.pkl", "neural.pkl", "replay.npy"}
 _CHECKPOINT_NAME = re.compile(r"trial-(\d{8})")
+
+
+@dataclass(frozen=True)
+class RecoveryPlan:
+    """Side-effect-free plan for reaching one cumulative training target."""
+
+    checkpoint: Path | None
+    completed_trials: int
+    target_trials: int
+    additional_trials: int
 
 
 def _runtime():
@@ -309,6 +319,23 @@ def find_latest_checkpoint(directory, *, target_trials=None):
     _, path, manifest = max(candidates, key=lambda candidate: candidate[0])
     _validate_checkpoint_files(path, manifest)
     return path
+
+
+def plan_training_recovery(directory, target_trials):
+    """Plan fresh or resumed work needed to reach ``target_trials`` exactly."""
+    if isinstance(target_trials, bool) or not isinstance(target_trials, int):
+        raise TypeError("target_trials must be a positive integer.")
+    if target_trials < 1:
+        raise ValueError("target_trials must be positive.")
+
+    latest = find_latest_checkpoint(directory, target_trials=target_trials)
+    completed = 0 if latest is None else _read_manifest(latest)["completed_trials"]
+    return RecoveryPlan(
+        checkpoint=latest,
+        completed_trials=completed,
+        target_trials=target_trials,
+        additional_trials=target_trials - completed,
+    )
 
 
 def _read_checkpoint(directory):
