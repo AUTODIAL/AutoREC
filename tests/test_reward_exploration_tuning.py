@@ -61,7 +61,7 @@ def test_shared_reward_tuning_targets_scoring_and_slurm_script(tmp_path):
     assert "test_dataset" not in script
 
 
-@pytest.mark.parametrize("case_name", CASES[:2])
+@pytest.mark.parametrize("case_name", CASES[:3])
 def test_tuning_configuration_and_entrypoints_are_isolated(case_name):
     case_dir = REWARD_ROOT / case_name
     config = yaml.safe_load((case_dir / "tuning_base_config.yaml").read_text())
@@ -88,4 +88,15 @@ def test_simplified_reward_tuning_worker_uses_experimental_environment():
     assert "def prepare_experimental_runtime" in worker
     assert "from environment import EIS_ECM_Env" in worker
     assert "pipeline_builder_function=build_experimental_pipeline" in worker
+    assert "prepare_runtime_function=prepare_experimental_runtime" in worker
+
+
+def test_discrete_fim_tuning_keeps_reward_definition_fixed():
+    case_dir = REWARD_ROOT / CASES[2]
+    config = yaml.safe_load((case_dir / "tuning_base_config.yaml").read_text())
+    for environment_name in ("training", "eval"):
+        assert config["environment"][environment_name]["identifiability_thresh"] == 1e-6
+    search_space = yaml.safe_load((case_dir / "tuning_search_space.yaml").read_text())
+    assert "identifiability_thresh" not in search_space
+    worker = (case_dir / "tuning_main_factory.py").read_text()
     assert "prepare_runtime_function=prepare_experimental_runtime" in worker
