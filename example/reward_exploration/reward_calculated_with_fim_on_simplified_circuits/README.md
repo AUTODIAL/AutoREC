@@ -14,6 +14,9 @@ successful fit, the environment:
 
 The default identifiability threshold is `1e-6`.
 
+After training, the runner evaluates every spectrum in the training, test, battery, and
+experimental datasets described in the parent README.
+
 From the AutoREC repository root, run locally with:
 
 ```bash
@@ -33,4 +36,4 @@ sbatch submit_job.sh
 
 The SLURM job uses the same resources and pipeline configuration as the baseline and
 simplified-component-penalty experiments, activates `$HOME/eis_env`, performs
-full-spectrum evaluation, and writes outputs to `calculation_output/`.
+all four evaluations, and writes outputs to `calculation_output/`.

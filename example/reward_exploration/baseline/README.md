@@ -7,7 +7,7 @@ calculated from the raw circuit proposed by the agent.
 
 The baseline and simplified-reward calculations use the same configuration, random seed,
 training workflow, and evaluation behavior. Evaluation runs on every spectrum in the
-training dataset.
+training, test, battery, and experimental datasets described in the parent README.
 
 From the AutoREC repository root, run locally with:
 
@@ -26,4 +26,4 @@ sbatch submit_job.sh
 
 The SLURM job activates `$HOME/eis_env`, uses the repository's
 `configs_yaml/examples/pipeline_config.yaml` (currently 10,000 training trials), performs
-full-spectrum evaluation, and writes outputs to `calculation_output/`.
+all four evaluations, and writes outputs to `calculation_output/`.

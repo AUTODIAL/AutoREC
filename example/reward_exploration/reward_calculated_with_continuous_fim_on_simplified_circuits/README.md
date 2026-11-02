@@ -25,6 +25,9 @@ it approach `0`. Taking the mean makes the score independent of the number of fi
 parameters, while `alpha` bounds the overall penalty to `[0, 2]`. Fit-quality and
 depth terms remain separate parts of the reward.
 
+After training, the runner evaluates every spectrum in the training, test, battery, and
+experimental datasets described in the parent README.
+
 From the AutoREC repository root, run locally with:
 
 ```bash
@@ -43,5 +46,5 @@ sbatch submit_job.sh
 ```
 
 The submission script retains the corrected configuration location
-`~/modules/AutoREC/configs_yaml/examples/pipeline_config.yaml`, performs full-spectrum
-evaluation, and writes outputs to `calculation_output/`.
+`~/modules/AutoREC/configs_yaml/examples/pipeline_config.yaml`, performs all four
+evaluations, and writes outputs to `calculation_output/`.

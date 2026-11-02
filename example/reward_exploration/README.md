@@ -43,13 +43,31 @@ Use a different output directory for every experiment; an existing `dqn_model.ke
 the selected directory causes the runner to load that model instead of training a new
 one.
 
+## Evaluation datasets and outputs
+
+Every runner performs four complete evaluations after training or loading its model:
+
+1. `training`: the training dataset selected by the YAML configuration;
+2. `test`: `data/test_dataset.pkl`;
+3. `battery`: `data/battery_dataset.pkl`; and
+4. `experimental`: `data/experimental_dataset.pkl`.
+
+The three external datasets must be available in `example/reward_exploration/data/` on the
+machine running the example. Each external dataset is loaded into a fresh environment with
+the same environment settings as the configured evaluation or training environment. This
+prevents circuit-cache entries from being shared between datasets.
+
+Each evaluation writes `eval_results_<dataset>.csv` and
+`eval_results_<dataset>.pkl` under the selected output directory's `results/` folder.
+
 ## Comparing methods
 
 For a controlled comparison, use the same YAML configuration, datasets, random seed, and
 software/hardware environment for every method. The runners set the global seed to 42 before
-constructing the pipeline and always evaluate every spectrum in the training dataset. The
-methods intentionally change the reward, so their learned trajectories and final models are
-not expected to be numerically equal.
+constructing the pipeline, reset all global random generators to the configured agent seed
+before each dataset evaluation, and evaluate every spectrum in all four datasets. The methods
+intentionally change the reward, so their learned trajectories and final models are not
+expected to be numerically equal.
 
 The included tests verify reward calculations and edge cases. They do not establish that
 one reward produces better circuits or RL performance; that requires replicated training
@@ -66,7 +84,7 @@ sbatch submit_job.sh
 
 Before submission, review the cluster-specific account, constraint, environment path,
 resources, and repository location in the script. The scripts use the full pipeline
-configuration, evaluate the full dataset, and write to `calculation_output/`. At the end
-of a successful job, the `models/` and `fit_plots/` directories are archived as
+configuration, evaluate all four datasets, and write to `calculation_output/`. At the end of
+a successful job, the `models/` and `fit_plots/` directories are archived as
 `models.tar.gz` and `fit_plots.tar.gz`, then the original directories are removed to
 reduce HPC file counts.
