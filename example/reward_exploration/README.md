@@ -26,7 +26,7 @@ Run commands from the AutoREC repository root. For a short workflow check, omit
 
 ```bash
 source ./autorec_env/bin/activate
-python example/reward_exploration/baseline/main_factory.py --run-mode quick
+python example/reward_exploration/baseline/main_factory.py
 ```
 
 For the full 10,000-trial configuration, provide the full pipeline configuration and a
@@ -35,7 +35,6 @@ dedicated output directory:
 ```bash
 python example/reward_exploration/baseline/main_factory.py \
   --config configs_yaml/examples/pipeline_config.yaml \
-  --run-mode full \
   --output-dir example/reward_exploration/baseline/calculation_output
 ```
 
@@ -46,15 +45,15 @@ one.
 
 ## Comparing methods
 
-For a controlled comparison, use the same YAML configuration, datasets, random seed,
-run mode, and software/hardware environment for every method. The runners set the global
-seed to 42 before constructing the pipeline. The methods intentionally change the reward,
-so their learned trajectories and final models are not expected to be numerically equal.
+For a controlled comparison, use the same YAML configuration, datasets, random seed, and
+software/hardware environment for every method. The runners set the global seed to 42 before
+constructing the pipeline and always evaluate every spectrum in the training dataset. The
+methods intentionally change the reward, so their learned trajectories and final models are
+not expected to be numerically equal.
 
-The included tests verify reward calculations, edge cases, and evaluation selection.
-They do not establish that one reward produces better circuits or RL performance; that
-requires replicated training runs and scientific analysis of the resulting models and
-evaluation outputs.
+The included tests verify reward calculations and edge cases. They do not establish that
+one reward produces better circuits or RL performance; that requires replicated training
+runs and scientific analysis of the resulting models and evaluation outputs.
 
 ## SLURM execution
 

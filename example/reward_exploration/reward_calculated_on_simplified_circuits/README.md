@@ -13,11 +13,9 @@ source ./autorec_env/bin/activate
 python example/reward_exploration/reward_calculated_on_simplified_circuits/main_factory.py
 ```
 
-The runner accepts the same `--config` and `--run-mode` options as
-`example/main_factory.py`. The default `full` mode evaluates every spectrum in the training
-dataset; use `--run-mode quick` for a random sample of 20 spectra. The runner also accepts
-`--output-dir`; by default, results are written to `demo_output/` beside the experimental
-runner so they do not mix with the standard example's outputs.
+The runner accepts `--config` and `--output-dir`. It evaluates every spectrum in the training
+dataset. By default, results are written to `demo_output/` beside the experimental runner so
+they do not mix with the standard example's outputs.
 
 For SLURM, review the account and resource directives in `submit_job.sh`, then submit from
 this directory:

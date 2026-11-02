@@ -21,7 +21,6 @@ source ./autorec_env/bin/activate
 python \
   example/reward_exploration/reward_calculated_with_fim_on_simplified_circuits/main_factory.py \
   --config configs_yaml/examples/pipeline_config.yaml \
-  --run-mode full \
   --output-dir \
   example/reward_exploration/reward_calculated_with_fim_on_simplified_circuits/calculation_output
 ```

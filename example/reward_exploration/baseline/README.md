@@ -6,8 +6,8 @@ This folder provides the baseline comparison for
 calculated from the raw circuit proposed by the agent.
 
 The baseline and simplified-reward calculations use the same configuration, random seed,
-training workflow, and evaluation behavior. In the default `full` mode, evaluation runs on
-every spectrum in the training dataset.
+training workflow, and evaluation behavior. Evaluation runs on every spectrum in the
+training dataset.
 
 From the AutoREC repository root, run locally with:
 
@@ -15,7 +15,6 @@ From the AutoREC repository root, run locally with:
 source ./autorec_env/bin/activate
 python example/reward_exploration/baseline/main_factory.py \
   --config configs_yaml/examples/pipeline_config.yaml \
-  --run-mode full \
   --output-dir example/reward_exploration/baseline/calculation_output
 ```
 

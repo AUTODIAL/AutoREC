@@ -11,7 +11,7 @@ Workflow:
 2. Build environment and agent from configuration
 3. Train agent for the configured number of trials
 4. Save trained model
-5. Evaluate on either a quick sample or every EIS measurement
+5. Evaluate every EIS measurement
 6. Save evaluation results
 """
 
@@ -35,8 +35,6 @@ set_global_seed(42, True)
 
 from autorec.factory import AUTOREC_ROOT, config_reader, pipeline_builder
 
-from evaluation import DEFAULT_RUN_MODE, run_evaluation
-
 # THREADING CONFIGURATION
 # ============================================================================
 # Runtime/threading configuration is applied at the top of the file before
@@ -57,14 +55,6 @@ parser.add_argument(
     help="Path to the YAML configuration file for the environment and agent.",
 )
 parser.add_argument(
-    "--run-mode",
-    "-r",
-    type=str,
-    default=DEFAULT_RUN_MODE,
-    choices=["quick", "full"],
-    help="Evaluation mode: 'quick' for 20 random spectra, 'full' for all spectra.",
-)
-parser.add_argument(
     "--output-dir",
     type=Path,
     default=Path(__file__).resolve().parent / "demo_output",
@@ -77,9 +67,6 @@ configs = config_reader(CONFIG_FILE)
 configs["agent"]["save_dir"] = args.output_dir
 print(f"Loaded configuration from {CONFIG_FILE}:")
 pprint(configs, sort_dicts=False)
-
-# Training length is controlled by the YAML file's agent.num_trials value.
-RUN_MODE = args.run_mode
 
 # ============================================================================
 # 2. ENVIRONMENT AND AGENT SETUP
@@ -137,20 +124,20 @@ else:
 # ============================================================================
 # 4. EVALUATION
 # ============================================================================
-# Test the trained agent on either a random sample or the complete training dataset.
+# Test the trained agent on the complete training dataset.
 
 try:
-    evaluation_results, evaluation_suffix = run_evaluation(
-        agent=agent,
-        run_mode=RUN_MODE,
-        action_cap=action_cap,
-        dataset_size=len(dataset),
+    print(f"\nEvaluating all {len(dataset)} spectra...")
+    evaluation_results = agent.eval_all_eis(
+        max_actions=action_cap,
+        verbose=False,
+        use_eval_env=False,
     )
 
     # Save results for analysis.
     save_evaluation_results(
         evaluation_results,
-        f"{run_id}_{evaluation_suffix}",
+        f"{run_id}_all",
         RESULTS_SAVE_DIR,
     )
 

@@ -27,12 +27,10 @@ export OMP_NUM_THREADS=1
 
 echo "Running script: main_factory.py"
 echo "Configuration: ~/modules/AutoREC/configs_yaml/examples/pipeline_config.yaml"
-echo "Evaluation mode: full"
 echo "Output directory: calculation_output"
 
 time python main_factory.py \
     --config ~/modules/AutoREC/configs_yaml/examples/pipeline_config.yaml \
-    --run-mode full \
     --output-dir calculation_output
 
 echo "Archiving model and fit-plot outputs..."
