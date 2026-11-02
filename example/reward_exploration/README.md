@@ -63,6 +63,11 @@ Its fit images are moved into `results/fit_plots_<dataset>/`, preventing spectra
 same row number in different datasets from overwriting one another. Repeating an evaluation
 replaces the corresponding dataset-specific fit-plot directory.
 
+On a later invocation, a dataset evaluation is skipped when its CSV and pickle results both
+exist and its fit plots are available either as `fit_plots_<dataset>/` or the archived
+`fit_plots_<dataset>.tar.gz`. If any of those outputs are incomplete, that dataset is
+evaluated again. Delete one of the required outputs to force reevaluation of a dataset.
+
 ## Comparing methods
 
 For a controlled comparison, use the same YAML configuration, datasets, random seed, and

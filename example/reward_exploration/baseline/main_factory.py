@@ -161,6 +161,24 @@ try:
     # agent's inference cache.
     retained_evaluation_environments = []
     for dataset_name, dataset_path in EVALUATION_DATASETS.items():
+        result_csv = RESULTS_SAVE_DIR / f"eval_results_{dataset_name}.csv"
+        result_pickle = RESULTS_SAVE_DIR / f"eval_results_{dataset_name}.pkl"
+        dataset_fit_plots_dir = RESULTS_SAVE_DIR / f"fit_plots_{dataset_name}"
+        fit_plots_archive = Path(f"{dataset_fit_plots_dir}.tar.gz")
+        if (
+            result_csv.is_file()
+            and result_pickle.is_file()
+            and (dataset_fit_plots_dir.is_dir() or fit_plots_archive.is_file())
+        ):
+            print(f"\nSkipping completed {dataset_name} evaluation.")
+            continue
+
+        fit_plots_dir = SAVE_DIR / "fit_plots"
+        if fit_plots_dir.exists():
+            if not fit_plots_dir.is_dir():
+                raise NotADirectoryError(f"Fit-plot path is not a directory: {fit_plots_dir}")
+            shutil.rmtree(fit_plots_dir)
+
         # Give every dataset evaluation the same reproducible RNG starting state.
         set_global_seed(agent.random_seed, True)
 
@@ -193,8 +211,6 @@ try:
             dataset_name,
             RESULTS_SAVE_DIR,
         )
-        fit_plots_dir = SAVE_DIR / "fit_plots"
-        dataset_fit_plots_dir = RESULTS_SAVE_DIR / f"fit_plots_{dataset_name}"
         if fit_plots_dir.is_dir():
             if dataset_fit_plots_dir.exists():
                 shutil.rmtree(dataset_fit_plots_dir)
