@@ -1,8 +1,8 @@
 # AutoREC examples
 
 This directory contains progressively more advanced examples for constructing, training,
-continuing, evaluating, and tuning AutoREC agents. This index describes only examples that
-are tracked by Git.
+continuing, evaluating, tuning, and experimentally modifying AutoREC agents. This index
+describes only examples that are tracked by Git.
 
 Activate the AutoREC environment and install the package before running an example. Commands
 for top-level scripts below assume the current directory is `example/`.
@@ -17,6 +17,7 @@ for top-level scripts below assume the current directory is `example/`.
 | [`checkpoint_training.py`](checkpoint_training.py) | Save or resume complete training checkpoints across Python processes | One configurable session per invocation |
 | [`checkpoint/`](checkpoint/) | Validate continuous versus fresh-process checkpoint-resumed equivalence | Full example compares 1,000 continuous trials with ten 100-trial sessions |
 | [`hyperparameter_tuning/`](hyperparameter_tuning/) | Run checkpointed multi-fidelity Optuna tuning on Slurm | Potentially expensive HPC workflow |
+| [`reward_exploration/`](reward_exploration/) | Compare the standard reward with simplified-circuit and FIM-based complexity penalties | Experimental workflows range from a 50-trial demo to 10,000-trial HPC runs |
 
 ## Direct Python construction
 
@@ -121,6 +122,23 @@ See [`hyperparameter_tuning/readme.md`](hyperparameter_tuning/readme.md) for con
 cluster requirements, and submission commands. Its dedicated dataset pickle files are local
 and currently ignored by Git, so they must be provided separately in
 `hyperparameter_tuning/data/`.
+
+## Reward exploration
+
+The [`reward_exploration/`](reward_exploration/) collection provides four isolated,
+configuration-driven workflows:
+
+- the standard AutoREC reward as a baseline;
+- component-count and depth penalties calculated after circuit simplification;
+- a discrete penalty based on weak Fisher information matrix (FIM) directions in the
+  simplified circuit; and
+- a bounded continuous penalty based on the same normalized FIM spectrum.
+
+Use identical configurations, datasets, seeds, run modes, and execution environments when
+comparing these methods. The included tests validate the reward calculations and workflow
+mechanics, but they do not demonstrate that one reward produces better circuits or training
+performance. See [`reward_exploration/README.md`](reward_exploration/README.md) for the
+formulas, local commands, HPC workflow, and scientific validation caveats.
 
 ## Runtime expectations
 
