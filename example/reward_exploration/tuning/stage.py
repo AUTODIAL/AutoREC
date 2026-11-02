@@ -76,6 +76,7 @@ def run_stage(
     target_trials: int | None,
     evaluation_seed: int,
     pipeline_builder_function=None,
+    prepare_runtime_function=None,
 ) -> None:
     config = _read_config(config_file)
     session_trials = config["agent"]["num_trials"]
@@ -97,6 +98,9 @@ def run_stage(
     from autorec.runtime import configure_autorec_runtime
 
     configure_autorec_runtime(thread_count=1, warmup_autoeis=True, suppress_tf_logs=True)
+
+    if prepare_runtime_function is not None:
+        prepare_runtime_function()
 
     from autorec.agent import DDQN_ECM
     from autorec.factory import pipeline_builder
@@ -150,7 +154,11 @@ def run_stage(
     print(f"Completed cumulative trial {target_trials}.")
 
 
-def main(pipeline_builder_function=None, default_config: Path | None = None) -> None:
+def main(
+    pipeline_builder_function=None,
+    prepare_runtime_function=None,
+    default_config: Path | None = None,
+) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--config",
@@ -178,6 +186,7 @@ def main(pipeline_builder_function=None, default_config: Path | None = None) -> 
         args.target_trials,
         args.evaluation_seed,
         pipeline_builder_function,
+        prepare_runtime_function,
     )
 
 

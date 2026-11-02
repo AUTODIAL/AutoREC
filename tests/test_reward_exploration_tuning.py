@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pandas as pd
+import pytest
 import yaml
 
 from example.reward_exploration.tuning import stage, tuning_utils
@@ -60,8 +61,9 @@ def test_shared_reward_tuning_targets_scoring_and_slurm_script(tmp_path):
     assert "test_dataset" not in script
 
 
-def test_baseline_tuning_configuration_and_entrypoints_are_isolated():
-    case_dir = REWARD_ROOT / "baseline"
+@pytest.mark.parametrize("case_name", CASES[:2])
+def test_tuning_configuration_and_entrypoints_are_isolated(case_name):
+    case_dir = REWARD_ROOT / case_name
     config = yaml.safe_load((case_dir / "tuning_base_config.yaml").read_text())
     assert config["dataprep"]["training"]["path"] == "../data/training_dataset.pkl"
     assert config["dataprep"]["eval"]["path"] == "../data/validation_dataset.pkl"
@@ -77,3 +79,13 @@ def test_baseline_tuning_configuration_and_entrypoints_are_isolated():
     assert "experimental_dataset" not in combined
     assert (case_dir / "submit_job.sh").is_file()
     assert (case_dir / "tuning_runner_job.sh").is_file()
+
+
+def test_simplified_reward_tuning_worker_uses_experimental_environment():
+    worker = (
+        REWARD_ROOT / "reward_calculated_on_simplified_circuits" / "tuning_main_factory.py"
+    ).read_text()
+    assert "def prepare_experimental_runtime" in worker
+    assert "from environment import EIS_ECM_Env" in worker
+    assert "pipeline_builder_function=build_experimental_pipeline" in worker
+    assert "prepare_runtime_function=prepare_experimental_runtime" in worker
