@@ -5,6 +5,7 @@ legacy random-op counters are not recoverable; AutoREC's supported training path
 NumPy sampling and separately captured Keras layer-local generators instead.
 """
 
+import importlib
 import pickle
 import random
 
@@ -23,6 +24,46 @@ _ENV_FIELDS = frozenset(
     "current_eis_index encoded_state START_STATE state Z freq Z_norm_flatten true_circuit "
     "chi_threshold r2_threshold".split()
 )
+
+
+def _checkpoint_fields(environment_class) -> frozenset[str]:
+    if not issubclass(environment_class, EIS_ECM_Env):
+        raise ValueError("Checkpoint environments must inherit from EIS_ECM_Env.")
+    if environment_class is EIS_ECM_Env:
+        fields = environment_class.CHECKPOINT_FIELDS
+    else:
+        fields = environment_class.__dict__.get("CHECKPOINT_FIELDS")
+        if fields is None:
+            raise ValueError("Environment subclasses must declare CHECKPOINT_FIELDS.")
+    if (
+        type(fields) is not frozenset
+        or not all(type(name) is str and name for name in fields)
+        or fields & (_ENV_FIELDS | {"cache"})
+    ):
+        raise ValueError("Environment CHECKPOINT_FIELDS are invalid.")
+    return fields
+
+
+def _environment_class_record(environment_class) -> dict:
+    fields = _checkpoint_fields(environment_class)
+    return {
+        "module": environment_class.__module__,
+        "qualname": environment_class.__qualname__,
+        "fields": sorted(fields),
+    }
+
+
+def _restore_environment_class(record: dict):
+    if set(record) != {"module", "qualname", "fields"}:
+        raise ValueError("Invalid environment class record.")
+    module = importlib.import_module(record["module"])
+    environment_class = module
+    for name in record["qualname"].split("."):
+        environment_class = getattr(environment_class, name)
+    fields = _checkpoint_fields(environment_class)
+    if record["fields"] != sorted(fields):
+        raise ValueError("Environment checkpoint fields do not match the class.")
+    return environment_class, fields
 
 
 def _copy_graph(value):
@@ -79,23 +120,27 @@ def environment_state_dict(training_env, eval_env, active_env) -> dict:
         raise ValueError("Active environment must be training_env or eval_env.")
     records = []
     for env in environments:
-        if type(env) is not EIS_ECM_Env or set(vars(env)) != _ENV_FIELDS | {"cache"}:
-            raise ValueError("Environment snapshots require an unmodified EIS_ECM_Env.")
+        environment_class = type(env)
+        checkpoint_fields = _checkpoint_fields(environment_class)
+        attributes = _ENV_FIELDS | checkpoint_fields
+        if set(vars(env)) != attributes | {"cache"}:
+            raise ValueError("Environment snapshot attributes are incomplete or undeclared.")
         records.append(
             {
-                "attributes": {key: getattr(env, key) for key in sorted(_ENV_FIELDS)},
+                "class": _environment_class_record(environment_class),
+                "attributes": {key: getattr(env, key) for key in sorted(attributes)},
                 "cache": None if env.cache is None else env.cache.state_dict(),
             }
         )
     return _copy_graph(
-        {"version": 1, "environments": records, "active": int(active_env is not training_env)}
+        {"version": 2, "environments": records, "active": int(active_env is not training_env)}
     )
 
 
 def restore_environment_state(state: dict):
     """Return training/evaluation/active environments without reset, fitting, or seeding."""
     state = _copy_graph(state)
-    if set(state) != {"version", "environments", "active"} or state["version"] != 1:
+    if set(state) != {"version", "environments", "active"} or state["version"] != 2:
         raise ValueError("Invalid environment state schema/version.")
     records = state["environments"]
     if (
@@ -106,9 +151,12 @@ def restore_environment_state(state: dict):
         raise ValueError("Invalid environment identities.")
     environments = []
     for record in records:
-        if set(record) != {"attributes", "cache"} or set(record["attributes"]) != _ENV_FIELDS:
+        if set(record) != {"class", "attributes", "cache"}:
+            raise ValueError("Invalid environment record.")
+        environment_class, checkpoint_fields = _restore_environment_class(record["class"])
+        if set(record["attributes"]) != _ENV_FIELDS | checkpoint_fields:
             raise ValueError("Invalid environment attributes.")
-        env = EIS_ECM_Env.__new__(EIS_ECM_Env)
+        env = environment_class.__new__(environment_class)
         env.__dict__.update(record["attributes"])
         env.cache = (
             None if record["cache"] is None else HistoryCache.from_state_dict(record["cache"])

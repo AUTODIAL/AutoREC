@@ -211,7 +211,7 @@ def save_checkpoint(agent, destination) -> Path:
                 stream.flush()
                 os.fsync(stream.fileno())
         manifest = {
-            "format_version": 4,
+            "format_version": 5,
             "series_id": agent._checkpoint_series_id,
             "config_fingerprint": agent._checkpoint_config_fingerprint,
             "completed_trials": agent.completed_trials,
@@ -252,7 +252,7 @@ def _read_manifest(directory):
             "runtime",
             "files",
         }
-        or manifest["format_version"] != 4
+        or manifest["format_version"] != 5
     ):
         raise ValueError("Unsupported checkpoint manifest/version.")
     if not isinstance(manifest["series_id"], str) or not re.fullmatch(
