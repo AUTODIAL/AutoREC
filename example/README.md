@@ -75,16 +75,19 @@ This is useful for testing cumulative continuation semantics without checkpoint 
 ## General checkpoint training
 
 [`checkpoint_training.py`](checkpoint_training.py) is a compact interface for one
-checkpointed training session. Start from a configuration:
+checkpointed training session. To make one configured cumulative target automatically
+recoverable after interruption, rerun this command as needed:
 
 ```bash
 python checkpoint_training.py \
   --config ../configs_yaml/examples/demo_pipeline_config.yaml \
-  --additional-trials 50 \
-  --checkpoint-dir checkpoint_outputs
+  --checkpoint-dir checkpoint_outputs \
+  --checkpoint-every 10 \
+  --resume-latest
 ```
 
-Resume a later process from an immutable checkpoint:
+A missing checkpoint starts fresh, a partial checkpoint runs only the remaining trials, and
+an already reached target is a no-op. The explicit manual equivalent remains available:
 
 ```bash
 python checkpoint_training.py \

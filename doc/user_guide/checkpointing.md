@@ -83,7 +83,22 @@ same immutable checkpoint that was evaluated.
 
 ## CLI workflow
 
-The same workflow is available through the CLI:
+For a known cumulative target, automatic recovery lets the same command be rerun after an
+interruption. Here `agent.num_trials` in the YAML is the cumulative target:
+
+```bash
+autorec train --config config.yaml \
+  --checkpoint-dir checkpoints \
+  --checkpoint-every 10 \
+  --resume-latest
+```
+
+No checkpoint starts a fresh run. A latest checkpoint at trial 300 with a target of 1,000
+runs 700 more trials; a checkpoint at 1,000 is a no-op. Invalid, incompatible, mixed-series,
+or above-target checkpoints fail rather than silently restarting. Rerun the same command
+after cancellation or machine failure.
+
+The explicit workflow remains available for open-ended sessions:
 
 ```bash
 # Initial configured session
@@ -97,9 +112,19 @@ autorec train \
   --checkpoint-every 100
 ```
 
-`--config` and `--resume` are mutually exclusive. `--output-dir` may relocate
+`--resume-latest` requires `--config` and `--checkpoint-dir`; it cannot be combined with
+`--resume` or `--additional-trials`. It fingerprints training settings and seed policy while
+allowing the cumulative target and output directory to change. `--config` and `--resume`
+are mutually exclusive. `--output-dir` may relocate
 future outputs, but architecture, optimizer, data, and training schedules are
 checkpoint-owned and cannot be changed during an exact resume.
+
+The same automatic option is exposed by the Python entry script:
+
+```bash
+python example/checkpoint_training.py --config config.yaml \
+  --checkpoint-dir checkpoints --checkpoint-every 10 --resume-latest
+```
 
 ## What is preserved
 

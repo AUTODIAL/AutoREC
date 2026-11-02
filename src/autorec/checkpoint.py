@@ -4,7 +4,7 @@ Checksums detect incomplete/corrupt files, not malicious pickle payloads. Compon
 snapshots are explicit dictionaries; live agents and environments are never pickled.
 """
 
-from dataclasses import fields
+from dataclasses import dataclass, fields
 import hashlib
 import importlib.metadata
 import json
@@ -12,7 +12,9 @@ import os
 from pathlib import Path
 import pickle
 import platform
+import re
 import tempfile
+import uuid
 
 import numpy as np
 import tensorflow as tf
@@ -42,6 +44,17 @@ _RECONSTRUCTIBLE_FIELDS = frozenset(
     "_compiled_train_step".split()
 )
 _COMPONENTS = {"config.json", "training.pkl", "environments.pkl", "neural.pkl", "replay.npy"}
+_CHECKPOINT_NAME = re.compile(r"trial-(\d{8})")
+
+
+@dataclass(frozen=True)
+class RecoveryPlan:
+    """Side-effect-free plan for reaching one cumulative training target."""
+
+    checkpoint: Path | None
+    completed_trials: int
+    additional_trials: int
+    config_fingerprint: str | None
 
 
 def _runtime():
@@ -107,6 +120,8 @@ def _capture(agent):
             "_replay_buffer",
             "_training_state",
             "_continuation_mode",
+            "_checkpoint_series_id",
+            "_checkpoint_config_fingerprint",
         }
     )
     # Performance caches are derived from checkpoint-owned environments, models, and
@@ -167,6 +182,17 @@ def save_checkpoint(agent, destination) -> Path:
     destination = Path(destination)
     if destination.exists() or destination.is_symlink():
         raise FileExistsError(f"Checkpoint already exists: {destination}")
+    if agent._checkpoint_series_id is None:
+        agent._checkpoint_series_id = uuid.uuid4().hex
+    if not isinstance(agent._checkpoint_series_id, str) or not re.fullmatch(
+        r"[0-9a-f]{32}", agent._checkpoint_series_id
+    ):
+        raise ValueError("Checkpoint series ID is invalid.")
+    if agent._checkpoint_config_fingerprint is not None and (
+        not isinstance(agent._checkpoint_config_fingerprint, str)
+        or not re.fullmatch(r"[0-9a-f]{64}", agent._checkpoint_config_fingerprint)
+    ):
+        raise ValueError("Checkpoint configuration fingerprint is invalid.")
     runtime = _runtime()
     payloads = _capture(agent)
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -185,7 +211,9 @@ def save_checkpoint(agent, destination) -> Path:
                 stream.flush()
                 os.fsync(stream.fileno())
         manifest = {
-            "format_version": 2,
+            "format_version": 4,
+            "series_id": agent._checkpoint_series_id,
+            "config_fingerprint": agent._checkpoint_config_fingerprint,
             "completed_trials": agent.completed_trials,
             "runtime": runtime,
             "files": {name: _digest(temporary / name) for name in sorted(_COMPONENTS)},
@@ -202,18 +230,51 @@ def save_checkpoint(agent, destination) -> Path:
     return destination
 
 
-def _read_checkpoint(directory):
-    """Verify all files before deserializing any trusted pickle payload."""
+def _read_manifest(directory):
+    """Read and validate checkpoint metadata without deserializing payloads."""
     directory = Path(directory)
     manifest_path = directory / "manifest.json"
     if manifest_path.is_symlink():
         raise ValueError("Checkpoint manifest must not be a symlink.")
-    manifest = json.loads(manifest_path.read_text())
+    if not manifest_path.is_file():
+        raise ValueError(f"Checkpoint manifest is missing: {manifest_path}")
+    try:
+        manifest = json.loads(manifest_path.read_text())
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError(f"Checkpoint manifest is unreadable: {manifest_path}") from error
     if (
-        set(manifest) != {"format_version", "completed_trials", "runtime", "files"}
-        or manifest["format_version"] != 2
+        set(manifest)
+        != {
+            "format_version",
+            "series_id",
+            "config_fingerprint",
+            "completed_trials",
+            "runtime",
+            "files",
+        }
+        or manifest["format_version"] != 4
     ):
         raise ValueError("Unsupported checkpoint manifest/version.")
+    if not isinstance(manifest["series_id"], str) or not re.fullmatch(
+        r"[0-9a-f]{32}", manifest["series_id"]
+    ):
+        raise ValueError("Checkpoint manifest has an invalid series ID.")
+    fingerprint = manifest["config_fingerprint"]
+    if fingerprint is not None and (
+        not isinstance(fingerprint, str) or not re.fullmatch(r"[0-9a-f]{64}", fingerprint)
+    ):
+        raise ValueError("Checkpoint manifest has an invalid configuration fingerprint.")
+    completed_trials = manifest["completed_trials"]
+    if isinstance(completed_trials, bool) or not isinstance(completed_trials, int):
+        raise ValueError("Checkpoint manifest has an invalid completed-trial count.")
+    if completed_trials < 0:
+        raise ValueError("Checkpoint manifest has a negative completed-trial count.")
+    return manifest
+
+
+def _validate_checkpoint_files(directory, manifest):
+    """Validate runtime, component inventory, sizes, and hashes without unpickling."""
+    directory = Path(directory)
     if manifest["runtime"] != _runtime():
         raise ValueError(
             "Checkpoint runtime/source differs; exact continuation is unsupported."
@@ -224,6 +285,88 @@ def _read_checkpoint(directory):
         path = directory / name
         if path.is_symlink() or not path.is_file() or _digest(path) != expected:
             raise ValueError(f"Missing or corrupt checkpoint component: {name}")
+
+
+def find_latest_checkpoint(directory, *, target_trials=None):
+    """Return the newest valid immutable checkpoint at or below a cumulative target.
+
+    Missing or empty directories return ``None``. Atomic-write temporary directories and
+    unrelated entries are ignored. Checkpoint-like entries that are malformed, corrupt,
+    incompatible, or beyond ``target_trials`` fail clearly instead of causing a silent
+    restart.
+    """
+    if target_trials is not None:
+        if isinstance(target_trials, bool) or not isinstance(target_trials, int):
+            raise TypeError("target_trials must be a nonnegative integer or None.")
+        if target_trials < 0:
+            raise ValueError("target_trials must be nonnegative.")
+
+    directory = Path(directory)
+    if not directory.exists():
+        return None
+    if directory.is_symlink() or not directory.is_dir():
+        raise ValueError(f"Checkpoint root must be a regular directory: {directory}")
+
+    candidates = []
+    series_id = None
+    config_fingerprint = None
+    for path in directory.iterdir():
+        if path.name.startswith("."):
+            continue
+        match = _CHECKPOINT_NAME.fullmatch(path.name)
+        if match is None:
+            if path.name.startswith("trial-"):
+                raise ValueError(f"Malformed checkpoint directory name: {path.name}")
+            continue
+        if path.is_symlink() or not path.is_dir():
+            raise ValueError(f"Checkpoint path must be a regular directory: {path}")
+        named_trials = int(match.group(1))
+        manifest = _read_manifest(path)
+        if series_id is None:
+            series_id = manifest["series_id"]
+            config_fingerprint = manifest["config_fingerprint"]
+        elif manifest["series_id"] != series_id:
+            raise ValueError("Checkpoint root contains multiple training series.")
+        elif manifest["config_fingerprint"] != config_fingerprint:
+            raise ValueError("Checkpoint series has inconsistent configuration fingerprints.")
+        if manifest["completed_trials"] != named_trials:
+            raise ValueError(f"Checkpoint directory and manifest trial counts differ: {path}")
+        if target_trials is not None and named_trials > target_trials:
+            raise ValueError(
+                f"Checkpoint trial {named_trials} exceeds target trial {target_trials}."
+            )
+        candidates.append((named_trials, path, manifest))
+
+    if not candidates:
+        return None
+    _, path, manifest = max(candidates, key=lambda candidate: candidate[0])
+    _validate_checkpoint_files(path, manifest)
+    return path
+
+
+def plan_training_recovery(directory, target_trials):
+    """Plan fresh or resumed work needed to reach ``target_trials`` exactly."""
+    if isinstance(target_trials, bool) or not isinstance(target_trials, int):
+        raise TypeError("target_trials must be a positive integer.")
+    if target_trials < 1:
+        raise ValueError("target_trials must be positive.")
+
+    latest = find_latest_checkpoint(directory, target_trials=target_trials)
+    manifest = None if latest is None else _read_manifest(latest)
+    completed = 0 if manifest is None else manifest["completed_trials"]
+    return RecoveryPlan(
+        checkpoint=latest,
+        completed_trials=completed,
+        additional_trials=target_trials - completed,
+        config_fingerprint=(None if manifest is None else manifest["config_fingerprint"]),
+    )
+
+
+def _read_checkpoint(directory):
+    """Verify all files before deserializing any trusted pickle payload."""
+    directory = Path(directory)
+    manifest = _read_manifest(directory)
+    _validate_checkpoint_files(directory, manifest)
     payloads = {}
     for name in sorted(_COMPONENTS):
         with (directory / name).open("rb") as stream:
@@ -239,6 +382,7 @@ def _read_checkpoint(directory):
         or progress["completed_trials"] != manifest["completed_trials"]
     ):
         raise ValueError("Checkpoint progress does not match its boundary/manifest.")
+    payloads["manifest.json"] = manifest
     return payloads
 
 
@@ -259,6 +403,7 @@ def load_checkpoint(directory, *, save_dir=None, num_trials=None):
     previous_rng = rng_state_dict()
     try:
         payloads = _read_checkpoint(directory)
+        manifest = payloads.pop("manifest.json")
         config = payloads["config.json"]
         training = payloads["training.pkl"]
         if set(config) != {"agent", "output"} or set(config["agent"]) != _CONFIG_FIELDS:
@@ -318,6 +463,8 @@ def load_checkpoint(directory, *, save_dir=None, num_trials=None):
             ):
                 raise ValueError("Checkpoint network dimensions do not match the environment.")
         agent._continuation_mode = True
+        agent._checkpoint_series_id = manifest["series_id"]
+        agent._checkpoint_config_fingerprint = manifest["config_fingerprint"]
         output = config["output"]
         agent.save_dir = Path(output["save_dir"] if save_dir is None else save_dir)
         agent.model_dir = agent.save_dir / "models"

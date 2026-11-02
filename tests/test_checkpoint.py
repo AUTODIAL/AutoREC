@@ -48,6 +48,7 @@ def test_save_read_is_exact_and_rng_inert(agent, tmp_path):
     assert payloads["config.json"]["agent"]["num_trials"] == 12
     assert payloads["config.json"]["agent"]["beta_anneal_trials"] == pytest.approx(7.14)
     assert payloads["training.pkl"]["progress"]["completed_trials"] == 0
+    assert payloads["manifest.json"]["series_id"] == agent._checkpoint_series_id
     with pytest.raises(FileExistsError):
         checkpoint.save_checkpoint(agent, path)
 
@@ -104,6 +105,115 @@ def test_interrupted_write_preserves_previous_checkpoint(agent, tmp_path, monkey
     assert (previous / "manifest.json").read_bytes() == original
     assert not (tmp_path / "next").exists()
     assert not list(tmp_path.glob(".next-*"))
+
+
+def test_find_latest_checkpoint_handles_missing_empty_and_valid_roots(agent, tmp_path):
+    root = tmp_path / "checkpoints"
+    assert checkpoint.find_latest_checkpoint(root, target_trials=10) is None
+    root.mkdir()
+    (root / "notes.txt").write_text("unrelated")
+    (root / ".trial-00000010-interrupted").mkdir()
+    assert checkpoint.find_latest_checkpoint(root, target_trials=10) is None
+
+    first = checkpoint.save_checkpoint(agent, root / "trial-00000000")
+    agent._training_state.completed_trials = 10
+    latest = checkpoint.save_checkpoint(agent, root / "trial-00000010")
+
+    assert checkpoint.find_latest_checkpoint(root, target_trials=10) == latest
+    assert checkpoint.find_latest_checkpoint(root) == latest
+    assert first.is_dir()
+
+
+def test_checkpoint_series_is_preserved_and_mixed_roots_are_rejected(
+    agent, tmp_path, environment_factory
+):
+    root = tmp_path / "checkpoints"
+    agent._checkpoint_config_fingerprint = "a" * 64
+    first = checkpoint.save_checkpoint(agent, root / "trial-00000000")
+    first_manifest = json.loads((first / "manifest.json").read_text())
+    series_id = first_manifest["series_id"]
+    assert first_manifest["config_fingerprint"] == "a" * 64
+    restored = checkpoint.load_checkpoint(first, save_dir=tmp_path / "restored")
+    assert restored._checkpoint_config_fingerprint == "a" * 64
+    restored._training_state.completed_trials = 1
+    second = checkpoint.save_checkpoint(restored, root / "trial-00000001")
+
+    assert json.loads((second / "manifest.json").read_text())["series_id"] == series_id
+    assert checkpoint.find_latest_checkpoint(root) == second
+
+    second_manifest_path = second / "manifest.json"
+    second_manifest = json.loads(second_manifest_path.read_text())
+    second_manifest["config_fingerprint"] = "b" * 64
+    second_manifest_path.write_text(json.dumps(second_manifest))
+    with pytest.raises(ValueError, match="inconsistent configuration fingerprints"):
+        checkpoint.find_latest_checkpoint(root)
+    second_manifest["config_fingerprint"] = "a" * 64
+    second_manifest_path.write_text(json.dumps(second_manifest))
+
+    other = DDQN_ECM(
+        environment_factory(),
+        save_dir=tmp_path / "other-output",
+        num_trials=1,
+        hidden_layers=[{"type": "Dense", "units": 4, "activation": "relu"}],
+    )
+    other.train(additional_trials=0)
+    other._training_state.completed_trials = 2
+    checkpoint.save_checkpoint(other, root / "trial-00000002")
+    with pytest.raises(ValueError, match="multiple training series"):
+        checkpoint.find_latest_checkpoint(root)
+
+
+def test_find_latest_checkpoint_rejects_unsafe_candidates(agent, tmp_path):
+    for problem in ("malformed", "name-mismatch", "corrupt", "above-target"):
+        root = tmp_path / problem
+        root.mkdir()
+        if problem == "malformed":
+            (root / "trial-invalid").mkdir()
+            match = "Malformed checkpoint"
+        else:
+            path = checkpoint.save_checkpoint(agent, root / "trial-00000000")
+            if problem == "name-mismatch":
+                path.rename(root / "trial-00000001")
+                match = "trial counts differ"
+            elif problem == "corrupt":
+                (path / "replay.npy").write_bytes(b"corrupt")
+                match = "corrupt checkpoint component"
+            else:
+                match = "exceeds target"
+
+        target = -1 if problem == "above-target" else 10
+        if problem == "above-target":
+            target = 0
+            agent._training_state.completed_trials = 1
+            checkpoint.save_checkpoint(agent, root / "trial-00000001")
+        with pytest.raises(ValueError, match=match):
+            checkpoint.find_latest_checkpoint(root, target_trials=target)
+
+
+@pytest.mark.parametrize("completed", [None, 4, 10])
+def test_plan_training_recovery_is_cumulative_and_side_effect_free(agent, tmp_path, completed):
+    root = tmp_path / "checkpoints"
+    if completed is not None:
+        agent._training_state.completed_trials = completed
+        checkpoint.save_checkpoint(agent, root / f"trial-{completed:08d}")
+    before = rng_state_dict()
+
+    plan = checkpoint.plan_training_recovery(root, target_trials=10)
+
+    expected_checkpoint = None if completed is None else root / f"trial-{completed:08d}"
+    assert plan.checkpoint == expected_checkpoint
+    assert plan.completed_trials == (0 if completed is None else completed)
+    assert plan.additional_trials == 10 - (0 if completed is None else completed)
+    assert pickle.dumps(before) == pickle.dumps(rng_state_dict())
+
+
+@pytest.mark.parametrize(
+    ("target", "error"),
+    [(0, ValueError), (-1, ValueError), (True, TypeError), (1.5, TypeError)],
+)
+def test_plan_training_recovery_rejects_invalid_targets(tmp_path, target, error):
+    with pytest.raises(error, match="target_trials"):
+        checkpoint.plan_training_recovery(tmp_path, target)
 
 
 def test_unfinished_trial_rejected(agent, tmp_path):

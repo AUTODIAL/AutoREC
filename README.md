@@ -72,20 +72,28 @@ progress, environments and caches, histories, and supported random-number
 generator state. Checkpoints are written at completed-trial boundaries:
 
 ```bash
-# Initial configured session
-autorec train --config config.yaml --checkpoint-dir checkpoints
+# Recover automatically toward the cumulative target in agent.num_trials.
+autorec train --config config.yaml \
+  --checkpoint-dir checkpoints --checkpoint-every 10 --resume-latest
 
-# Another 100 trials in a fresh process
+# Rerun the same command after an interruption. If trial 300 is the latest
+# checkpoint and num_trials is 1000, AutoREC performs only trials 300--999.
+autorec train --config config.yaml \
+  --checkpoint-dir checkpoints --checkpoint-every 10 --resume-latest
+
+# Manual equivalent: select an exact checkpoint and an additional count.
 autorec train \
   --resume checkpoints/trial-00000100 \
   --additional-trials 100 \
   --checkpoint-dir checkpoints
 ```
 
-`num_trials` describes the current session, while `completed_trials` remains
-cumulative. Exact continuation requires the documented deterministic CPU and
-runtime constraints. See the [checkpoint guide](docs/checkpointing.md) and the
-[runnable example](example/checkpoint/) before relying on exact equivalence.
+Without `--resume-latest`, `num_trials` describes the current session. In the
+opt-in automatic mode it is a cumulative target. A missing checkpoint starts a
+fresh run; an already completed target is a no-op. Exact continuation requires
+the documented deterministic CPU and runtime constraints. See the
+[checkpoint guide](docs/checkpointing.md) and the [runnable example](example/checkpoint/)
+before relying on exact equivalence.
 
 Continue with:
 

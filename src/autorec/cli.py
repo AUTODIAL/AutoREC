@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import argparse
+from copy import deepcopy
 import datetime as _datetime
+import hashlib
+import json
 from pathlib import Path
 from typing import Sequence
 
@@ -51,6 +54,32 @@ def _read_config_with_overrides(config_path: Path, output_dir: Path | None = Non
     return config
 
 
+def _recovery_config_fingerprint(config: dict, *, seed: int, deterministic_ops: bool) -> str:
+    """Fingerprint training inputs while allowing target and output changes."""
+    pipeline = deepcopy(
+        {name: config[name] for name in ("dataprep", "environment", "agent") if name in config}
+    )
+    agent = pipeline.get("agent", {})
+    agent.pop("num_trials", None)
+    agent.pop("save_dir", None)
+
+    def normalize(value):
+        if isinstance(value, dict):
+            return {str(key): normalize(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [normalize(item) for item in value]
+        if isinstance(value, Path):
+            return str(value)
+        return value
+
+    payload = {
+        "pipeline": normalize(pipeline),
+        "initial_rng": {"seed": seed, "deterministic_ops": deterministic_ops},
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    return hashlib.sha256(encoded.encode()).hexdigest()
+
+
 def _run_preprocess(args: argparse.Namespace) -> int:
     """Run the data preprocessing or dataset validation CLI command."""
     _configure_runtime(args)
@@ -85,19 +114,61 @@ def _run_train(args: argparse.Namespace) -> int:
     from autorec.factory import pipeline_builder
     from autorec.utils import set_global_seed
 
-    if args.resume is not None:
+    if args.resume_latest:
+        if args.resume is not None:
+            raise ValueError("--resume-latest cannot be combined with --resume.")
+        if args.config is None or args.checkpoint_dir is None:
+            raise ValueError("--resume-latest requires --config and --checkpoint-dir.")
+        if args.additional_trials is not None:
+            raise ValueError("--resume-latest cannot be combined with --additional-trials.")
+
+        from autorec.checkpoint import plan_training_recovery
+
+        config = _read_config_with_overrides(args.config, args.output_dir)
+        target_trials = config.get("agent", {}).get("num_trials")
+        if isinstance(target_trials, bool) or not isinstance(target_trials, int):
+            raise TypeError("--resume-latest requires agent.num_trials to be an integer.")
+        fingerprint = _recovery_config_fingerprint(
+            config,
+            seed=args.seed,
+            deterministic_ops=not args.non_deterministic,
+        )
+        plan = plan_training_recovery(args.checkpoint_dir, target_trials)
+        if plan.checkpoint is not None and plan.config_fingerprint != fingerprint:
+            raise ValueError(
+                "Latest checkpoint was created from a different training configuration."
+            )
+        if plan.additional_trials == 0:
+            print(f"Training target already reached at cumulative trial {target_trials}.")
+            return 0
+
+        if plan.checkpoint is None:
+            set_global_seed(args.seed, deterministic_ops=not args.non_deterministic)
+            _, _, _, _, agent = pipeline_builder(config)
+            agent._checkpoint_config_fingerprint = fingerprint
+        else:
+            import tensorflow as tf
+            from autorec.agent import DDQN_ECM
+
+            if not args.non_deterministic:
+                tf.config.experimental.enable_op_determinism()
+            agent = DDQN_ECM.from_checkpoint(plan.checkpoint, save_dir=args.output_dir)
+        additional_trials = plan.additional_trials
+    elif args.resume is not None:
         import tensorflow as tf
         from autorec.agent import DDQN_ECM
 
         if not args.non_deterministic:
             tf.config.experimental.enable_op_determinism()
         agent = DDQN_ECM.from_checkpoint(args.resume, save_dir=args.output_dir)
+        additional_trials = args.additional_trials
     else:
         set_global_seed(args.seed, deterministic_ops=not args.non_deterministic)
         config = _read_config_with_overrides(args.config, args.output_dir)
         _, _, _, _, agent = pipeline_builder(config)
+        additional_trials = args.additional_trials
     agent.train(
-        additional_trials=args.additional_trials,
+        additional_trials=additional_trials,
         checkpoint_dir=args.checkpoint_dir,
         checkpoint_every=args.checkpoint_every,
     )
@@ -275,6 +346,11 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     train.add_argument(
         "--checkpoint-dir", type=Path, help="Directory for new complete checkpoints."
+    )
+    train.add_argument(
+        "--resume-latest",
+        action="store_true",
+        help="Resume the latest checkpoint and train to agent.num_trials cumulatively.",
     )
     train.add_argument(
         "--checkpoint-every",

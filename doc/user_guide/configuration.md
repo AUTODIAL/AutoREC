@@ -140,8 +140,9 @@ Keep `gradient_steps: 1` as a baseline. Larger values perform additional fresh
 replay sampling and optimizer updates at each training event, increasing cost
 and changing training behavior.
 
-For retained or checkpoint-resumed training, `num_trials` is the number of
-trials in the current session; `completed_trials` is cumulative. Open-ended
+For retained or manually checkpoint-resumed training, `num_trials` is the number of
+trials in the current session; `completed_trials` is cumulative. With the explicit CLI
+`--resume-latest` option, `num_trials` is instead the cumulative target. Open-ended
 workflows should configure absolute schedule timing with `start_jump` and
 `beta_anneal_trials`. The legacy `anneal_fraction` remains supported when
 `beta_anneal_trials` is omitted, but its duration is resolved from the initial

@@ -5,6 +5,7 @@ import hashlib
 import pickle
 import struct
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
@@ -13,6 +14,7 @@ import tensorflow as tf
 
 from test_training_baseline import controlled_fit, environment_factory
 from autorec.agent import DDQN_ECM
+from autorec import cli
 from autorec.checkpoint import _capture
 from autorec.environment import EIS_ECM_Env
 from autorec.utils import set_global_seed
@@ -60,6 +62,8 @@ def main():
     parser.add_argument("--count", type=int, default=12)
     parser.add_argument("--cache", default="lru")
     parser.add_argument("--save-every", type=int)
+    parser.add_argument("--auto-target", type=int)
+    parser.add_argument("--interrupt-at", type=int)
     args = parser.parse_args()
     args.directory.mkdir(parents=True, exist_ok=True)
     patches = pytest.MonkeyPatch()
@@ -89,15 +93,12 @@ def main():
         return result
 
     patches.setattr(DDQN_ECM, "_interact_update", traced)
-    if args.resume:
-        agent = DDQN_ECM.from_checkpoint(
-            args.resume, save_dir=args.directory, num_trials=args.count
-        )
-    else:
-        agent = DDQN_ECM(
+
+    def make_agent(count):
+        return DDQN_ECM(
             make_env(args.cache),
             save_dir=args.directory,
-            num_trials=args.count,
+            num_trials=count,
             hidden_layers=[{"type": "Dense", "units": 4, "activation": "relu"}],
             action_cap=2,
             batch_size=2,
@@ -120,13 +121,73 @@ def main():
                 },
             },
         )
-    agent.train(
-        checkpoint_dir=args.directory / "periodic" if args.save_every else None,
-        checkpoint_every=args.save_every,
-    )
+
+    if args.auto_target is not None:
+        config = {
+            "environment": {"cache": args.cache},
+            "agent": {
+                "num_trials": args.auto_target,
+                "schedule_trials": args.schedule_trials,
+            },
+        }
+        patches.setattr(cli, "_configure_runtime", lambda command_args: None)
+        patches.setattr(cli, "_read_config_with_overrides", lambda *unused: config)
+        patches.setattr(
+            "autorec.factory.pipeline_builder",
+            lambda unused: (None, None, None, None, make_agent(args.auto_target)),
+        )
+
+        class SimulatedInterruption(RuntimeError):
+            pass
+
+        if args.interrupt_at is not None:
+            save_checkpoint = DDQN_ECM.save_checkpoint
+
+            def interrupt_after_save(self, directory):
+                path = save_checkpoint(self, directory)
+                if self.completed_trials == args.interrupt_at:
+                    raise SimulatedInterruption("simulated process interruption")
+                return path
+
+            patches.setattr(DDQN_ECM, "save_checkpoint", interrupt_after_save)
+
+        command_args = SimpleNamespace(
+            resume_latest=True,
+            resume=None,
+            config=Path("controlled-config.yaml"),
+            checkpoint_dir=args.directory / "periodic",
+            checkpoint_every=args.save_every,
+            additional_trials=None,
+            output_dir=args.directory,
+            seed=42,
+            non_deterministic=False,
+        )
+        try:
+            cli._run_train(command_args)
+        except SimulatedInterruption:
+            with (args.directory / "result.pkl").open("wb") as stream:
+                pickle.dump({"trace": traces}, stream, protocol=5)
+            raise SystemExit(75) from None
+        final = args.directory / "periodic" / f"trial-{args.auto_target:08d}"
+        agent = DDQN_ECM.from_checkpoint(final, save_dir=args.directory)
+    elif args.resume:
+        agent = DDQN_ECM.from_checkpoint(
+            args.resume, save_dir=args.directory, num_trials=args.count
+        )
+        agent.train(
+            checkpoint_dir=args.directory / "periodic" if args.save_every else None,
+            checkpoint_every=args.save_every,
+        )
+    else:
+        agent = make_agent(args.count)
+        agent.train(
+            checkpoint_dir=args.directory / "periodic" if args.save_every else None,
+            checkpoint_every=args.save_every,
+        )
     state = signature(agent)
-    agent.save_checkpoint(args.directory / "checkpoint")
-    assert signature(agent) == state, "Checkpoint saving changed training state"
+    if args.auto_target is None:
+        agent.save_checkpoint(args.directory / "checkpoint")
+        assert signature(agent) == state, "Checkpoint saving changed training state"
     with (args.directory / "result.pkl").open("wb") as stream:
         pickle.dump({"state": state, "trace": traces}, stream, protocol=5)
     print("State digest:", hashlib.sha256(pickle.dumps(state)).hexdigest())

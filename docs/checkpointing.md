@@ -5,10 +5,10 @@
 > detailed format, compatibility, and validation reference.
 
 AutoREC can save complete training state at completed-trial boundaries and resume in a
-new Python process. `num_trials` is the amount of work requested for the current session;
-the cumulative `completed_trials` counter comes from the checkpoint. Training is open-ended,
-so users can inspect each session and decide whether to continue without declaring a final
-trial count. Do not change training-critical settings or reseed after restoration.
+new Python process. Normally, `num_trials` is the amount of work requested for the current
+session and the checkpoint owns cumulative `completed_trials`. The opt-in `--resume-latest`
+workflow instead interprets `num_trials` as a cumulative target. Do not change
+training-critical settings or reseed after restoration.
 
 ## Python workflow
 
@@ -92,13 +92,33 @@ with an overall verdict, and export machine-readable JSON reports.
 ## CLI workflow
 
 Use the same startup environment variables as above. The commands below run in separate
-processes; neither preprocessing nor the original dataset paths are needed on resume.
+processes. Automatic recovery is appropriate when the target is known and the same command
+should survive scheduler cancellation or machine failure:
 
 ```bash
 # Ordinary training remains supported.
 autorec train --config config.yaml
 
-# Start a configured 100-trial session.
+# Train toward cumulative agent.num_trials, saving every 10 completed trials.
+autorec train --config config.yaml --checkpoint-dir checkpoints \
+  --checkpoint-every 10 --resume-latest
+
+# After an interruption, rerun exactly the same command.
+autorec train --config config.yaml --checkpoint-dir checkpoints \
+  --checkpoint-every 10 --resume-latest
+```
+
+If no checkpoint exists, automatic recovery starts from the configured seed. If the latest
+checkpoint is trial 300 and `agent.num_trials` is 1,000, it restores trial 300 and requests
+700 additional trials. Trial 1,000 produces a successful no-op. A malformed, corrupt,
+incompatible, mixed-series, or above-target checkpoint fails instead of silently starting
+over. `--resume-latest` requires `--config` and `--checkpoint-dir` and cannot be combined
+with `--resume` or `--additional-trials`.
+
+The explicit manual workflow remains available for open-ended training:
+
+```bash
+# Start a configured session.
 autorec train --config config.yaml --checkpoint-dir checkpoints
 
 # Perform the next 100 trials using the saved configuration and prepared data.
@@ -110,7 +130,7 @@ autorec train --resume checkpoints/trial-00000200 --output-dir resumed-results \
   --checkpoint-dir checkpoints
 ```
 
-`--config` and `--resume` are mutually exclusive. Resume does not call `set_global_seed`;
+`--config` and `--resume` are mutually exclusive. Manual resume does not call `set_global_seed`;
 `--seed` applies only to initial training. `--non-deterministic` must agree with the saved
 runtime, but exact reproducibility requires deterministic operations. `--output-dir`
 relocates exported results and the final model; it does not change training configuration.
@@ -118,11 +138,19 @@ Checkpoint paths and frequencies can change freely between sessions. The Python 
 allows `from_checkpoint(..., num_trials=N)` to change the next session length; the CLI can
 use `--additional-trials N` for the same per-invocation override.
 
+Automatic recovery records a checkpoint-series ID and a fingerprint of the configured
+training configuration and initial seed policy. It permits changes to `agent.num_trials`
+(to extend a cumulative target) and `agent.save_dir`, but rejects other configuration
+changes. It scans immutable `trial-NNNNNNNN` directories; it does not maintain a mutable
+`latest` pointer. The same option is available through `example/checkpoint_training.py`.
+Extending a target does not recompute schedules already owned by the checkpoint; configure
+absolute cumulative schedule values when later extension is possible.
+
 ## Contents and persistence
 
 ```text
 checkpoints/trial-00000100/
-├── manifest.json       # Format version, trial count, runtime/source signature, file hashes/sizes
+├── manifest.json       # Format, series/config identity, trial count, runtime, file hashes/sizes
 ├── config.json         # Effective agent configuration and output paths
 ├── training.pkl        # Counters, histories, epsilon/beta, replay metadata, RNG state
 ├── environments.pkl    # Prepared datasets, current observations, caches, environment identities
@@ -169,7 +197,7 @@ a new agent; it never partially overwrites an existing one. On failure, the supp
 caller RNG streams are restored. Output directories can have been created before a late
 filesystem/restoration error.
 
-Format version 2 requires identical AutoREC Python source and recorded Python/numerical
+Format version 4 requires identical AutoREC Python source and recorded Python/numerical
 library versions, OS/platform, threading settings, TensorFlow determinism and backend
 settings. This is deliberately conservative: there is no migration or best-effort loading.
 Source edits, including implementation updates between stages, invalidate old checkpoints.
@@ -207,6 +235,10 @@ Separate component and same-process integration tests cover both LRU and Clock b
 expensive 1,000-trial test additionally uses a continuous periodic-saving control alongside
 ten fresh 100-trial processes. It uses sparse optimizer updates to keep runtime practical
 while crossing warm-up, target updates, replay wrapping and schedule boundaries.
+
+A separate fresh-process acceptance test simulates termination immediately after publishing
+a periodic checkpoint, reruns `--resume-latest`, and compares the final state and combined
+interaction/replay trace exactly against uninterrupted training.
 
 Both use a controlled, RNG-consuming fitter and real RL/TensorFlow updates. Circuit helper
 calls and model/plot output are replaced. These tests establish checkpoint equivalence
