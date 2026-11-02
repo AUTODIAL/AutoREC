@@ -93,19 +93,6 @@ from an internal spool directory, so the wrapper changes back to `$SLURM_SUBMIT_
 starting `runner.py`. Relative result and configuration paths are therefore resolved from
 the directory where `sbatch runner_job.sh` was invoked.
 
-The wrapper runs the equivalent of:
-
-```bash
-python runner.py \
-  --target-dir "$TARGET_DIR" \
-  --base-config "$BASE_CONFIG" \
-  --search-space "$SEARCH_SPACE" \
-  [remaining configured arguments]
-```
-
-Nested `sbatch` submissions and `sacct` status queries run directly on the allocated compute
-node. This requires a cluster that permits Slurm client commands from compute nodes.
-
 Before starting a long run, verify these cluster-specific requirements:
 
 1. The compute node can run `sbatch` and `sacct` directly.
@@ -121,21 +108,8 @@ Before starting a long run, verify these cluster-specific requirements:
 Cancelling the orchestrator job does not automatically cancel child jobs that it already
 submitted; inspect and cancel those Slurm jobs separately if needed.
 
-The arguments controlling candidate generation are:
-
-- `--num-initial`: size of the first group, including the protected baseline.
-- `--num-iterations`: total number of groups, including the initial group.
-- `--batch-size`: number of suggestions in each later group.
-
-The multi-fidelity arguments are:
-
-- `--max-trials`: maximum cumulative budget for a promoted candidate.
-- `--session-trials`: trials added before each checkpoint and score.
-- `--grace-trials`: first cumulative budget at which pruning is allowed.
-- `--reduction-factor`: at each promotion budget, retain
-  `ceil(candidate_count / reduction_factor)` candidates.
-
-`max-trials` must be divisible by `session-trials`. Every geometric promotion budget
+Run `python runner.py --help` for the complete argument reference. `max-trials` must be
+divisible by `session-trials`. Every geometric promotion budget
 (`grace-trials`, then repeated multiplication by `reduction-factor`) must coincide with a
 session boundary. `agent.num_trials` in the base configuration must equal
 `--session-trials`.
@@ -188,22 +162,8 @@ The trial-specific evaluation files preserve the score used at each rung.
 latest completed stage. `rung_scores.csv` records each objective component, promotion or
 pruning status, Optuna trial number, configuration ID, and cumulative budget.
 
-The worker is idempotent for a stage whose checkpoint and both evaluation files already
-exist. If a checkpoint exists but its evaluation output does not, the worker restores that
-checkpoint and performs validation without retraining. Slurm failures are reported as
-errors rather than treated as completed trials.
-
-## Files
-
-- `runner.py`: proposes candidates, submits each fidelity stage, performs synchronous
-  promotion, reports final/pruned trials to Optuna, and exports summaries.
-- `runner_job.sh`: long-running, low-resource Slurm wrapper for `runner.py`.
-- `main_factory.py`: trains or restores one candidate to one cumulative trial target, then
-  evaluates the validation dataset.
-- `tuning_utils.py`: configuration handling, Slurm submission/monitoring, promotion helpers,
-  and objective computation.
-- `base_config.yaml`: training/validation pipeline and untuned baseline values.
-- `search_space.yaml`: hyperparameters and Optuna bounds.
+The worker is idempotent for a completed stage. If a checkpoint exists without evaluation
+output, it performs validation without retraining. Slurm failures are reported as errors.
 
 Early scores can be noisy, and successive halving can discard a configuration that would
 have improved late in training. The grace budget and reduction factor therefore represent a

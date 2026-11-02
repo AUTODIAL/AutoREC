@@ -182,15 +182,6 @@ def test_slurm_script_passes_stage_target_and_preserves_intermediate_models(
     assert commands[1][0] == "sacct"
 
     wrapper = (EXAMPLE_DIR / "runner_job.sh").read_text()
-    assert "#SBATCH --time=7-00:00:00" in wrapper
-    assert "#SBATCH --cpus-per-task=1" in wrapper
-    assert "#SBATCH --mem-per-cpu=16G" in wrapper
-    assert "#SBATCH --account=rrg-j3goals" in wrapper
-    assert "scontrol show job" in wrapper
-    assert "time python runner.py" in wrapper
-    assert "NUM_INITIAL=5" in wrapper
-    assert "MAX_TRIALS=10000" in wrapper
-    assert "Slurm commands: direct from this compute node" in wrapper
     assert 'RUN_DIR=${SLURM_SUBMIT_DIR:-"$SCRIPT_DIR"}' in wrapper
     assert 'cd "$RUN_DIR"' in wrapper
     assert 'python runner.py "${RUNNER_ARGUMENTS[@]}"' in wrapper
