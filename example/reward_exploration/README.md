@@ -59,6 +59,9 @@ prevents circuit-cache entries from being shared between datasets.
 
 Each evaluation writes `eval_results_<dataset>.csv` and
 `eval_results_<dataset>.pkl` under the selected output directory's `results/` folder.
+Its fit images are moved into `results/fit_plots_<dataset>/`, preventing spectra with the
+same row number in different datasets from overwriting one another. Repeating an evaluation
+replaces the corresponding dataset-specific fit-plot directory.
 
 ## Comparing methods
 
@@ -85,6 +88,7 @@ sbatch submit_job.sh
 Before submission, review the cluster-specific account, constraint, environment path,
 resources, and repository location in the script. The scripts use the full pipeline
 configuration, evaluate all four datasets, and write to `calculation_output/`. At the end of
-a successful job, the `models/` and `fit_plots/` directories are archived as
-`models.tar.gz` and `fit_plots.tar.gz`, then the original directories are removed to
-reduce HPC file counts.
+a successful job, `models/` is archived as `models.tar.gz`. Each
+`results/fit_plots_<dataset>/` directory is archived beside itself as
+`fit_plots_<dataset>.tar.gz`. The original directories are then removed to reduce HPC file
+counts.

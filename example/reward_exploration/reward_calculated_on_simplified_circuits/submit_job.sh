@@ -38,10 +38,12 @@ if [ -d calculation_output/models ]; then
     tar -czf calculation_output/models.tar.gz -C calculation_output models &&
         rm -rf calculation_output/models
 fi
-if [ -d calculation_output/fit_plots ]; then
-    tar -czf calculation_output/fit_plots.tar.gz -C calculation_output fit_plots &&
-        rm -rf calculation_output/fit_plots
-fi
+for fit_plots_dir in calculation_output/results/fit_plots_*; do
+    if [ -d "$fit_plots_dir" ]; then
+        tar -czf "${fit_plots_dir}.tar.gz" -C calculation_output/results \
+            "$(basename "$fit_plots_dir")" && rm -rf "$fit_plots_dir"
+    fi
+done
 
 echo "------------------------------------------------------------"
 echo "All done!"

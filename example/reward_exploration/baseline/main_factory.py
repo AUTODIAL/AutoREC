@@ -20,6 +20,7 @@ import argparse
 from copy import deepcopy
 from pathlib import Path
 from pprint import pprint
+import shutil
 
 from autorec.runtime import configure_autorec_runtime
 
@@ -192,6 +193,13 @@ try:
             dataset_name,
             RESULTS_SAVE_DIR,
         )
+        fit_plots_dir = SAVE_DIR / "fit_plots"
+        dataset_fit_plots_dir = RESULTS_SAVE_DIR / f"fit_plots_{dataset_name}"
+        if fit_plots_dir.is_dir():
+            if dataset_fit_plots_dir.exists():
+                shutil.rmtree(dataset_fit_plots_dir)
+            fit_plots_dir.replace(dataset_fit_plots_dir)
+            print(f"✓ Moved evaluation fit plots to: {dataset_fit_plots_dir}")
 
 except Exception as e:
     print(f"\n⚠ Error during evaluation: {e}")
