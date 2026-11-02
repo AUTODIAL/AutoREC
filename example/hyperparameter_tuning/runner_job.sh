@@ -21,7 +21,7 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 RUN_DIR=${SLURM_SUBMIT_DIR:-"$SCRIPT_DIR"}
 
 # USER CONFIGURATION
-TARGET_DIR='./hyperparameter_tuning_results'
+TARGET_DIR='./hyperparameter_tuning'
 BASE_CONFIG='./base_config.yaml'
 SEARCH_SPACE='./search_space.yaml'
 NUM_INITIAL=5

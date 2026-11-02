@@ -43,7 +43,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--target-dir",
         type=Path,
-        default=Path("./hyperparameter_tuning_results"),
+        default=Path("./hyperparameter_tuning"),
         help="Directory in which configurations and results are stored.",
     )
     parser.add_argument(

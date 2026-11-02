@@ -60,7 +60,7 @@ From this directory, run:
 
 ```bash
 python runner.py \
-  --target-dir ./hyperparameter_tuning_results \
+  --target-dir ./hyperparameter_tuning \
   --base-config ./base_config.yaml \
   --search-space ./search_space.yaml \
   --num-initial 5 \
@@ -138,7 +138,7 @@ for a 10,000-trial run. `anneal_fraction` remains `null` for legacy compatibilit
 Each unique configuration has a stable ID:
 
 ```text
-hyperparameter_tuning_results/
+hyperparameter_tuning/
 ├── configs/
 │   ├── config_0000.yaml
 │   └── config_0001.yaml
