@@ -186,6 +186,8 @@ def test_slurm_script_passes_stage_target_and_preserves_intermediate_models(
     wrapper = (EXAMPLE_DIR / "runner_job.sh").read_text()
     assert 'RUN_DIR=${SLURM_SUBMIT_DIR:-"$SCRIPT_DIR"}' in wrapper
     assert 'cd "$RUN_DIR"' in wrapper
+    assert 'MODULE_SAVELIST_NAME="default"' in wrapper
+    assert 'PYTHON_ENV_PATH="$HOME/autorec_env"' in wrapper
     assert 'python runner.py "${RUNNER_ARGUMENTS[@]}"' in wrapper
 
 

@@ -109,8 +109,8 @@ Before starting a long run, verify these cluster-specific requirements:
 3. The `#SBATCH` directives in `runner_job.sh`, including the seven-day limit, account, and
    node constraint, are accepted by the cluster. They currently match the training-job
    template and should be edited for a different cluster.
-4. `MODULE_SAVELIST_NAME` and `PYTHON_ENV_PATH` match the cluster. They default to `default`
-   and `$HOME/autorec_env`, and may be exported when submitting the wrapper job.
+4. `MODULE_SAVELIST_NAME` and `PYTHON_ENV_PATH` in `runner_job.sh` match the cluster. They are
+   currently set to `default` and `$HOME/autorec_env`.
 
 Cancelling the orchestrator job does not automatically cancel child jobs that it already
 submitted; inspect and cancel those Slurm jobs separately if needed.
