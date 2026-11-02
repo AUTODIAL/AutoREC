@@ -206,14 +206,34 @@ optimizer, data, or schedule hyperparameters is not a resume operation. Runtime 
 does not prove identical
 hardware or native-library builds: use the same hardware and software environment as well.
 
-Checkpoint support currently requires CPU execution and ordinary `DDQN_ECM`/
-`EIS_ECM_Env` instances without extra instance state. Networks must be uncompiled built-in
-Keras Sequential models with Dense, BatchNormalization, Dropout, Activation or Flatten,
-using float32/float64. Optimizers are Adam (including AMSGrad) or SGD, with constant learning
-rate, ExponentialDecay, PiecewiseConstantDecay or CosineDecay. Custom layers/optimizers,
-Functional/compiled models, mixed precision/loss scaling, EMA, gradient accumulation,
-LoRA/quantization and stateful custom schedules are unsupported. Ordinary training retains
-its existing support for configurations outside this checkpoint subset.
+Checkpoint support currently requires CPU execution and an ordinary `DDQN_ECM` agent.
+The standard `EIS_ECM_Env` and explicitly declared subclasses are supported. A subclass
+must be importable by the same module and qualified name in the resumed process and must
+define both declarations directly on the class:
+
+```python
+class ExperimentalEnvironment(EIS_ECM_Env):
+    CHECKPOINT_FIELDS = frozenset({"reward_scale"})
+    CHECKPOINT_SOURCE_MODULES = ("my_experiment.reward_utils",)
+```
+
+`CHECKPOINT_FIELDS` must name every instance attribute added by the subclass; standard
+environment fields and `cache` must not be repeated. The environment class's module is
+fingerprinted automatically. `CHECKPOINT_SOURCE_MODULES` adds importable modules whose
+implementation affects transitions, rewards, or other future training behavior. Both
+declarations are required even when empty. Restoration creates the exact class without
+calling its constructor, then restores its declared fields. Missing, extra, changed, or
+undeclared state is rejected, and changed declared source fails compatibility validation
+before checkpoint payloads are unpickled. External resources and mutable module-level state
+are not captured by these declarations and remain unsupported.
+
+Networks must be uncompiled built-in Keras Sequential models with Dense,
+BatchNormalization, Dropout, Activation or Flatten, using float32/float64. Optimizers are
+Adam (including AMSGrad) or SGD, with constant learning rate, ExponentialDecay,
+PiecewiseConstantDecay or CosineDecay. Custom layers/optimizers, Functional/compiled models,
+mixed precision/loss scaling, EMA, gradient accumulation, LoRA/quantization and stateful
+custom schedules are unsupported. Ordinary training retains its existing support for
+configurations outside this checkpoint subset.
 
 Only completed trials are checkpoint boundaries. An interruption during a trial discards
 work since the last saved boundary; reload that checkpoint. Mid-episode gradients, temporary

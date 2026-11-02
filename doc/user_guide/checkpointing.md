@@ -165,10 +165,13 @@ Bitwise continuation is supported only under the validated deterministic CPU
 conditions: identical AutoREC source, dependency/runtime fingerprint,
 threading and TensorFlow determinism settings, supported built-in
 network/optimizer components, and no mutation or evaluation between training
-boundaries. GPU execution, changed native libraries or hardware, arbitrary
-custom components, and nondeterministic real fitting require separate
-qualification. Checkpoints are supported at completed-trial boundaries, not
-in the middle of a trial.
+boundaries. An environment subclass must explicitly declare all additional
+instance fields through `CHECKPOINT_FIELDS` and all behavior-affecting source
+modules through `CHECKPOINT_SOURCE_MODULES`; the detailed contract is in the
+complete checkpoint documentation linked below. GPU execution, changed native
+libraries or hardware, other arbitrary custom components, and nondeterministic
+real fitting require separate qualification. Checkpoints are supported at
+completed-trial boundaries, not in the middle of a trial.
 
 For the complete format, compatibility checks, limitations, and validation
 evidence, read `docs/checkpointing.md` in the repository. The
