@@ -141,6 +141,15 @@ def test_checkpoint_series_is_preserved_and_mixed_roots_are_rejected(
     assert json.loads((second / "manifest.json").read_text())["series_id"] == series_id
     assert checkpoint.find_latest_checkpoint(root) == second
 
+    second_manifest_path = second / "manifest.json"
+    second_manifest = json.loads(second_manifest_path.read_text())
+    second_manifest["config_fingerprint"] = "b" * 64
+    second_manifest_path.write_text(json.dumps(second_manifest))
+    with pytest.raises(ValueError, match="inconsistent configuration fingerprints"):
+        checkpoint.find_latest_checkpoint(root)
+    second_manifest["config_fingerprint"] = "a" * 64
+    second_manifest_path.write_text(json.dumps(second_manifest))
+
     other = DDQN_ECM(
         environment_factory(),
         save_dir=tmp_path / "other-output",
@@ -194,7 +203,6 @@ def test_plan_training_recovery_is_cumulative_and_side_effect_free(agent, tmp_pa
     expected_checkpoint = None if completed is None else root / f"trial-{completed:08d}"
     assert plan.checkpoint == expected_checkpoint
     assert plan.completed_trials == (0 if completed is None else completed)
-    assert plan.target_trials == 10
     assert plan.additional_trials == 10 - (0 if completed is None else completed)
     assert pickle.dumps(before) == pickle.dumps(rng_state_dict())
 

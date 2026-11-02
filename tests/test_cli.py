@@ -6,12 +6,12 @@ processing EIS data. Train and evaluate execution belong in broader integration 
 
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
 
 from autorec import cli
+from autorec.checkpoint import RecoveryPlan
 
 
 _CHECKPOINT_SCRIPT = Path(__file__).parents[1] / "example" / "checkpoint_training.py"
@@ -82,14 +82,21 @@ def test_resume_latest_runs_only_remaining_cumulative_trials(monkeypatch):
     monkeypatch.setattr("tensorflow.config.experimental.enable_op_determinism", lambda: None)
 
     plans = [
-        SimpleNamespace(checkpoint=None, additional_trials=10, config_fingerprint=None),
-        SimpleNamespace(
+        RecoveryPlan(
+            checkpoint=None,
+            completed_trials=0,
+            additional_trials=10,
+            config_fingerprint=None,
+        ),
+        RecoveryPlan(
             checkpoint=Path("checkpoints/trial-00000004"),
+            completed_trials=4,
             additional_trials=6,
             config_fingerprint=fingerprint,
         ),
-        SimpleNamespace(
+        RecoveryPlan(
             checkpoint=Path("checkpoints/trial-00000010"),
+            completed_trials=10,
             additional_trials=0,
             config_fingerprint=fingerprint,
         ),
@@ -129,8 +136,9 @@ def test_resume_latest_runs_only_remaining_cumulative_trials(monkeypatch):
     assert planner.call_count == 3
 
     planner.side_effect = None
-    planner.return_value = SimpleNamespace(
+    planner.return_value = RecoveryPlan(
         checkpoint=Path("checkpoints/trial-00000004"),
+        completed_trials=4,
         additional_trials=6,
         config_fingerprint="different",
     )

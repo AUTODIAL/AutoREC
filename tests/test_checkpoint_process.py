@@ -12,6 +12,27 @@ import pytest
 pytestmark = pytest.mark.integration
 
 
+def _run_process(command, directory, expected_returncode=0):
+    environment = dict(
+        os.environ,
+        CUDA_VISIBLE_DEVICES="-1",
+        TF_NUM_INTRAOP_THREADS="1",
+        TF_NUM_INTEROP_THREADS="1",
+        OMP_NUM_THREADS="1",
+        OPENBLAS_NUM_THREADS="1",
+        MPLBACKEND="Agg",
+        PYTHONHASHSEED="0",
+    )
+    result = subprocess.run(
+        command, env=environment, capture_output=True, text=True, timeout=240
+    )
+    assert result.returncode == expected_returncode, (
+        result.stdout[-6000:] + result.stderr[-6000:]
+    )
+    with (directory / "result.pkl").open("rb") as stream:
+        return pickle.load(stream)
+
+
 def run_worker(
     directory, *, resume=None, schedule_trials=8, count=8, cache="clock", save_every=None
 ):
@@ -30,22 +51,7 @@ def run_worker(
         command += ["--resume", str(resume)]
     if save_every is not None:
         command += ["--save-every", str(save_every)]
-    environment = dict(
-        os.environ,
-        CUDA_VISIBLE_DEVICES="-1",
-        TF_NUM_INTRAOP_THREADS="1",
-        TF_NUM_INTEROP_THREADS="1",
-        OMP_NUM_THREADS="1",
-        OPENBLAS_NUM_THREADS="1",
-        MPLBACKEND="Agg",
-        PYTHONHASHSEED="0",
-    )
-    result = subprocess.run(
-        command, env=environment, capture_output=True, text=True, timeout=240
-    )
-    assert result.returncode == 0, result.stdout[-6000:] + result.stderr[-6000:]
-    with (directory / "result.pkl").open("rb") as stream:
-        return pickle.load(stream)
+    return _run_process(command, directory)
 
 
 def run_auto_worker(directory, *, target, save_every, interrupt_at=None, cache="clock"):
@@ -64,23 +70,8 @@ def run_auto_worker(directory, *, target, save_every, interrupt_at=None, cache="
     ]
     if interrupt_at is not None:
         command += ["--interrupt-at", str(interrupt_at)]
-    environment = dict(
-        os.environ,
-        CUDA_VISIBLE_DEVICES="-1",
-        TF_NUM_INTRAOP_THREADS="1",
-        TF_NUM_INTEROP_THREADS="1",
-        OMP_NUM_THREADS="1",
-        OPENBLAS_NUM_THREADS="1",
-        MPLBACKEND="Agg",
-        PYTHONHASHSEED="0",
-    )
-    result = subprocess.run(
-        command, env=environment, capture_output=True, text=True, timeout=240
-    )
     expected = 75 if interrupt_at is not None else 0
-    assert result.returncode == expected, result.stdout[-6000:] + result.stderr[-6000:]
-    with (directory / "result.pkl").open("rb") as stream:
-        return pickle.load(stream)
+    return _run_process(command, directory, expected)
 
 
 def compare_sessions(tmp_path, *, horizon, counts, cache, saving_control=False):

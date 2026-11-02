@@ -53,7 +53,6 @@ class RecoveryPlan:
 
     checkpoint: Path | None
     completed_trials: int
-    target_trials: int
     additional_trials: int
     config_fingerprint: str | None
 
@@ -310,6 +309,7 @@ def find_latest_checkpoint(directory, *, target_trials=None):
 
     candidates = []
     series_id = None
+    config_fingerprint = None
     for path in directory.iterdir():
         if path.name.startswith("."):
             continue
@@ -324,8 +324,11 @@ def find_latest_checkpoint(directory, *, target_trials=None):
         manifest = _read_manifest(path)
         if series_id is None:
             series_id = manifest["series_id"]
+            config_fingerprint = manifest["config_fingerprint"]
         elif manifest["series_id"] != series_id:
             raise ValueError("Checkpoint root contains multiple training series.")
+        elif manifest["config_fingerprint"] != config_fingerprint:
+            raise ValueError("Checkpoint series has inconsistent configuration fingerprints.")
         if manifest["completed_trials"] != named_trials:
             raise ValueError(f"Checkpoint directory and manifest trial counts differ: {path}")
         if target_trials is not None and named_trials > target_trials:
@@ -354,7 +357,6 @@ def plan_training_recovery(directory, target_trials):
     return RecoveryPlan(
         checkpoint=latest,
         completed_trials=completed,
-        target_trials=target_trials,
         additional_trials=target_trials - completed,
         config_fingerprint=(None if manifest is None else manifest["config_fingerprint"]),
     )
