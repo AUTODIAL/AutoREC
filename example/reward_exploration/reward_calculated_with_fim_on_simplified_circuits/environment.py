@@ -24,6 +24,8 @@ def _find_max_depth(nested: Any) -> int:
 class EIS_ECM_Env(BaseEISECMEnv):
     """Replace the standard component penalty with simplified-circuit FIM rank loss."""
 
+    CHECKPOINT_FIELDS = frozenset({"identifiability_thresh"})
+
     def __init__(
         self,
         *args,

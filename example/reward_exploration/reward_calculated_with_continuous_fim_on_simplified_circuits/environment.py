@@ -55,6 +55,10 @@ def continuous_identifiability_penalty(
 class EIS_ECM_Env(BaseEISECMEnv):
     """Use continuous simplified-circuit FIM sensitivity as complexity penalty."""
 
+    CHECKPOINT_FIELDS = frozenset(
+        {"identifiability_thresh", "penalty_sharpness", "penalty_scale"}
+    )
+
     def __init__(
         self,
         *args,

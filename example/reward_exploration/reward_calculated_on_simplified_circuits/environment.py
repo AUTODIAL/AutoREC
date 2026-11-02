@@ -15,6 +15,8 @@ class EIS_ECM_Env(BaseEISECMEnv):
     fit.
     """
 
+    CHECKPOINT_FIELDS = frozenset()
+
     def _calculate_reward(
         self,
         r2_score: float,

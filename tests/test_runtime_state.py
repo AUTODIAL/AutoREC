@@ -9,6 +9,7 @@ import tensorflow as tf
 from tensorflow.python.ops import stateful_random_ops
 
 from test_training_baseline import environment_factory as _environment_factory
+from autorec.environment import EIS_ECM_Env
 from autorec.runtime_state import (
     environment_state_dict,
     restore_environment_state,
@@ -18,6 +19,14 @@ from autorec.runtime_state import (
 
 
 environment_factory = _environment_factory
+
+
+class CheckpointEnvironment(EIS_ECM_Env):
+    CHECKPOINT_FIELDS = frozenset({"reward_scale"})
+
+
+class UndeclaredCheckpointEnvironment(EIS_ECM_Env):
+    pass
 
 
 @pytest.fixture(autouse=True)
@@ -107,3 +116,32 @@ def test_disabled_cache_restores_without_enabling_it(environment_factory):
     assert restored is evaluation is active
     assert restored.cache is None
     assert restored.cache_enabled is False
+
+
+def test_declared_environment_subclass_state_roundtrips_without_constructor(
+    environment_factory,
+):
+    env = environment_factory()
+    env.__class__ = CheckpointEnvironment
+    env.reward_scale = 2.5
+
+    restored, evaluation, active = restore_environment_state(
+        environment_state_dict(env, env, env)
+    )
+
+    assert restored is evaluation is active
+    assert type(restored) is CheckpointEnvironment
+    assert restored.reward_scale == 2.5
+
+
+def test_environment_subclass_requires_declared_complete_state(environment_factory):
+    env = environment_factory()
+    env.__class__ = UndeclaredCheckpointEnvironment
+    with pytest.raises(ValueError, match="declare CHECKPOINT_FIELDS"):
+        environment_state_dict(env, env, env)
+
+    env.__class__ = CheckpointEnvironment
+    env.reward_scale = 2.5
+    env.undeclared = True
+    with pytest.raises(ValueError, match="incomplete or undeclared"):
+        environment_state_dict(env, env, env)
