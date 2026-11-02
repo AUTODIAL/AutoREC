@@ -21,7 +21,6 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 RUN_DIR=${SLURM_SUBMIT_DIR:-"$SCRIPT_DIR"}
 
 # USER CONFIGURATION
-LOGIN_NODE='login1'
 TARGET_DIR='./hyperparameter_tuning_results'
 BASE_CONFIG='./base_config.yaml'
 SEARCH_SPACE='./search_space.yaml'
@@ -38,7 +37,6 @@ MODULE_SAVELIST_NAME=${MODULE_SAVELIST_NAME:-default}
 PYTHON_ENV_PATH=${PYTHON_ENV_PATH:-"$HOME/autorec_env"}
 
 RUNNER_ARGUMENTS=(
-    --login-node "$LOGIN_NODE"
     --target-dir "$TARGET_DIR"
     --base-config "$BASE_CONFIG"
     --search-space "$SEARCH_SPACE"
@@ -69,7 +67,7 @@ source "$PYTHON_ENV_PATH/bin/activate"
 # RUN THE HYPERPARAMETER-TUNING ORCHESTRATOR
 cd "$RUN_DIR"
 echo 'Running script: runner.py'
-echo "Login node: $LOGIN_NODE"
+echo 'Slurm commands: direct from this compute node'
 echo "Arguments: ${RUNNER_ARGUMENTS[*]}"
 echo
 
