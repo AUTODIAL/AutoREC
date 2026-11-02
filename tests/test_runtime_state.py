@@ -12,6 +12,7 @@ from test_training_baseline import environment_factory as _environment_factory
 from autorec.environment import EIS_ECM_Env
 from autorec.runtime_state import (
     environment_state_dict,
+    environment_source_modules,
     restore_environment_state,
     restore_rng_state,
     rng_state_dict,
@@ -23,6 +24,7 @@ environment_factory = _environment_factory
 
 class CheckpointEnvironment(EIS_ECM_Env):
     CHECKPOINT_FIELDS = frozenset({"reward_scale"})
+    CHECKPOINT_SOURCE_MODULES = ()
 
 
 class UndeclaredCheckpointEnvironment(EIS_ECM_Env):
@@ -145,3 +147,6 @@ def test_environment_subclass_requires_declared_complete_state(environment_facto
     env.undeclared = True
     with pytest.raises(ValueError, match="incomplete or undeclared"):
         environment_state_dict(env, env, env)
+
+    del env.undeclared
+    assert environment_source_modules(env) == (__name__,)

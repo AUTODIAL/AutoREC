@@ -65,6 +65,7 @@ class EIS_ECM_Env:
     # Constant declaration
     _N_MAX = 2
     CHECKPOINT_FIELDS = frozenset()
+    CHECKPOINT_SOURCE_MODULES = ()
 
     def __init__(
         self,

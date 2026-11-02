@@ -6,7 +6,9 @@ snapshots are explicit dictionaries; live agents and environments are never pick
 
 from dataclasses import dataclass, fields
 import hashlib
+import importlib
 import importlib.metadata
+import inspect
 import json
 import os
 from pathlib import Path
@@ -24,6 +26,7 @@ from autorec.neural_state import neural_state_dict, restore_neural_state
 from autorec.optimized_data_structures.circular_buffer import CircularBuffer
 from autorec.runtime_state import (
     environment_state_dict,
+    environment_source_modules,
     restore_environment_state,
     restore_rng_state,
     rng_state_dict,
@@ -57,7 +60,26 @@ class RecoveryPlan:
     config_fingerprint: str | None
 
 
-def _runtime():
+def _source_module_records(module_names=()):
+    records = []
+    for name in sorted(set(module_names)):
+        try:
+            module = importlib.import_module(name)
+            source_path = inspect.getsourcefile(module)
+        except (ImportError, TypeError) as error:
+            raise ValueError(f"Cannot inspect checkpoint source module: {name}") from error
+        if source_path is None:
+            raise ValueError(f"Checkpoint source module has no Python source: {name}")
+        path = Path(source_path)
+        if not path.is_file():
+            raise ValueError(f"Checkpoint source module is missing: {name}")
+        records.append(
+            {"module": name, "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+        )
+    return records
+
+
+def _runtime(environment_modules=()):
     """Conservative compatibility: identical source, numerical stack and CPU settings."""
     if tf.config.get_visible_devices("GPU"):
         raise ValueError("Training checkpoints currently support CPU execution only.")
@@ -98,6 +120,7 @@ def _runtime():
                 "NUMEXPR_NUM_THREADS",
             )
         },
+        "environment_sources": _source_module_records(environment_modules),
     }
 
 
@@ -193,7 +216,9 @@ def save_checkpoint(agent, destination) -> Path:
         or not re.fullmatch(r"[0-9a-f]{64}", agent._checkpoint_config_fingerprint)
     ):
         raise ValueError("Checkpoint configuration fingerprint is invalid.")
-    runtime = _runtime()
+    runtime = _runtime(
+        environment_source_modules(agent.training_env, agent.eval_env, agent._active_env)
+    )
     payloads = _capture(agent)
     destination.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(
@@ -211,7 +236,7 @@ def save_checkpoint(agent, destination) -> Path:
                 stream.flush()
                 os.fsync(stream.fileno())
         manifest = {
-            "format_version": 5,
+            "format_version": 6,
             "series_id": agent._checkpoint_series_id,
             "config_fingerprint": agent._checkpoint_config_fingerprint,
             "completed_trials": agent.completed_trials,
@@ -252,7 +277,7 @@ def _read_manifest(directory):
             "runtime",
             "files",
         }
-        or manifest["format_version"] != 5
+        or manifest["format_version"] != 6
     ):
         raise ValueError("Unsupported checkpoint manifest/version.")
     if not isinstance(manifest["series_id"], str) or not re.fullmatch(
@@ -275,7 +300,17 @@ def _read_manifest(directory):
 def _validate_checkpoint_files(directory, manifest):
     """Validate runtime, component inventory, sizes, and hashes without unpickling."""
     directory = Path(directory)
-    if manifest["runtime"] != _runtime():
+    expected_runtime = manifest["runtime"]
+    sources = expected_runtime.get("environment_sources")
+    if type(sources) is not list or any(
+        type(record) is not dict
+        or set(record) != {"module", "sha256"}
+        or type(record["module"]) is not str
+        or type(record["sha256"]) is not str
+        for record in sources
+    ):
+        raise ValueError("Checkpoint environment-source metadata is invalid.")
+    if expected_runtime != _runtime(record["module"] for record in sources):
         raise ValueError(
             "Checkpoint runtime/source differs; exact continuation is unsupported."
         )
