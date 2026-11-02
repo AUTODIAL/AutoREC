@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import pickle
 import platform
+import re
 import tempfile
 
 import numpy as np
@@ -42,6 +43,7 @@ _RECONSTRUCTIBLE_FIELDS = frozenset(
     "_compiled_train_step".split()
 )
 _COMPONENTS = {"config.json", "training.pkl", "environments.pkl", "neural.pkl", "replay.npy"}
+_CHECKPOINT_NAME = re.compile(r"trial-(\d{8})")
 
 
 def _runtime():
@@ -202,18 +204,34 @@ def save_checkpoint(agent, destination) -> Path:
     return destination
 
 
-def _read_checkpoint(directory):
-    """Verify all files before deserializing any trusted pickle payload."""
+def _read_manifest(directory):
+    """Read and validate checkpoint metadata without deserializing payloads."""
     directory = Path(directory)
     manifest_path = directory / "manifest.json"
     if manifest_path.is_symlink():
         raise ValueError("Checkpoint manifest must not be a symlink.")
-    manifest = json.loads(manifest_path.read_text())
+    if not manifest_path.is_file():
+        raise ValueError(f"Checkpoint manifest is missing: {manifest_path}")
+    try:
+        manifest = json.loads(manifest_path.read_text())
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError(f"Checkpoint manifest is unreadable: {manifest_path}") from error
     if (
         set(manifest) != {"format_version", "completed_trials", "runtime", "files"}
         or manifest["format_version"] != 2
     ):
         raise ValueError("Unsupported checkpoint manifest/version.")
+    completed_trials = manifest["completed_trials"]
+    if isinstance(completed_trials, bool) or not isinstance(completed_trials, int):
+        raise ValueError("Checkpoint manifest has an invalid completed-trial count.")
+    if completed_trials < 0:
+        raise ValueError("Checkpoint manifest has a negative completed-trial count.")
+    return manifest
+
+
+def _validate_checkpoint_files(directory, manifest):
+    """Validate runtime, component inventory, sizes, and hashes without unpickling."""
+    directory = Path(directory)
     if manifest["runtime"] != _runtime():
         raise ValueError(
             "Checkpoint runtime/source differs; exact continuation is unsupported."
@@ -224,6 +242,61 @@ def _read_checkpoint(directory):
         path = directory / name
         if path.is_symlink() or not path.is_file() or _digest(path) != expected:
             raise ValueError(f"Missing or corrupt checkpoint component: {name}")
+
+
+def find_latest_checkpoint(directory, *, target_trials=None):
+    """Return the newest valid immutable checkpoint at or below a cumulative target.
+
+    Missing or empty directories return ``None``. Atomic-write temporary directories and
+    unrelated entries are ignored. Checkpoint-like entries that are malformed, corrupt,
+    incompatible, or beyond ``target_trials`` fail clearly instead of causing a silent
+    restart.
+    """
+    if target_trials is not None:
+        if isinstance(target_trials, bool) or not isinstance(target_trials, int):
+            raise TypeError("target_trials must be a nonnegative integer or None.")
+        if target_trials < 0:
+            raise ValueError("target_trials must be nonnegative.")
+
+    directory = Path(directory)
+    if not directory.exists():
+        return None
+    if directory.is_symlink() or not directory.is_dir():
+        raise ValueError(f"Checkpoint root must be a regular directory: {directory}")
+
+    candidates = []
+    for path in directory.iterdir():
+        if path.name.startswith("."):
+            continue
+        match = _CHECKPOINT_NAME.fullmatch(path.name)
+        if match is None:
+            if path.name.startswith("trial-"):
+                raise ValueError(f"Malformed checkpoint directory name: {path.name}")
+            continue
+        if path.is_symlink() or not path.is_dir():
+            raise ValueError(f"Checkpoint path must be a regular directory: {path}")
+        named_trials = int(match.group(1))
+        manifest = _read_manifest(path)
+        if manifest["completed_trials"] != named_trials:
+            raise ValueError(f"Checkpoint directory and manifest trial counts differ: {path}")
+        if target_trials is not None and named_trials > target_trials:
+            raise ValueError(
+                f"Checkpoint trial {named_trials} exceeds target trial {target_trials}."
+            )
+        candidates.append((named_trials, path, manifest))
+
+    if not candidates:
+        return None
+    _, path, manifest = max(candidates, key=lambda candidate: candidate[0])
+    _validate_checkpoint_files(path, manifest)
+    return path
+
+
+def _read_checkpoint(directory):
+    """Verify all files before deserializing any trusted pickle payload."""
+    directory = Path(directory)
+    manifest = _read_manifest(directory)
+    _validate_checkpoint_files(directory, manifest)
     payloads = {}
     for name in sorted(_COMPONENTS):
         with (directory / name).open("rb") as stream:

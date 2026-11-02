@@ -106,6 +106,50 @@ def test_interrupted_write_preserves_previous_checkpoint(agent, tmp_path, monkey
     assert not list(tmp_path.glob(".next-*"))
 
 
+def test_find_latest_checkpoint_handles_missing_empty_and_valid_roots(agent, tmp_path):
+    root = tmp_path / "checkpoints"
+    assert checkpoint.find_latest_checkpoint(root, target_trials=10) is None
+    root.mkdir()
+    (root / "notes.txt").write_text("unrelated")
+    (root / ".trial-00000010-interrupted").mkdir()
+    assert checkpoint.find_latest_checkpoint(root, target_trials=10) is None
+
+    first = checkpoint.save_checkpoint(agent, root / "trial-00000000")
+    agent._training_state.completed_trials = 10
+    latest = checkpoint.save_checkpoint(agent, root / "trial-00000010")
+
+    assert checkpoint.find_latest_checkpoint(root, target_trials=10) == latest
+    assert checkpoint.find_latest_checkpoint(root) == latest
+    assert first.is_dir()
+
+
+def test_find_latest_checkpoint_rejects_unsafe_candidates(agent, tmp_path):
+    for problem in ("malformed", "name-mismatch", "corrupt", "above-target"):
+        root = tmp_path / problem
+        root.mkdir()
+        if problem == "malformed":
+            (root / "trial-invalid").mkdir()
+            match = "Malformed checkpoint"
+        else:
+            path = checkpoint.save_checkpoint(agent, root / "trial-00000000")
+            if problem == "name-mismatch":
+                path.rename(root / "trial-00000001")
+                match = "trial counts differ"
+            elif problem == "corrupt":
+                (path / "replay.npy").write_bytes(b"corrupt")
+                match = "corrupt checkpoint component"
+            else:
+                match = "exceeds target"
+
+        target = -1 if problem == "above-target" else 10
+        if problem == "above-target":
+            target = 0
+            agent._training_state.completed_trials = 1
+            checkpoint.save_checkpoint(agent, root / "trial-00000001")
+        with pytest.raises(ValueError, match=match):
+            checkpoint.find_latest_checkpoint(root, target_trials=target)
+
+
 def test_unfinished_trial_rejected(agent, tmp_path):
     agent._training_state.at_trial_boundary = False
     with pytest.raises(ValueError, match="boundary"):
