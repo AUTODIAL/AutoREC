@@ -37,3 +37,13 @@ sbatch submit_job.sh
 The SLURM job uses the same resources and pipeline configuration as the baseline and
 simplified-component-penalty experiments, activates `$HOME/eis_env`, performs
 all four evaluations, and writes outputs to `calculation_output/`.
+
+## Hyperparameter tuning
+
+From this directory, run `python tuning_runner.py` directly or submit
+`tuning_runner_job.sh`. Every candidate uses the discrete-FIM reward environment. The
+identifiability threshold remains fixed at `1e-6` in both training and validation and is not
+part of the search space. Training uses `../data/training_dataset.pkl`, while promotion
+scores use `../data/validation_dataset.pkl`. See the parent [reward exploration
+README](../README.md#hyperparameter-tuning) for requirements, budgets, outputs, and the
+separate role of `submit_job.sh`.

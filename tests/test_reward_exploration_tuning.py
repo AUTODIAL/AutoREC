@@ -3,7 +3,6 @@
 from pathlib import Path
 
 import pandas as pd
-import pytest
 import yaml
 
 from example.reward_exploration.tuning import stage, tuning_utils
@@ -61,59 +60,46 @@ def test_shared_reward_tuning_targets_scoring_and_slurm_script(tmp_path):
     assert "test_dataset" not in script
 
 
-@pytest.mark.parametrize("case_name", CASES)
-def test_tuning_configuration_and_entrypoints_are_isolated(case_name):
-    case_dir = REWARD_ROOT / case_name
-    config = yaml.safe_load((case_dir / "tuning_base_config.yaml").read_text())
-    assert config["dataprep"]["training"]["path"] == "../data/training_dataset.pkl"
-    assert config["dataprep"]["eval"]["path"] == "../data/validation_dataset.pkl"
-    assert config["agent"]["num_trials"] == 1_000
-    assert config["agent"]["start_jump"] == 4_000
-    assert config["agent"]["beta_anneal_trials"] == 5_950
-    combined = "\n".join(
-        (case_dir / name).read_text()
-        for name in ("tuning_base_config.yaml", "tuning_main_factory.py")
-    )
-    assert "test_dataset" not in combined
-    assert "battery_dataset" not in combined
-    assert "experimental_dataset" not in combined
-    assert (case_dir / "submit_job.sh").is_file()
-    assert (case_dir / "tuning_runner_job.sh").is_file()
-
-
-def test_simplified_reward_tuning_worker_uses_experimental_environment():
-    worker = (
-        REWARD_ROOT / "reward_calculated_on_simplified_circuits" / "tuning_main_factory.py"
-    ).read_text()
-    assert "def prepare_experimental_runtime" in worker
-    assert "from environment import EIS_ECM_Env" in worker
-    assert "pipeline_builder_function=build_experimental_pipeline" in worker
-    assert "prepare_runtime_function=prepare_experimental_runtime" in worker
-
-
-def test_discrete_fim_tuning_keeps_reward_definition_fixed():
-    case_dir = REWARD_ROOT / CASES[2]
-    config = yaml.safe_load((case_dir / "tuning_base_config.yaml").read_text())
-    for environment_name in ("training", "eval"):
-        assert config["environment"][environment_name]["identifiability_thresh"] == 1e-6
-    search_space = yaml.safe_load((case_dir / "tuning_search_space.yaml").read_text())
-    assert "identifiability_thresh" not in search_space
-    worker = (case_dir / "tuning_main_factory.py").read_text()
-    assert "prepare_runtime_function=prepare_experimental_runtime" in worker
-
-
-def test_continuous_fim_tuning_keeps_reward_definition_fixed():
-    case_dir = REWARD_ROOT / CASES[3]
-    config = yaml.safe_load((case_dir / "tuning_base_config.yaml").read_text())
-    expected = {
-        "identifiability_thresh": 1e-6,
-        "penalty_sharpness": 2.0,
-        "penalty_scale": 2.0,
+def test_case_tuning_configurations_and_entrypoints_are_isolated():
+    reward_settings = {
+        CASES[0]: {},
+        CASES[1]: {},
+        CASES[2]: {"identifiability_thresh": 1e-6},
+        CASES[3]: {
+            "identifiability_thresh": 1e-6,
+            "penalty_sharpness": 2.0,
+            "penalty_scale": 2.0,
+        },
     }
-    for environment_name in ("training", "eval"):
-        environment = config["environment"][environment_name]
-        assert {name: environment[name] for name in expected} == expected
-    search_space = yaml.safe_load((case_dir / "tuning_search_space.yaml").read_text())
-    assert expected.keys().isdisjoint(search_space)
-    worker = (case_dir / "tuning_main_factory.py").read_text()
-    assert "prepare_runtime_function=prepare_experimental_runtime" in worker
+    for case_name, fixed_reward_settings in reward_settings.items():
+        case_dir = REWARD_ROOT / case_name
+        config = yaml.safe_load((case_dir / "tuning_base_config.yaml").read_text())
+        assert config["dataprep"]["training"]["path"] == "../data/training_dataset.pkl"
+        assert config["dataprep"]["eval"]["path"] == "../data/validation_dataset.pkl"
+        assert config["agent"]["num_trials"] == 1_000
+        assert config["agent"]["start_jump"] == 4_000
+        assert config["agent"]["beta_anneal_trials"] == 5_950
+        for environment_name in ("training", "eval"):
+            environment = config["environment"][environment_name]
+            assert {
+                name: environment[name] for name in fixed_reward_settings
+            } == fixed_reward_settings
+
+        search_space = yaml.safe_load((case_dir / "tuning_search_space.yaml").read_text())
+        assert fixed_reward_settings.keys().isdisjoint(search_space)
+        combined = "\n".join(
+            (case_dir / name).read_text()
+            for name in ("tuning_base_config.yaml", "tuning_main_factory.py")
+        )
+        assert "test_dataset" not in combined
+        assert "battery_dataset" not in combined
+        assert "experimental_dataset" not in combined
+        assert (case_dir / "submit_job.sh").is_file()
+        assert (case_dir / "tuning_runner_job.sh").is_file()
+
+        if case_name != "baseline":
+            worker = (case_dir / "tuning_main_factory.py").read_text()
+            assert "def prepare_experimental_runtime" in worker
+            assert "from environment import EIS_ECM_Env" in worker
+            assert "pipeline_builder_function=build_experimental_pipeline" in worker
+            assert "prepare_runtime_function=prepare_experimental_runtime" in worker

@@ -27,3 +27,13 @@ sbatch submit_job.sh
 The SLURM job activates `$HOME/eis_env`, uses the repository's
 `configs_yaml/examples/pipeline_config.yaml` (currently 10,000 training trials), performs
 all four evaluations, and writes outputs to `calculation_output/`.
+
+## Hyperparameter tuning
+
+From this directory, run `python tuning_runner.py` to orchestrate the baseline reward search
+directly, or `sbatch tuning_runner_job.sh` to run the orchestrator as a low-resource Slurm
+job. The tuning configuration uses `../data/training_dataset.pkl` for training and
+`../data/validation_dataset.pkl` for promotion scores. It does not use held-out test,
+battery, or experimental results. See the parent [reward exploration
+README](../README.md#hyperparameter-tuning) for budgets, outputs, requirements, and the
+difference from `submit_job.sh`.

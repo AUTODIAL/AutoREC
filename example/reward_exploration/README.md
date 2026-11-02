@@ -97,3 +97,64 @@ a successful job, `models/` is archived as `models.tar.gz`. Each
 `results/fit_plots_<dataset>/` directory is archived beside itself as
 `fit_plots_<dataset>.tar.gz`. The original directories are then removed to reduce HPC file
 counts.
+
+## Hyperparameter tuning
+
+Each experiment directory also contains a checkpointed multi-fidelity tuning workflow. It
+uses the same successive-halving policy as `example/hyperparameter_tuning`: candidates train
+in 1,000-trial stages up to 10,000 trials, are first eligible for pruning at 2,000 trials,
+and resume promoted candidates from their latest complete checkpoint.
+
+The tuning datasets have deliberately separate roles:
+
+- `data/training_dataset.pkl` supplies RL training interactions and learning-curve rewards;
+- `data/validation_dataset.pkl` supplies the evaluation success rate used in the tuning
+  score; and
+- `data/test_dataset.pkl` is held back for assessment after hyperparameter selection.
+
+Tuning does not evaluate the test, battery, or experimental datasets. Those evaluations
+remain part of the separate full-run workflow so that model selection does not use held-out
+results.
+
+Install the additional orchestration dependencies once:
+
+```bash
+pip install -r example/reward_exploration/tuning/requirements.txt
+```
+
+Then enter the experiment directory. Run the orchestrator directly on a node that may call
+`sbatch` and `sacct`:
+
+```bash
+cd example/reward_exploration/baseline
+python tuning_runner.py
+```
+
+Alternatively, submit the lightweight seven-day orchestration job:
+
+```bash
+sbatch tuning_runner_job.sh
+```
+
+The shell script contains editable resource, environment, and tuning-budget variables. It
+defaults to one core, 16 GB, five initial candidates, ten Optuna iterations, and a maximum
+10,000-trial budget. `tuning_runner.py --help` lists command-line overrides for direct use.
+
+The two Slurm scripts serve different purposes:
+
+- `submit_job.sh` trains one selected configuration to completion and evaluates all four
+  datasets.
+- `tuning_runner_job.sh` orchestrates many checkpointed candidates and evaluates only the
+  validation data needed for promotion decisions.
+
+Tuning outputs are written under the case's `hyperparameter_tuning/` directory. The main
+summary files are `rung_scores.csv`, `optuna_trials.csv`, `optimization_history.png`, and
+`param_importances.png`; candidate directories contain configurations, checkpoints, and
+rung-specific validation results. The baseline hyperparameter configuration is never
+pruned.
+
+The tuning wrappers depend on the shared `tuning/` package and `data/` directory beside the
+case directories. When moving this workflow to shared HPC storage, preserve the complete
+`reward_exploration/` directory layout rather than copying a case directory by itself.
+Relative dataset paths are resolved from the case directory because generated training jobs
+change to that directory before starting Python.

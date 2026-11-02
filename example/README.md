@@ -117,7 +117,7 @@ budgets. It supports:
 
 - direct orchestration from a login node;
 - a low-resource Slurm job that runs the orchestrator on a compute node;
-- SSH-routed child-job submission and monitoring;
+- direct Slurm child-job submission and monitoring from the orchestrator node;
 - separate training, validation, and held-out test datasets;
 - rung-level objective and promotion reports.
 
@@ -129,7 +129,8 @@ and currently ignored by Git, so they must be provided separately in
 ## Reward exploration
 
 The [`reward_exploration/`](reward_exploration/) collection provides four isolated,
-configuration-driven workflows:
+configuration-driven workflows, each with both a single full-training job and a
+checkpointed multi-fidelity tuning workflow:
 
 - the standard AutoREC reward as a baseline;
 - component-count and depth penalties calculated after circuit simplification;
