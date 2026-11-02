@@ -3,8 +3,17 @@
 from pathlib import Path
 
 import pandas as pd
+import yaml
 
 from example.reward_exploration.tuning import stage, tuning_utils
+
+
+CASES = (
+    "baseline",
+    "reward_calculated_on_simplified_circuits",
+    "reward_calculated_with_fim_on_simplified_circuits",
+    "reward_calculated_with_continuous_fim_on_simplified_circuits",
+)
 
 
 REPOSITORY_ROOT = Path(__file__).parents[1]
@@ -49,3 +58,22 @@ def test_shared_reward_tuning_targets_scoring_and_slurm_script(tmp_path):
     assert "MODULE_SAVELIST_NAME='basic'" in script
     assert "PYTHON_ENV_PATH=$HOME/eis_env" in script
     assert "test_dataset" not in script
+
+
+def test_baseline_tuning_configuration_and_entrypoints_are_isolated():
+    case_dir = REWARD_ROOT / "baseline"
+    config = yaml.safe_load((case_dir / "tuning_base_config.yaml").read_text())
+    assert config["dataprep"]["training"]["path"] == "../data/training_dataset.pkl"
+    assert config["dataprep"]["eval"]["path"] == "../data/validation_dataset.pkl"
+    assert config["agent"]["num_trials"] == 1_000
+    assert config["agent"]["start_jump"] == 4_000
+    assert config["agent"]["beta_anneal_trials"] == 5_950
+    combined = "\n".join(
+        (case_dir / name).read_text()
+        for name in ("tuning_base_config.yaml", "tuning_main_factory.py")
+    )
+    assert "test_dataset" not in combined
+    assert "battery_dataset" not in combined
+    assert "experimental_dataset" not in combined
+    assert (case_dir / "submit_job.sh").is_file()
+    assert (case_dir / "tuning_runner_job.sh").is_file()
