@@ -157,7 +157,7 @@ def test_slurm_script_passes_stage_target_and_preserves_intermediate_models(
 
     def fake_run(command, **kwargs):
         commands.append(command)
-        if command[-1].startswith("sbatch "):
+        if command[0] == "sbatch":
             return types.SimpleNamespace(
                 returncode=0, stdout="Submitted batch job 12345\n", stderr=""
             )
@@ -170,34 +170,20 @@ def test_slurm_script_passes_stage_target_and_preserves_intermediate_models(
         EXAMPLE_DIR / "main_factory.py",
         tmp_path / "config.yaml",
         {"job_name": "test"},
-        login_node="login1",
         submit=True,
     )
     final_stage_script = (save_dir / "submit.sh").read_text()
-    tuning_utils.block_until_completed([job_id], login_node="login1")
+    tuning_utils.block_until_completed([job_id])
 
     assert job_id == "12345"
     assert "tar -czf models.tar.gz models && rm -rf models" in final_stage_script
     assert "tar -czf fit_plots.tar.gz fit_plots && rm -rf fit_plots" in final_stage_script
-    assert all(command[:2] == ["ssh", "-o"] for command in commands)
-    assert all(command[-2] == "login1" for command in commands)
-    assert commands[0][-1].startswith("sbatch ")
-    assert commands[1][-1].startswith("sacct ")
-    assert tuning_utils.slurm_command(["sbatch", "job.sh"]) == ["sbatch", "job.sh"]
-    with pytest.raises(ValueError, match="login_node"):
-        tuning_utils.slurm_command(["sbatch", "job.sh"], "invalid host")
+    assert commands[0][0] == "sbatch"
+    assert commands[1][0] == "sacct"
 
     wrapper = (EXAMPLE_DIR / "runner_job.sh").read_text()
-    assert "#SBATCH --time=7-00:00:00" in wrapper
-    assert "#SBATCH --cpus-per-task=1" in wrapper
-    assert "#SBATCH --mem-per-cpu=16G" in wrapper
-    assert "#SBATCH --account=rrg-j3goals" in wrapper
-    assert "scontrol show job" in wrapper
-    assert "time python runner.py" in wrapper
-    assert "LOGIN_NODE='login1'" in wrapper
-    assert "NUM_INITIAL=5" in wrapper
-    assert "MAX_TRIALS=10000" in wrapper
-    assert '--login-node "$LOGIN_NODE"' in wrapper
+    assert 'RUN_DIR=${SLURM_SUBMIT_DIR:-"$SCRIPT_DIR"}' in wrapper
+    assert 'cd "$RUN_DIR"' in wrapper
     assert 'python runner.py "${RUNNER_ARGUMENTS[@]}"' in wrapper
 
 

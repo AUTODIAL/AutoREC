@@ -32,32 +32,6 @@ MODULE_SAVELIST_NAME = "default"
 PYTHON_ENV_PATH = "$HOME/autorec_env"
 
 
-def slurm_command(command: Sequence[str], login_node: Optional[str] = None) -> list[str]:
-    """Return a direct or SSH-routed Slurm command without invoking a shell locally."""
-    command = [str(value) for value in command]
-    if not command:
-        raise ValueError("A Slurm command is required.")
-    if login_node is None:
-        return command
-    if (
-        not isinstance(login_node, str)
-        or not login_node
-        or login_node.startswith("-")
-        or any(character.isspace() for character in login_node)
-    ):
-        raise ValueError("login_node must be a non-empty SSH host without whitespace.")
-    return [
-        "ssh",
-        "-o",
-        "BatchMode=yes",
-        "-o",
-        "ConnectTimeout=30",
-        "--",
-        login_node,
-        shlex.join(command),
-    ]
-
-
 def cumulative_trial_targets(max_trials: int, session_trials: int) -> list[int]:
     """Return cumulative evaluation/checkpoint targets for fixed-size sessions."""
     for value, name in ((max_trials, "max_trials"), (session_trials, "session_trials")):
@@ -487,7 +461,6 @@ def write_job_script(
     sbatch_options: dict,
     script_args: Optional[Sequence[Union[str, int, Path]]] = None,
     archive_models: bool = True,
-    login_node: Optional[str] = None,
     submit: bool = False,
 ) -> Optional[str]:
     """Write a Slurm job submission script with the specified options and parameters.
@@ -509,10 +482,6 @@ def write_job_script(
     archive_models : bool, optional
         Archive and remove intermediate model exports and fit plots after the job. Disable
         this for non-final multi-fidelity sessions.
-    login_node : str, optional
-        SSH host through which ``sbatch`` is executed. Use this when the caller is itself
-        running on a compute node that may not submit jobs directly. If omitted, execute
-        ``sbatch`` locally.
     submit : bool, optional
         Whether to submit the job immediately after writing the script, by default False.
 
@@ -610,9 +579,7 @@ def write_job_script(
 
     if submit:
         # Submit the job
-        submit_command = slurm_command(
-            ["sbatch", str((save_dir / "submit.sh").resolve())], login_node
-        )
+        submit_command = ["sbatch", str((save_dir / "submit.sh").resolve())]
         submit_process = subprocess.run(
             submit_command, capture_output=True, text=True, check=False
         )
@@ -633,7 +600,6 @@ def write_job_script(
 def block_until_completed(
     jobid_list: list,
     poll_interval: int = 60,
-    login_node: Optional[str] = None,
 ) -> None:
     """Block until all jobs reach a terminal Slurm state.
 
@@ -643,8 +609,6 @@ def block_until_completed(
         A list of Slurm job IDs to monitor.
     poll_interval : int, optional
         The interval (in seconds) at which to poll the job status, by default 60 seconds.
-    login_node : str, optional
-        SSH host through which ``sacct`` is executed. If omitted, query Slurm locally.
     """
     if not jobid_list:
         return
@@ -668,17 +632,14 @@ def block_until_completed(
     }
 
     while True:
-        query_command = slurm_command(
-            [
-                "sacct",
-                "-j",
-                jobid_str,
-                "--format=JobIDRaw,State",
-                "--parsable2",
-                "--noheader",
-            ],
-            login_node,
-        )
+        query_command = [
+            "sacct",
+            "-j",
+            jobid_str,
+            "--format=JobIDRaw,State",
+            "--parsable2",
+            "--noheader",
+        ]
         result = subprocess.run(
             query_command,
             capture_output=True,
