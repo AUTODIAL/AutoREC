@@ -10,7 +10,6 @@ import yaml
 
 
 DIRECTORY = Path(__file__).resolve().parent
-REPOSITORY_ROOT = DIRECTORY.parents[1]
 
 
 def _positive_integer(value: str) -> int:
@@ -21,7 +20,6 @@ def _positive_integer(value: str) -> int:
 
 
 def _read_config(config_file: Path) -> dict:
-    os.environ.setdefault("AUTOREC_ROOT", str(REPOSITORY_ROOT))
     with config_file.open() as stream:
         config = yaml.safe_load(stream)
     if not isinstance(config, dict) or not isinstance(config.get("agent"), dict):

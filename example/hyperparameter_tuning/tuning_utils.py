@@ -491,6 +491,7 @@ def write_job_script(
         The Slurm job ID if the job was submitted, otherwise None.
     """
     save_dir = Path(save_dir)
+    python_file = Path(python_file).resolve()
     time = sbatch_options.get("time", "2:00:00")
     cpus_per_task = sbatch_options.get("cpus_per_task", 2)
     nodes = sbatch_options.get("nodes", 1)
@@ -557,10 +558,12 @@ def write_job_script(
             "",
             "# RUN YOUR PYTHON SCRIPT",
             "# DEFINE YOUR PYTHON SCRIPT PARAMETERS HERE",
+            f"WORK_DIR={shlex.quote(str(python_file.parent))}",
             f"SCRIPTS={shlex.quote(str(python_file))}",
             f"ARGS=({argument_array})",
             "",
             "# Run calculation",
+            'cd "$WORK_DIR"',
             "echo 'Running script: ${SCRIPTS}'",
             'echo "Arguments: ${ARGS[*]}"',
             "",

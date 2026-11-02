@@ -31,6 +31,13 @@ The `data/` directory has three processed datasets:
 - `test_dataset.pkl` is reserved for final assessment after hyperparameter selection. The
   tuning scripts never load it.
 
+The training and validation paths in `base_config.yaml` are relative to the directory from
+which the calculation runs. Generated candidate configurations preserve those relative
+paths. Each generated Slurm script explicitly changes to the directory containing
+`main_factory.py` before starting Python, so copying the complete
+`example/hyperparameter_tuning/` directory to any shared location also copies the data root
+used by `./data/...`.
+
 `tuning_utils.compute_score` combines the mean episodic cumulative reward over the most
 recent 1,000 training episodes, validation success rate, and validation exact-circuit rate.
 Because the validation set is consulted repeatedly, it must not be reported as an unbiased
