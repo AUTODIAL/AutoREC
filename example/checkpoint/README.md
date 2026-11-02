@@ -82,8 +82,10 @@ python run_sequential.py \
   --sessions 3
 ```
 
-The runner never searches for a mutable “latest” checkpoint. Each generated YAML identifies
-the exact immutable checkpoint it will restore.
+This equivalence runner deliberately uses explicit immutable checkpoint paths recorded in
+generated YAML. For automatic crash recovery toward a cumulative target, use
+`autorec train --config ... --checkpoint-dir ... --checkpoint-every ... --resume-latest`
+or the general `example/checkpoint_training.py` script described in `example/README.md`.
 
 ## Run the 1,000-trial comparison
 

@@ -51,6 +51,19 @@ autorec train \
   --checkpoint-dir checkpoints
 ```
 
+For crash recovery toward the cumulative `agent.num_trials` target, opt in explicitly and
+rerun the same command after an interruption:
+
+```bash
+autorec train \
+  --config configs_yaml/examples/demo_pipeline_config.yaml \
+  --checkpoint-dir checkpoints \
+  --checkpoint-every 10 \
+  --resume-latest
+```
+
+A missing checkpoint starts fresh, while an already reached target is a no-op.
+
 Resume that trusted checkpoint in a fresh process for another 100 trials:
 
 ```bash
@@ -61,7 +74,9 @@ autorec train \
   --checkpoint-every 100
 ```
 
-`--config` and `--resume` are mutually exclusive. A Keras model export is not a
+`--resume-latest` requires `--config` and `--checkpoint-dir` and is incompatible with
+`--resume` and `--additional-trials`. `--config` and `--resume` are mutually exclusive.
+A Keras model export is not a
 complete checkpoint. See {doc}`checkpointing <checkpointing>` for cumulative
 trial semantics, deterministic runtime requirements, and compatibility limits.
 
