@@ -55,6 +55,7 @@ class RecoveryPlan:
     completed_trials: int
     target_trials: int
     additional_trials: int
+    config_fingerprint: str | None
 
 
 def _runtime():
@@ -121,6 +122,7 @@ def _capture(agent):
             "_training_state",
             "_continuation_mode",
             "_checkpoint_series_id",
+            "_checkpoint_config_fingerprint",
         }
     )
     # Performance caches are derived from checkpoint-owned environments, models, and
@@ -187,6 +189,11 @@ def save_checkpoint(agent, destination) -> Path:
         r"[0-9a-f]{32}", agent._checkpoint_series_id
     ):
         raise ValueError("Checkpoint series ID is invalid.")
+    if agent._checkpoint_config_fingerprint is not None and (
+        not isinstance(agent._checkpoint_config_fingerprint, str)
+        or not re.fullmatch(r"[0-9a-f]{64}", agent._checkpoint_config_fingerprint)
+    ):
+        raise ValueError("Checkpoint configuration fingerprint is invalid.")
     runtime = _runtime()
     payloads = _capture(agent)
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -205,8 +212,9 @@ def save_checkpoint(agent, destination) -> Path:
                 stream.flush()
                 os.fsync(stream.fileno())
         manifest = {
-            "format_version": 3,
+            "format_version": 4,
             "series_id": agent._checkpoint_series_id,
+            "config_fingerprint": agent._checkpoint_config_fingerprint,
             "completed_trials": agent.completed_trials,
             "runtime": runtime,
             "files": {name: _digest(temporary / name) for name in sorted(_COMPONENTS)},
@@ -237,14 +245,26 @@ def _read_manifest(directory):
         raise ValueError(f"Checkpoint manifest is unreadable: {manifest_path}") from error
     if (
         set(manifest)
-        != {"format_version", "series_id", "completed_trials", "runtime", "files"}
-        or manifest["format_version"] != 3
+        != {
+            "format_version",
+            "series_id",
+            "config_fingerprint",
+            "completed_trials",
+            "runtime",
+            "files",
+        }
+        or manifest["format_version"] != 4
     ):
         raise ValueError("Unsupported checkpoint manifest/version.")
     if not isinstance(manifest["series_id"], str) or not re.fullmatch(
         r"[0-9a-f]{32}", manifest["series_id"]
     ):
         raise ValueError("Checkpoint manifest has an invalid series ID.")
+    fingerprint = manifest["config_fingerprint"]
+    if fingerprint is not None and (
+        not isinstance(fingerprint, str) or not re.fullmatch(r"[0-9a-f]{64}", fingerprint)
+    ):
+        raise ValueError("Checkpoint manifest has an invalid configuration fingerprint.")
     completed_trials = manifest["completed_trials"]
     if isinstance(completed_trials, bool) or not isinstance(completed_trials, int):
         raise ValueError("Checkpoint manifest has an invalid completed-trial count.")
@@ -329,12 +349,14 @@ def plan_training_recovery(directory, target_trials):
         raise ValueError("target_trials must be positive.")
 
     latest = find_latest_checkpoint(directory, target_trials=target_trials)
-    completed = 0 if latest is None else _read_manifest(latest)["completed_trials"]
+    manifest = None if latest is None else _read_manifest(latest)
+    completed = 0 if manifest is None else manifest["completed_trials"]
     return RecoveryPlan(
         checkpoint=latest,
         completed_trials=completed,
         target_trials=target_trials,
         additional_trials=target_trials - completed,
+        config_fingerprint=(None if manifest is None else manifest["config_fingerprint"]),
     )
 
 
@@ -440,6 +462,7 @@ def load_checkpoint(directory, *, save_dir=None, num_trials=None):
                 raise ValueError("Checkpoint network dimensions do not match the environment.")
         agent._continuation_mode = True
         agent._checkpoint_series_id = manifest["series_id"]
+        agent._checkpoint_config_fingerprint = manifest["config_fingerprint"]
         output = config["output"]
         agent.save_dir = Path(output["save_dir"] if save_dir is None else save_dir)
         agent.model_dir = agent.save_dir / "models"

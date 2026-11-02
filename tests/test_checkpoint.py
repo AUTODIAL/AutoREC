@@ -128,9 +128,13 @@ def test_checkpoint_series_is_preserved_and_mixed_roots_are_rejected(
     agent, tmp_path, environment_factory
 ):
     root = tmp_path / "checkpoints"
+    agent._checkpoint_config_fingerprint = "a" * 64
     first = checkpoint.save_checkpoint(agent, root / "trial-00000000")
-    series_id = json.loads((first / "manifest.json").read_text())["series_id"]
+    first_manifest = json.loads((first / "manifest.json").read_text())
+    series_id = first_manifest["series_id"]
+    assert first_manifest["config_fingerprint"] == "a" * 64
     restored = checkpoint.load_checkpoint(first, save_dir=tmp_path / "restored")
+    assert restored._checkpoint_config_fingerprint == "a" * 64
     restored._training_state.completed_trials = 1
     second = checkpoint.save_checkpoint(restored, root / "trial-00000001")
 

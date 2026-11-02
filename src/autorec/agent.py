@@ -298,6 +298,7 @@ class DDQN_ECM:
         self._training_state: Optional[_TrainingState] = None
         self._continuation_mode = False
         self._checkpoint_series_id = None
+        self._checkpoint_config_fingerprint = None
 
         # Prioritized replay parameters
         self.prioritized_replay_alpha = prioritized_replay_alpha

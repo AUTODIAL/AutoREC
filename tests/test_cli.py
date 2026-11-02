@@ -5,6 +5,7 @@ processing EIS data. Train and evaluate execution belong in broader integration 
 """
 
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
@@ -57,6 +58,107 @@ def test_train_checkpoint_options_and_resume_without_reseeding(monkeypatch, resu
         seed.assert_called_once_with(42, deterministic_ops=True)
         builder.assert_called_once()
         loader.assert_not_called()
+
+
+def test_resume_latest_runs_only_remaining_cumulative_trials(monkeypatch):
+    agent = Mock()
+    seed = Mock()
+    builder = Mock(return_value=(None, None, None, None, agent))
+    loader = Mock(return_value=agent)
+    config = {"environment": {"seed": 7}, "agent": {"num_trials": 10}}
+    fingerprint = cli._recovery_config_fingerprint(config, seed=42, deterministic_ops=True)
+    monkeypatch.setattr(cli, "_configure_runtime", lambda args: None)
+    monkeypatch.setattr(cli, "_read_config_with_overrides", lambda *args: config)
+    monkeypatch.setattr("autorec.utils.set_global_seed", seed)
+    monkeypatch.setattr("autorec.factory.pipeline_builder", builder)
+    monkeypatch.setattr("autorec.agent.DDQN_ECM.from_checkpoint", loader)
+    monkeypatch.setattr("tensorflow.config.experimental.enable_op_determinism", lambda: None)
+
+    plans = [
+        SimpleNamespace(checkpoint=None, additional_trials=10, config_fingerprint=None),
+        SimpleNamespace(
+            checkpoint=Path("checkpoints/trial-00000004"),
+            additional_trials=6,
+            config_fingerprint=fingerprint,
+        ),
+        SimpleNamespace(
+            checkpoint=Path("checkpoints/trial-00000010"),
+            additional_trials=0,
+            config_fingerprint=fingerprint,
+        ),
+    ]
+    planner = Mock(side_effect=plans)
+    monkeypatch.setattr("autorec.checkpoint.plan_training_recovery", planner)
+    args = cli._build_parser().parse_args(
+        [
+            "train",
+            "--config",
+            "config.yaml",
+            "--checkpoint-dir",
+            "checkpoints",
+            "--checkpoint-every",
+            "2",
+            "--resume-latest",
+        ]
+    )
+
+    assert cli._run_train(args) == 0
+    assert agent._checkpoint_config_fingerprint == fingerprint
+    agent.train.assert_called_once_with(
+        additional_trials=10, checkpoint_dir=Path("checkpoints"), checkpoint_every=2
+    )
+    seed.assert_called_once_with(42, deterministic_ops=True)
+
+    agent.reset_mock()
+    assert cli._run_train(args) == 0
+    loader.assert_called_once_with(Path("checkpoints/trial-00000004"), save_dir=None)
+    agent.train.assert_called_once_with(
+        additional_trials=6, checkpoint_dir=Path("checkpoints"), checkpoint_every=2
+    )
+
+    agent.reset_mock()
+    assert cli._run_train(args) == 0
+    agent.train.assert_not_called()
+    assert planner.call_count == 3
+
+    planner.side_effect = None
+    planner.return_value = SimpleNamespace(
+        checkpoint=Path("checkpoints/trial-00000004"),
+        additional_trials=6,
+        config_fingerprint="different",
+    )
+    with pytest.raises(ValueError, match="different training configuration"):
+        cli._run_train(args)
+    agent.train.assert_not_called()
+
+
+def test_recovery_fingerprint_allows_target_and_output_changes_only():
+    base = {
+        "dataprep": {"path": "data.pkl"},
+        "environment": {"seed": 42},
+        "agent": {"num_trials": 100, "save_dir": "first", "gamma": 0.9},
+    }
+    changed_session = {
+        **base,
+        "agent": {**base["agent"], "num_trials": 200, "save_dir": "second"},
+    }
+    changed_training = {
+        **base,
+        "agent": {**base["agent"], "gamma": 0.8},
+    }
+
+    fingerprint = cli._recovery_config_fingerprint(base, seed=42, deterministic_ops=True)
+    assert (
+        cli._recovery_config_fingerprint(changed_session, seed=42, deterministic_ops=True)
+        == fingerprint
+    )
+    assert (
+        cli._recovery_config_fingerprint(changed_training, seed=42, deterministic_ops=True)
+        != fingerprint
+    )
+    assert (
+        cli._recovery_config_fingerprint(base, seed=43, deterministic_ops=True) != fingerprint
+    )
 
 
 def test_parse_indices_handles_spaces_and_empty_items():
