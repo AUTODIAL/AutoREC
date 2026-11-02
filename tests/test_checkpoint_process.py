@@ -48,6 +48,41 @@ def run_worker(
         return pickle.load(stream)
 
 
+def run_auto_worker(directory, *, target, save_every, interrupt_at=None, cache="clock"):
+    command = [
+        sys.executable,
+        str(Path(__file__).with_name("checkpoint_worker.py")),
+        str(directory),
+        "--schedule-trials",
+        str(target),
+        "--auto-target",
+        str(target),
+        "--save-every",
+        str(save_every),
+        "--cache",
+        cache,
+    ]
+    if interrupt_at is not None:
+        command += ["--interrupt-at", str(interrupt_at)]
+    environment = dict(
+        os.environ,
+        CUDA_VISIBLE_DEVICES="-1",
+        TF_NUM_INTRAOP_THREADS="1",
+        TF_NUM_INTEROP_THREADS="1",
+        OMP_NUM_THREADS="1",
+        OPENBLAS_NUM_THREADS="1",
+        MPLBACKEND="Agg",
+        PYTHONHASHSEED="0",
+    )
+    result = subprocess.run(
+        command, env=environment, capture_output=True, text=True, timeout=240
+    )
+    expected = 75 if interrupt_at is not None else 0
+    assert result.returncode == expected, result.stdout[-6000:] + result.stderr[-6000:]
+    with (directory / "result.pkl").open("rb") as stream:
+        return pickle.load(stream)
+
+
 def compare_sessions(tmp_path, *, horizon, counts, cache, saving_control=False):
     continuous = run_worker(
         tmp_path / "continuous", cache=cache, schedule_trials=horizon, count=horizon
@@ -84,6 +119,18 @@ def compare_sessions(tmp_path, *, horizon, counts, cache, saving_control=False):
 
 def test_fresh_process_continuation(tmp_path):
     compare_sessions(tmp_path, horizon=8, counts=[3, 5], cache="clock")
+
+
+def test_resume_latest_recovers_interrupted_process_exactly(tmp_path):
+    continuous = run_worker(tmp_path / "continuous", cache="clock", schedule_trials=8, count=8)
+    recovered_dir = tmp_path / "recovered"
+    interrupted = run_auto_worker(recovered_dir, target=8, save_every=3, interrupt_at=3)
+    assert (recovered_dir / "periodic" / "trial-00000003").is_dir()
+
+    resumed = run_auto_worker(recovered_dir, target=8, save_every=3)
+
+    assert continuous["state"] == resumed["state"]
+    assert continuous["trace"] == interrupted["trace"] + resumed["trace"]
 
 
 @pytest.mark.skipif(
