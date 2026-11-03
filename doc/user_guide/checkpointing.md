@@ -134,7 +134,8 @@ A complete checkpoint stores:
 - optimizer configuration, iterations, slots, and supported schedules;
 - the physical replay allocation, ordering, priorities, and insertion state;
 - cumulative counters, exploration state, histories, and statistics;
-- prepared training/evaluation environments and their active identity;
+- prepared training/evaluation environments, active spectrum views, and their identity;
+- registered progressive runtime configuration and progressive stage history;
 - cache entries, hit/miss counts, and LRU or Clock eviction metadata; and
 - supported Python, NumPy, TensorFlow, and layer-local random state.
 
@@ -158,6 +159,15 @@ checkpoints/trial-00000100/
 The loader validates the complete file list, sizes, hashes, format version,
 runtime and source fingerprint before restoration. It intentionally rejects
 best-effort loading when exact continuation cannot be supported.
+
+For enabled progressive runs, the selector, encoder, source, transition policy,
+active views, replay observations, and stage history are checkpoint-owned.
+Automatic recovery includes the entire `progressive_spectrum` YAML block in its
+configuration fingerprint. Changing the number of windows or any component
+setting therefore starts a new experiment rather than resuming an existing
+series. Checkpoint serialization supports the registered built-in progressive
+components; arbitrary custom component instances require a separately designed
+state contract.
 
 ## Exact-equivalence conditions
 

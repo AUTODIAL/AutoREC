@@ -52,6 +52,27 @@ values determine when a fit is accepted. Repeated fitted circuits can be cached
 with either the `lru` or `clock` policy to avoid repeating equivalent fitting
 work.
 
+## Progressive-spectrum execution
+
+An optional progressive runtime applies the same agent repeatedly to cumulative
+portions of one spectrum. A spectrum source resolves the physical arrays, a
+window selector chooses the source points available at each stage, a fixed-size
+encoder creates the neural-network observation, and a transition policy chooses
+the ECM state that starts the next stage.
+
+The encoded observation and physical fitting data have separate roles. An
+encoder may interpolate, pad, or downsample to preserve the network input size;
+the environment's parameter fitting and reward calculation use every original
+physical point in the current selection. Replay stores the exact encoded
+observation and spectrum-view identity associated with each transition, so
+later stages cannot reinterpret earlier transitions against a different view.
+
+The default pipeline has no progressive runtime and retains the original
+full-spectrum behavior. See the {doc}`configuration guide
+<../user_guide/configuration>` for opt-in YAML settings and the
+{doc}`progressive API reference <../api/progressive_spectrum>` for replaceable
+components.
+
 ## Training and evaluation lifecycle
 
 Training uses epsilon-greedy exploration, a main network, a target network, and
@@ -70,7 +91,9 @@ Retained training sessions keep replay, schedules, counters, histories,
 environments, and random state alive across calls. Complete checkpoints persist
 that state at completed-trial boundaries so a supported run can continue in a
 fresh process. `num_trials` describes the current session and
-`completed_trials` tracks cumulative progress. See the
+`completed_trials` tracks cumulative progress. Enabled progressive runs also
+persist their registered runtime components, active spectrum views, and stage
+history. See the
 {doc}`checkpoint guide <../user_guide/checkpointing>` for the exact supported
 state and reproducibility constraints.
 

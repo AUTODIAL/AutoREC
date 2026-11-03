@@ -46,6 +46,8 @@ Pipeline and component builders
 
 .. autoapifunction:: autorec.factory.agent.agent_builder
 
+.. autoapifunction:: autorec.factory.progressive_spectrum.progressive_spectrum_builder
+
 Model helpers
 -------------
 

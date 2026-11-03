@@ -161,16 +161,19 @@ checkpoints/trial-00000100/
 The payloads use existing component APIs. Neural state contains trainable and nontrainable
 variables, target weights independent of online weights, layer-local random counters,
 optimizer slots/iteration, mutable learning rate and supported schedule configuration.
-Replay preserves capacity, size, physical order, insertion position and priorities. Cache
-state preserves values, counters, LRU order or Clock ring/reference bits/hand. Histories
-include loss, success and reward statistics, terminal history as currently maintained by
-training, and epsilon/beta history. The existing terminal-history reporting defect is not
-changed by checkpointing.
+Replay preserves capacity, size, physical order, insertion position and priorities. For
+progressive runs, each replay transition also owns its encoded observation and spectrum-view
+identity. Cache state preserves values, counters, LRU order or Clock ring/reference bits/hand.
+Histories include loss, success and reward statistics, terminal history as currently
+maintained by training, epsilon/beta history, and progressive stage history. The existing
+terminal-history reporting defect is not changed by checkpointing.
 
 Prepared DataFrames include nested numerical arrays and metadata. Shared training/evaluation
-environment identity, active environment choice, and shared prepared-dataset references
-are retained. Environment reconstruction does not parse circuits, sample, reset or seed.
-Neural construction and validation finish before restoring random streams.
+environment identity, active environment choice, active spectrum views, and shared
+prepared-dataset references are retained. Registered progressive selector, encoder, source,
+and transition-policy state is restored against the checkpoint's data preparation object.
+Environment reconstruction does not parse circuits, sample, reset or seed. Neural
+construction and validation finish before restoring random streams.
 
 Python and NumPy global streams include their cached Gaussian samples. An already existing
 TensorFlow `Generator` is captured without creating one during saving. Keras layer-local
@@ -197,7 +200,7 @@ a new agent; it never partially overwrites an existing one. On failure, the supp
 caller RNG streams are restored. Output directories can have been created before a late
 filesystem/restoration error.
 
-Format version 6 requires identical AutoREC Python source and recorded Python/numerical
+Format version 7 requires identical AutoREC Python source and recorded Python/numerical
 library versions, OS/platform, threading settings, TensorFlow determinism and backend
 settings. This is deliberately conservative: there is no migration or best-effort loading.
 Source edits, including implementation updates between stages, invalidate old checkpoints.
@@ -205,6 +208,10 @@ Output relocation and session-length changes are supported; changing architectur
 optimizer, data, or schedule hyperparameters is not a resume operation. Runtime matching
 does not prove identical
 hardware or native-library builds: use the same hardware and software environment as well.
+
+Progressive checkpoints support the built-in component types represented by AutoREC's
+runtime state schema. Arbitrary custom selectors, encoders, normalizers, downsamplers,
+sources, or transition policies are rejected rather than serialized incompletely.
 
 Checkpoint support currently requires CPU execution and an ordinary `DDQN_ECM` agent.
 The standard `EIS_ECM_Env` and explicitly declared subclasses are supported. A subclass

@@ -16,6 +16,7 @@ for top-level scripts below assume the current directory is `example/`.
 | [`bounded_training.py`](bounded_training.py) | Continue cumulative training for a fixed number of sessions in one Python process | Controlled by the selected configuration and CLI arguments |
 | [`checkpoint_training.py`](checkpoint_training.py) | Save or resume complete training checkpoints across Python processes | One configurable session per invocation |
 | [`checkpoint/`](checkpoint/) | Validate continuous versus fresh-process checkpoint-resumed equivalence | Full example compares 1,000 continuous trials with ten 100-trial sessions |
+| [`progressive_checkpoint/`](progressive_checkpoint/) | Train and evaluate cumulative spectrum windows with complete checkpoint resume | Two-trial workflow configuration; real fitting still required |
 | [`hyperparameter_tuning/`](hyperparameter_tuning/) | Run checkpointed multi-fidelity Optuna tuning on Slurm | Potentially expensive HPC workflow |
 
 ## Direct Python construction
@@ -97,6 +98,13 @@ python checkpoint_training.py \
 
 Checkpoint continuation requires the deterministic CPU/runtime conditions documented in
 [`docs/checkpointing.md`](../docs/checkpointing.md).
+
+## Progressive checkpoint workflow
+
+[`progressive_checkpoint/`](progressive_checkpoint/) combines progressive-spectrum training
+and evaluation with complete checkpoint save and resume. Its paired YAML files show both an
+enabled four-window workflow and the original full-spectrum path with the optional section
+omitted. See its README for exact commands and the fitting-versus-observation boundary.
 
 ## Checkpoint equivalence experiment
 

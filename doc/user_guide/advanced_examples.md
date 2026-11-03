@@ -25,6 +25,19 @@ these examples from their own directory in the active environment, and review
 the deterministic CPU requirements in the
 {doc}`checkpoint guide <checkpointing>` first.
 
+## Progressive-spectrum training with checkpoints
+
+`example/progressive_checkpoint/` provides paired progressive and ordinary
+full-spectrum YAML configurations plus small wrappers around the public CLI. It
+demonstrates progressive training, automatic and explicit checkpoint resume,
+progressive evaluation, and recovery of the original behavior by omitting the
+optional progressive section.
+
+The example uses a small trial count for workflow inspection, but it performs
+real fitting and is not a scientific benchmark. Follow its
+[`README.md`](https://github.com/AUTODIAL/AutoREC/blob/main/example/progressive_checkpoint/README.md)
+for exact commands and output locations.
+
 ## Hyperparameter tuning on Slurm
 
 [`example/hyperparameter_tuning/`](https://github.com/AUTODIAL/AutoREC/tree/main/example/hyperparameter_tuning)

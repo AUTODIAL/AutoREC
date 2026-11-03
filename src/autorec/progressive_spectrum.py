@@ -365,7 +365,8 @@ class SentinelSafeMinMaxNormalizer:
 
     Negative features are constructed from the literal negative physical quantity before
     normalization. Constant features map to zero. This keeps ``-1`` available exclusively for
-    padding without changing the legacy :meth:`EISDataPrep.flatten_EIS` implementation.
+    padding without changing the legacy
+    :meth:`~autorec.data_preparation.EISDataPrep.flatten_EIS` implementation.
     """
 
     def normalize(
@@ -380,7 +381,8 @@ class SentinelSafeMinMaxNormalizer:
         impedance : numpy.ndarray
             Complete one-dimensional physical impedance selection for the current stage.
         eis_features : tuple of str
-            Ordered feature names supported by :meth:`EISDataPrep.flatten_EIS`.
+            Ordered feature names supported by
+            :meth:`~autorec.data_preparation.EISDataPrep.flatten_EIS`.
 
         Returns
         -------
@@ -450,7 +452,8 @@ class LegacyEISFeatureNormalizer:
         impedance : numpy.ndarray
             One-dimensional physical impedance selection for the current stage.
         eis_features : tuple of str
-            Ordered feature names passed unchanged to :meth:`EISDataPrep.flatten_EIS`.
+            Ordered feature names passed unchanged to
+            :meth:`~autorec.data_preparation.EISDataPrep.flatten_EIS`.
 
         Returns
         -------
