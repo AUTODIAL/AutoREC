@@ -84,10 +84,11 @@ also saves at cumulative multiples of N. Automatic names use eight digits, for e
 Without checkpoint arguments, `agent.train()` and existing model exports retain their
 previous behavior. `save_model()` and `load_model()` remain model-only APIs and cannot
 resume complete training. Every non-empty retained session exports the current cumulative
-model, histories and plots. See [the runnable open-ended example](../example/checkpoint/).
-That example also compares continuous and resumed checkpoints exactly. Its faster checkpoint
-comparison and slower fresh-process evaluation comparison print per-category results, finish
-with an overall verdict, and export machine-readable JSON reports.
+model, histories and plots. See [the checkpoint comparison example](../example/checkpoint/).
+It compares uninterrupted training with bounded same-process sessions, complete-checkpoint
+fresh-process sessions, and deliberately incomplete model-only restarts. The exact state and
+optional fresh-process evaluation tools print per-category results, finish with an overall
+verdict, and export machine-readable JSON reports.
 
 ## CLI workflow
 
@@ -142,8 +143,6 @@ Automatic recovery records a checkpoint-series ID and a fingerprint of the confi
 training configuration and initial seed policy. It permits changes to `agent.num_trials`
 (to extend a cumulative target) and `agent.save_dir`, but rejects other configuration
 changes. It scans immutable `trial-NNNNNNNN` directories; it does not maintain a mutable
-`latest` pointer. The same option is available through
-`example/checkpoint/complete_checkpoint/cli.py`.
 Extending a target does not recompute schedules already owned by the checkpoint; configure
 absolute cumulative schedule values when later extension is possible.
 

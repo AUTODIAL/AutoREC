@@ -23,7 +23,7 @@ training run with retained same-process sessions and complete-checkpoint
 fresh-process sessions. A model-only restart scenario demonstrates why restoring
 a `.keras` file is not equivalent to restoring training state. The workflow also
 provides exact persisted-state and greedy-evaluation comparison reports. Run
-these examples from their own directory in the active environment, and review
+these examples from the repository root in the active environment, and review
 the deterministic CPU requirements in the
 {doc}`checkpoint guide <checkpointing>` first.
 

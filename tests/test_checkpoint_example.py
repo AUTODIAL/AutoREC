@@ -1,4 +1,9 @@
-"""Tests for the open-ended checkpoint example configuration workflow."""
+"""Fast contracts for checkpoint scenario configuration, orchestration, and reports.
+
+The full example performs real 1,000-trial training runs. These tests instead own its pure
+configuration, command construction, session accounting, and report-interpretation behavior.
+Fresh-process checkpoint equivalence itself is covered by ``test_checkpoint_process.py``.
+"""
 
 from io import StringIO
 from pathlib import Path

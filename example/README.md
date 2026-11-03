@@ -13,9 +13,7 @@ for top-level scripts below assume the current directory is `example/`.
 |---|---|---|
 | [`main.py`](main.py) | Construct the data preparation, environment, and agent directly in Python | Quick mode trains for 50 trials |
 | [`main_factory.py`](main_factory.py) | Build the same pipeline from YAML configuration | Defaults to the 50-trial demo configuration |
-| [`checkpoint/bounded/`](checkpoint/bounded/) | Compare retained same-process sessions with uninterrupted and checkpoint-resumed training | Ten 100-trial sessions in the full comparison |
-| [`checkpoint/complete_checkpoint/cli.py`](checkpoint/complete_checkpoint/cli.py) | Save or resume complete training checkpoints across Python processes | One configurable session per invocation |
-| [`checkpoint/`](checkpoint/) | Validate continuous versus fresh-process checkpoint-resumed equivalence | Full example compares 1,000 continuous trials with ten 100-trial sessions |
+| [`checkpoint/`](checkpoint/) | Compare continuous, bounded, complete-checkpoint, and model-only continuation | Four controlled 1,000-trial scenarios; intentionally expensive |
 | [`hyperparameter_tuning/`](hyperparameter_tuning/) | Run checkpointed multi-fidelity Optuna tuning on Slurm | Potentially expensive HPC workflow |
 
 ## Direct Python construction
@@ -55,46 +53,6 @@ python main_factory.py \
 `--run-mode` controls the evaluation sample size; training length comes from
 `agent.num_trials` in the selected YAML file. The standard `pipeline_config.yaml` is the
 long-training configuration and currently specifies 10,000 trials.
-
-## Bounded continuation in one process
-
-[`checkpoint/bounded/`](checkpoint/bounded/) retains replay, histories, counters, schedules,
-and neural state while running multiple sessions in one interpreter. It writes one complete
-snapshot only after the last session so the final in-memory state can be compared; it does not
-use checkpoints to continue between sessions.
-
-```bash
-python -m checkpoint.bounded.run --sessions 10
-```
-
-This is useful for testing cumulative continuation semantics without checkpoint I/O.
-
-## General checkpoint training
-
-[`checkpoint/complete_checkpoint/cli.py`](checkpoint/complete_checkpoint/cli.py) is a compact interface for one
-checkpointed training session. To make one configured cumulative target automatically
-recoverable after interruption, rerun this command as needed:
-
-```bash
-python checkpoint/complete_checkpoint/cli.py \
-  --config ../configs_yaml/examples/demo_pipeline_config.yaml \
-  --checkpoint-dir checkpoint_outputs \
-  --checkpoint-every 10 \
-  --resume-latest
-```
-
-A missing checkpoint starts fresh, a partial checkpoint runs only the remaining trials, and
-an already reached target is a no-op. The explicit manual equivalent remains available:
-
-```bash
-python checkpoint/complete_checkpoint/cli.py \
-  --resume checkpoint_outputs/trial-00000050 \
-  --additional-trials 50 \
-  --checkpoint-dir checkpoint_outputs
-```
-
-Checkpoint continuation requires the deterministic CPU/runtime conditions documented in
-[`docs/checkpointing.md`](../docs/checkpointing.md).
 
 ## Checkpoint equivalence experiment
 

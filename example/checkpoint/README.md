@@ -4,13 +4,13 @@ This directory contains four controlled scenarios:
 
 - `continuous/`: one uninterrupted 1,000-trial reference process;
 - `bounded/`: ten retained 100-trial sessions in one process;
-- `complete_checkpoint/`: ten fresh 100-trial processes that restore complete checkpoints.
+- `complete_checkpoint/`: ten fresh 100-trial processes that restore complete checkpoints;
 - `model_only_restart/`: ten fresh processes that carry only the preceding online model.
 
 Shared session, runtime, evaluation, and comparison code remains at this directory level or
 under `comparison/`. Run commands from the repository root with the AutoREC environment active.
 
-Both scenarios use the same absolute cumulative schedules:
+All scenarios use the same absolute cumulative schedules:
 
 ```yaml
 start_jump: 400
@@ -48,10 +48,10 @@ python -m example.checkpoint.complete_checkpoint.run \
 The configuration may change only the next session length, output paths, and checkpoint paths.
 Model, optimizer, environment, replay, and schedule settings remain checkpoint-owned.
 
-The smaller public CLI wrapper is also available when a comparison configuration is not needed:
+For ordinary checkpointed training outside this comparison, use the public CLI directly:
 
 ```bash
-python -m example.checkpoint.complete_checkpoint.cli \
+autorec train \
   --config configs_yaml/examples/demo_pipeline_config.yaml \
   --checkpoint-dir checkpoint_outputs \
   --checkpoint-every 10 \

@@ -119,13 +119,6 @@ are mutually exclusive. `--output-dir` may relocate
 future outputs, but architecture, optimizer, data, and training schedules are
 checkpoint-owned and cannot be changed during an exact resume.
 
-The same automatic option is exposed by the Python entry script:
-
-```bash
-python -m example.checkpoint.complete_checkpoint.cli --config config.yaml \
-  --checkpoint-dir checkpoints --checkpoint-every 10 --resume-latest
-```
-
 ## What is preserved
 
 A complete checkpoint stores:
@@ -179,24 +172,26 @@ evidence, read `docs/checkpointing.md` in the repository. The
 fresh-process sessions and a bounded same-process control, and exports per-category JSON
 comparison reports.
 
-From the repository root, the complete validation workflow is:
+From the repository root, run all controlled scenarios and the state comparison with:
 
 ```bash
-python -m example.checkpoint.continuous.run
-python -m example.checkpoint.complete_checkpoint.run --sessions 10
-python -m example.checkpoint.comparison.compare_checkpoints
-python -m example.checkpoint.comparison.compare_results
+python -m example.checkpoint.run_comparisons
 ```
+
+Add `--with-evaluation` to run fresh-process greedy evaluation for every final scenario.
+The bounded and complete-checkpoint results are required to match the uninterrupted reference
+exactly. The model-only scenario instead verifies named losses of non-model training state.
 
 `compare_checkpoints.py` is the faster persisted-state comparison. It checks
 counters, histories, schedules, random streams, environments, caches, online
 and target networks, optimizer state, and the replay buffer. Its default report
 is `outputs/comparison_reports/checkpoint_comparison.json`.
 
-`compare_results.py` includes those checks and additionally restores both
+`compare_results.py` includes those checks for one reference/candidate pair and additionally restores both
 agents in fresh processes, evaluates identical training rows using greedy
 actions, compares the resulting ECM records exactly, and verifies that
 evaluation did not modify either checkpoint. Its default report is
 `outputs/evaluation_comparison/comparison_report.json`. Both commands print
 named per-check verdicts, finish with a prominent overall verdict, and return a
-nonzero status when comparison fails.
+nonzero status when an expected comparison contract fails. `compare_scenarios.py` produces
+the combined report for all continuation strategies.
