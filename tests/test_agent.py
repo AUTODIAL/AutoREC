@@ -9,6 +9,8 @@ import pandas as pd
 import pytest
 
 from autorec import agent as agent_module
+from autorec.data_preparation import EISDataPrep
+from autorec.progressive_spectrum import StageTransitionDecision
 
 
 class DummyEnv:
@@ -47,6 +49,31 @@ class DummyModel:
         for line in lines:
             print_fn(line)
         return None
+
+
+class ProgressiveEvaluationEnv:
+    """Small prepared dataset container for progressive coordinator tests."""
+
+    EIS_INPUT_SIZE = 12
+
+    def __init__(self):
+        frequency = np.geomspace(1e4, 1e-1, 6)
+        log_frequency = np.log10(frequency)
+        impedance = (10 + log_frequency**2) + 1j * (5 - log_frequency)
+        dataprep = object.__new__(EISDataPrep)
+        dataprep.frequency_npoints = 6
+        dataprep.eis_features = ["ReZ", "ImZ"]
+        self.dataprep = dataprep
+        self.dataset = pd.DataFrame(
+            {
+                "freq": [frequency],
+                "Z_true": [impedance],
+                "flatten_Z": [dataprep.flatten_EIS(impedance, dataprep.eis_features)],
+                "true_circuit": ["R0"],
+            }
+        )
+        self.START_STATE = None
+        self.current_spectrum_view_id = None
 
 
 def dense_signature(model):
@@ -392,6 +419,110 @@ def test_agent_switches_between_training_and_eval_envs(light_agent, tmp_path):
     agent.switch_to_training()
     assert agent.get_active_env is training_env
     assert agent.get_current_env_type() == "training"
+
+
+def test_progressive_evaluation_carries_best_state_and_runs_every_stage(monkeypatch):
+    training_env = ProgressiveEvaluationEnv()
+    eval_env = ProgressiveEvaluationEnv()
+    agent = object.__new__(agent_module.DDQN_ECM)
+    agent.training_env = training_env
+    agent.eval_env = eval_env
+    agent._active_env = training_env
+    agent.action_cap = 3
+    calls = []
+    best_states = ["+PR", "+LR", "+PP"]
+
+    def fake_generate_ecm(**kwargs):
+        stage_index = len(calls)
+        calls.append(kwargs)
+        active_env = agent._active_env
+        active_env.START_STATE = kwargs["initial_state"] or "+RR"
+        active_env.current_spectrum_view_id = f"view-{stage_index}"
+        return {
+            "ground_truth_circuit": "R0",
+            "found_solution": stage_index == 0,
+            "best_reward": 3.0 - stage_index,
+            "best_state": best_states[stage_index],
+        }
+
+    monkeypatch.setattr(agent, "generate_ECM", fake_generate_ecm)
+
+    result = agent.generate_progressive_ECM(
+        EIS_i=0,
+        num_windows=3,
+        max_actions=2,
+        verbose=False,
+        use_eval_env=True,
+    )
+
+    assert agent.get_active_env is eval_env
+    assert [call["initial_state"] for call in calls] == [None, "+PR", "+LR"]
+    assert [stage["selected_point_count"] for stage in result["stage_results"]] == [
+        2,
+        4,
+        6,
+    ]
+    assert [stage["continued_to_next_stage"] for stage in result["stage_results"]] == [
+        True,
+        True,
+        False,
+    ]
+    assert result["completed_all_stages"] is True
+    assert result["final_result"]["best_state"] == "+PP"
+
+
+def test_progressive_evaluation_policy_can_reroute_and_stop(monkeypatch):
+    env = ProgressiveEvaluationEnv()
+    agent = object.__new__(agent_module.DDQN_ECM)
+    agent.training_env = env
+    agent.eval_env = env
+    agent._active_env = env
+    agent.action_cap = 3
+    calls = []
+
+    def fake_generate_ecm(**kwargs):
+        stage_index = len(calls)
+        calls.append(kwargs)
+        env.START_STATE = kwargs["initial_state"] or "+RR"
+        env.current_spectrum_view_id = f"view-{stage_index}"
+        return {
+            "ground_truth_circuit": "R0",
+            "found_solution": False,
+            "best_reward": stage_index + 1.0,
+            "best_state": ["+PR", "+LR"][stage_index],
+        }
+
+    class RerouteThenStopPolicy:
+        def decide(self, outcome):
+            if outcome.stage_index == 0:
+                return StageTransitionDecision("+PP", True)
+            return StageTransitionDecision(None, False)
+
+    monkeypatch.setattr(agent, "generate_ECM", fake_generate_ecm)
+
+    result = agent.generate_progressive_ECM(
+        EIS_i=0,
+        num_windows=3,
+        verbose=False,
+        transition_policy=RerouteThenStopPolicy(),
+    )
+
+    assert [call["initial_state"] for call in calls] == [None, "+PP"]
+    assert len(result["stage_results"]) == 2
+    assert result["completed_all_stages"] is False
+    assert result["final_result"]["best_state"] == "+LR"
+
+
+def test_progressive_evaluation_requires_dataprep_for_default_encoder():
+    env = ProgressiveEvaluationEnv()
+    env.dataprep = None
+    agent = object.__new__(agent_module.DDQN_ECM)
+    agent.training_env = env
+    agent.eval_env = env
+    agent._active_env = env
+
+    with pytest.raises(ValueError, match="must retain a loaded EISDataPrep"):
+        agent.generate_progressive_ECM(EIS_i=0, num_windows=2, verbose=False)
 
 
 def test_agent_can_replace_envs(light_agent, tmp_path):

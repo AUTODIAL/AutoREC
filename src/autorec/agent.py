@@ -20,6 +20,20 @@ from autorec.utils import (
 from autorec.factory import create_model, get_model_config
 from autorec.factory import create_optimizer, get_optimizer_config
 from autorec.optimized_data_structures.circular_buffer import CircularBuffer
+from autorec.progressive_spectrum import (
+    CarryBestStatePolicy,
+    EqualPointWindowSelector,
+    InterpolatingSpectrumEncoder,
+    PREPARED_SPECTRUM_SOURCE,
+    ProgressiveStageOutcome,
+    SpectrumObservationEncoder,
+    SpectrumSource,
+    SpectrumView,
+    SpectrumWindowSelector,
+    StageTransitionPolicy,
+    build_spectrum_view,
+    decide_stage_transition,
+)
 
 
 default_hidden_layers = [
@@ -1637,6 +1651,8 @@ class DDQN_ECM:
         get_fit_plots: bool = True,
         gif_generation: bool = True,
         use_eval_env: bool = True,  # ADD THIS
+        initial_state: Optional[str] = None,
+        spectrum_view: Optional[SpectrumView] = None,
     ) -> Dict[str, Any]:
         """
         Evaluate the trained agent on a single EIS measurement.
@@ -1665,6 +1681,11 @@ class DDQN_ECM:
         use_eval_env : bool
             Whether to run on the evaluation environment instead
             of the training environment
+        initial_state : str, optional
+            Explicit full chromosome used to initialize this evaluation episode.
+        spectrum_view : SpectrumView, optional
+            Progressive view whose raw selection is used for fitting and whose fixed-size
+            observation is used as neural-network input.
 
         Returns
         -------
@@ -1684,15 +1705,26 @@ class DDQN_ECM:
             raise ValueError("Must provide either EIS_i or flatten_Z")
         if EIS_i is not None and flatten_Z is not None:
             raise ValueError("Cannot provide both EIS_i and flatten_Z - choose one")
+        if flatten_Z is not None and (initial_state is not None or spectrum_view is not None):
+            raise ValueError(
+                "initial_state and spectrum_view are supported only with dataset-index "
+                "evaluation"
+            )
 
         if max_actions is None:
             max_actions = self.action_cap
 
+        reset_options = {}
+        if initial_state is not None:
+            reset_options["initial_state"] = initial_state
+        if spectrum_view is not None:
+            reset_options["spectrum_view"] = spectrum_view
+
         # If using dataset index, fetch the data
         if EIS_i is not None:
-            EIS_i, _ = self._active_env.reset(EIS_i)
+            EIS_i, _ = self._active_env.reset(EIS_i, **reset_options)
         else:
-            EIS_i, _ = self._active_env.reset()  # Reset to valid state
+            EIS_i, _ = self._active_env.reset(**reset_options)  # Reset to valid state
 
         Z_true = self._active_env.Z
         flatten_Z = self._active_env.Z_norm_flatten
@@ -1854,6 +1886,196 @@ class DDQN_ECM:
             )
 
         return eval_result
+
+    def generate_progressive_ECM(
+        self,
+        EIS_i: int,
+        num_windows: int,
+        max_actions: Optional[int] = None,
+        verbose: bool = True,
+        use_eval_env: bool = True,
+        selector: Optional[SpectrumWindowSelector] = None,
+        encoder: Optional[SpectrumObservationEncoder] = None,
+        transition_policy: Optional[StageTransitionPolicy] = None,
+        spectrum_source: Optional[SpectrumSource] = None,
+    ) -> Dict[str, Any]:
+        """Generate an ECM through cumulative partial-spectrum evaluation stages.
+
+        Each stage fits all raw points selected from the physical spectrum while the policy
+        receives the encoder's fixed-size observation. The default transition policy carries
+        the previous stage's best chromosome and evaluates every configured stage.
+
+        Parameters
+        ----------
+        EIS_i : int
+            Zero-based row position used for every stage.
+        num_windows : int
+            Number of cumulative high-to-low-frequency stages.
+        max_actions : int, optional
+            Maximum actions per stage. Defaults to ``self.action_cap``.
+        verbose : bool, default=True
+            Print stage and evaluation progress.
+        use_eval_env : bool, default=True
+            Use the evaluation rather than training environment.
+        selector : SpectrumWindowSelector, optional
+            Window selection strategy. Defaults to equal-point cumulative windows.
+        encoder : SpectrumObservationEncoder, optional
+            Fixed-size observation encoder. Defaults to interpolation configured by the
+            active environment's retained ``EISDataPrep`` instance.
+        transition_policy : StageTransitionPolicy, optional
+            Strategy selecting the next starting chromosome and whether to continue.
+        spectrum_source : SpectrumSource, optional
+            Dataset source for progressive selection and fitting. Defaults to prepared
+            ``freq`` and ``Z_true`` columns.
+
+        Returns
+        -------
+        dict
+            Per-stage results, final result, and whether all stages completed.
+        """
+        if isinstance(EIS_i, bool) or not isinstance(EIS_i, int):
+            raise TypeError("EIS_i must be an integer row position")
+        if isinstance(num_windows, bool) or not isinstance(num_windows, int):
+            raise TypeError("num_windows must be an integer")
+        if num_windows <= 0:
+            raise ValueError("num_windows must be greater than zero")
+        if max_actions is not None and (
+            isinstance(max_actions, bool)
+            or not isinstance(max_actions, int)
+            or max_actions <= 0
+        ):
+            raise ValueError("max_actions must be a positive integer")
+
+        if use_eval_env:
+            self.switch_to_eval()
+        else:
+            self.switch_to_training()
+        active_env = self._active_env
+        if not 0 <= EIS_i < len(active_env.dataset):
+            raise ValueError(
+                f"EIS_i must be between 0 and {len(active_env.dataset) - 1}, got {EIS_i}"
+            )
+
+        if selector is None:
+            selector = EqualPointWindowSelector(num_windows=num_windows)
+        elif selector.num_windows != num_windows:
+            raise ValueError(
+                "selector.num_windows must match num_windows: "
+                f"{selector.num_windows} != {num_windows}"
+            )
+        if encoder is None:
+            if active_env.dataprep is None:
+                raise ValueError(
+                    "the active environment must retain a loaded EISDataPrep instance when "
+                    "no encoder is provided"
+                )
+            encoder = InterpolatingSpectrumEncoder(active_env.dataprep)
+        if encoder.observation_size != active_env.EIS_INPUT_SIZE:
+            raise ValueError(
+                "encoder observation size must match the active environment input size: "
+                f"{encoder.observation_size} != {active_env.EIS_INPUT_SIZE}"
+            )
+        if transition_policy is None:
+            transition_policy = CarryBestStatePolicy()
+        if spectrum_source is None:
+            spectrum_source = PREPARED_SPECTRUM_SOURCE
+
+        row = active_env.dataset.iloc[EIS_i]
+        source_frequency, source_impedance = spectrum_source.read(row)
+        carried_state = None
+        stage_results = []
+
+        for stage_index in range(num_windows):
+            spectrum_view = build_spectrum_view(
+                source_frequency,
+                source_impedance,
+                stage_index,
+                selector=selector,
+                encoder=encoder,
+                spectrum_source=spectrum_source,
+            )
+            if verbose:
+                included = ", ".join(
+                    str(index) for index in spectrum_view.selection.included_window_indices
+                )
+                print(f"\nProgressive stage {stage_index}: windows {included}")
+
+            evaluation_result = self.generate_ECM(
+                EIS_i=EIS_i,
+                max_actions=max_actions,
+                verbose=verbose,
+                get_fit_plots=False,
+                gif_generation=False,
+                use_eval_env=use_eval_env,
+                initial_state=carried_state,
+                spectrum_view=spectrum_view,
+            )
+            starting_state = active_env.START_STATE
+            best_state = evaluation_result["best_state"]
+            if best_state is None:
+                raise ValueError(
+                    f"progressive stage {stage_index} did not return a best chromosome"
+                )
+
+            has_next_stage = stage_index + 1 < num_windows
+            next_state = None
+            continue_to_next_stage = False
+            if has_next_stage:
+                outcome = ProgressiveStageOutcome(
+                    stage_index=stage_index,
+                    num_stages=num_windows,
+                    initial_state=starting_state,
+                    best_state=best_state,
+                    best_reward=evaluation_result["best_reward"],
+                    found_solution=bool(evaluation_result["found_solution"]),
+                    metadata={
+                        "mode": "evaluation",
+                        "EIS_i": EIS_i,
+                        "spectrum_view": spectrum_view,
+                        "included_window_indices": (
+                            spectrum_view.selection.included_window_indices
+                        ),
+                        "evaluation_result": evaluation_result,
+                    },
+                )
+                decision = decide_stage_transition(transition_policy, outcome)
+                next_state = decision.next_state
+                continue_to_next_stage = decision.continue_to_next_stage
+
+            stage_results.append(
+                {
+                    "stage_index": stage_index,
+                    "included_window_indices": (
+                        spectrum_view.selection.included_window_indices
+                    ),
+                    "selected_point_count": len(spectrum_view.selection.frequency),
+                    "selected_frequency_bounds": (
+                        float(np.min(spectrum_view.selection.frequency)),
+                        float(np.max(spectrum_view.selection.frequency)),
+                    ),
+                    "initial_state": starting_state,
+                    "spectrum_view_id": active_env.current_spectrum_view_id,
+                    "spectrum_view": spectrum_view,
+                    "evaluation_result": evaluation_result,
+                    "next_state": next_state,
+                    "continued_to_next_stage": continue_to_next_stage,
+                }
+            )
+            if has_next_stage and not continue_to_next_stage:
+                break
+            if has_next_stage:
+                carried_state = next_state
+
+        final_result = stage_results[-1]["evaluation_result"]
+        return {
+            "EIS_i": EIS_i,
+            "environment_type": self.get_current_env_type(),
+            "ground_truth_circuit": final_result["ground_truth_circuit"],
+            "num_windows": num_windows,
+            "completed_all_stages": len(stage_results) == num_windows,
+            "stage_results": stage_results,
+            "final_result": final_result,
+        }
 
     def eval_batch_eis(
         self,
