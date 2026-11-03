@@ -1,4 +1,4 @@
-"""Compare the final continuous and sequential checkpoints using exact equality."""
+"""Compare a reference and candidate checkpoint using exact equality."""
 
 from __future__ import annotations
 
@@ -140,8 +140,8 @@ def _finalize_report(comparison, first, second, checks):
     return {
         "report_version": 1,
         "comparison": comparison,
-        "continuous_checkpoint": str(first),
-        "sequential_checkpoint": str(second),
+        "reference_checkpoint": str(first),
+        "candidate_checkpoint": str(second),
         "overall_passed": bool(checks) and all(check["passed"] for check in checks),
         "checks": checks,
     }
@@ -412,12 +412,12 @@ def main():
     checkpoint_directory = directory.parent
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--continuous",
+        "--reference",
         type=Path,
         default=checkpoint_directory / "outputs/continuous/checkpoints/trial-00001000",
     )
     parser.add_argument(
-        "--sequential",
+        "--candidate",
         type=Path,
         default=checkpoint_directory
         / "outputs/complete_checkpoint/checkpoints/trial-00001000",
@@ -430,7 +430,7 @@ def main():
     )
     args = parser.parse_args()
     report_path = args.report.resolve()
-    report = checkpoint_report(args.continuous.resolve(), args.sequential.resolve())
+    report = checkpoint_report(args.reference.resolve(), args.candidate.resolve())
     _write_report(report, report_path)
     _print_detailed_report(report)
     if not report["overall_passed"]:
@@ -450,7 +450,7 @@ def main():
         True,
         "complete persisted checkpoint state",
         (
-            "Continuous and sequential checkpoints are exactly identical.",
+            "Reference and candidate checkpoints are exactly identical.",
             "Output paths and per-session num_trials were intentionally excluded.",
             f"JSON report: {report_path}",
         ),

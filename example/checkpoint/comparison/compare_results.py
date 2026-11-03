@@ -71,12 +71,12 @@ def main():
     checkpoint_directory = directory.parent
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--continuous",
+        "--reference",
         type=Path,
         default=checkpoint_directory / "outputs/continuous/checkpoints/trial-00001000",
     )
     parser.add_argument(
-        "--sequential",
+        "--candidate",
         type=Path,
         default=checkpoint_directory
         / "outputs/complete_checkpoint/checkpoints/trial-00001000",
@@ -102,8 +102,8 @@ def main():
     if args.max_actions is not None and args.max_actions < 1:
         parser.error("--max-actions must be positive")
 
-    continuous = args.continuous.resolve()
-    sequential = args.sequential.resolve()
+    reference = args.reference.resolve()
+    candidate = args.candidate.resolve()
     output_dir = args.output_dir.resolve()
     report_path = (
         args.report.resolve()
@@ -111,15 +111,15 @@ def main():
         else output_dir / "comparison_report.json"
     )
     print("\n[1/2] Comparing complete persisted checkpoint state...", flush=True)
-    persisted = checkpoint_report(continuous, sequential)
+    persisted = checkpoint_report(reference, candidate)
     checks = [
         {**check, "name": f"Checkpoint / {check['name']}"} for check in persisted["checks"]
     ]
     if not persisted["overall_passed"]:
         report = _finalize_report(
             "checkpoint state and fresh-process evaluation results",
-            continuous,
-            sequential,
+            reference,
+            candidate,
             checks,
         )
         _fail_with_report(
@@ -129,15 +129,15 @@ def main():
         )
     print("[1/2] PASS: checkpoint state is exactly identical.", flush=True)
     checkpoint_digests = {
-        continuous: _checkpoint_digest(continuous),
-        sequential: _checkpoint_digest(sequential),
+        reference: _checkpoint_digest(reference),
+        candidate: _checkpoint_digest(candidate),
     }
 
     environment = deterministic_subprocess_environment()
     print("\n[2/2] Evaluating identical training rows in fresh processes...", flush=True)
     try:
-        first = _evaluate(continuous, output_dir / "continuous", args, environment)
-        second = _evaluate(sequential, output_dir / "complete_checkpoint", args, environment)
+        first = _evaluate(reference, output_dir / "reference", args, environment)
+        second = _evaluate(candidate, output_dir / "candidate", args, environment)
     except Exception as error:
         traceback.print_exc()
         checks.append(
@@ -149,15 +149,15 @@ def main():
         )
         report = _finalize_report(
             "checkpoint state and fresh-process evaluation results",
-            continuous,
-            sequential,
+            reference,
+            candidate,
             checks,
         )
         _fail_with_report(report, report_path, "Fresh-process evaluation failed.")
 
     current_digests = {
-        continuous: _checkpoint_digest(continuous),
-        sequential: _checkpoint_digest(sequential),
+        reference: _checkpoint_digest(reference),
+        candidate: _checkpoint_digest(candidate),
     }
     _record_comparison(
         checks,
@@ -210,8 +210,8 @@ def main():
     )
     report = _finalize_report(
         "checkpoint state and fresh-process evaluation results",
-        continuous,
-        sequential,
+        reference,
+        candidate,
         checks,
     )
     if not report["overall_passed"]:

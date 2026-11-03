@@ -12,9 +12,11 @@ from example.checkpoint import checkpoint_runtime
 from example.checkpoint import train_session as example
 from example.checkpoint.bounded import run as bounded
 from example.checkpoint.comparison import compare_checkpoints as comparison
+from example.checkpoint.comparison import compare_scenarios
 from example.checkpoint.complete_checkpoint import run as runner
 from example.checkpoint.model_only_restart import run as model_only_runner
 from example.checkpoint.model_only_restart import train_session as model_only_session
+from example.checkpoint import run_comparisons
 
 
 _SCRIPT = Path(example.__file__)
@@ -272,6 +274,51 @@ def test_model_only_fresh_process_command_carries_only_model_path(tmp_path):
     assert "from_checkpoint" not in command
 
 
+def test_scenario_report_requires_known_model_only_state_loss():
+    checks = [
+        {"name": name, "passed": True, "detail": "Exact match."}
+        for name in compare_scenarios.MODEL_ONLY_REQUIRED_MATCHES
+    ]
+    checks.extend(
+        {"name": name, "passed": False, "detail": "values differ"}
+        for name in compare_scenarios.MODEL_ONLY_REQUIRED_DIFFERENCES
+    )
+    raw = {"overall_passed": False, "checks": checks}
+
+    assessed = compare_scenarios.assess_checkpoint_state(
+        "model_only_restart", raw, expect_exact=False
+    )
+
+    assert assessed["passed"] is True
+    assert assessed["observed_exact_match"] is False
+    assert assessed["missing_required_matches"] == []
+    assert assessed["missing_required_differences"] == []
+
+    checks[-1]["passed"] = True
+    assessed = compare_scenarios.assess_checkpoint_state(
+        "model_only_restart", raw, expect_exact=False
+    )
+    assert assessed["passed"] is False
+    assert assessed["missing_required_differences"] == [checks[-1]["name"]]
+
+
+def test_scenario_orchestrator_runs_all_candidates_before_comparison():
+    commands = run_comparisons.scenario_commands(10, with_evaluation=True)
+
+    modules = [command[command.index("-m") + 1] for command in commands]
+    assert modules == [
+        "example.checkpoint.continuous.run",
+        "example.checkpoint.bounded.run",
+        "example.checkpoint.complete_checkpoint.run",
+        "example.checkpoint.model_only_restart.run",
+        "example.checkpoint.comparison.compare_scenarios",
+    ]
+    assert commands[-1][-1] == "--with-evaluation"
+    run_comparisons._validate_trial_horizons(10)
+    with pytest.raises(ValueError, match="trial horizons"):
+        run_comparisons._validate_trial_horizons(9)
+
+
 def test_checkpoint_comparison_excludes_only_session_and_output_configuration(tmp_path):
     first = {
         "agent": {"num_trials": 1000, "start_jump": 400, "beta_anneal_trials": 595},
@@ -302,3 +349,5 @@ def test_checkpoint_comparison_excludes_only_session_and_output_configuration(tm
     destination = tmp_path / "reports" / "comparison.json"
     comparison._write_report(report, destination)
     assert yaml.safe_load(destination.read_text()) == report
+    assert report["reference_checkpoint"] == "continuous"
+    assert report["candidate_checkpoint"] == "sequential"

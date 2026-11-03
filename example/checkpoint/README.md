@@ -63,11 +63,12 @@ python -m example.checkpoint.complete_checkpoint.cli \
 Use clean output paths because checkpoint destinations are immutable:
 
 ```bash
-python -m example.checkpoint.continuous.run
-python -m example.checkpoint.bounded.run --sessions 10
-python -m example.checkpoint.complete_checkpoint.run --sessions 10
-python -m example.checkpoint.model_only_restart.run --sessions 10
+python -m example.checkpoint.run_comparisons
 ```
+
+This runs the four scenarios sequentially and writes one scenario-level JSON report. Add
+`--with-evaluation` to evaluate identical rows from every final checkpoint in fresh processes.
+The full workflow performs real training and fitting and is intentionally expensive.
 
 The expected final checkpoints are:
 
@@ -91,6 +92,9 @@ python -m example.checkpoint.comparison.compare_checkpoints
 
 # Persisted state plus fresh-process greedy evaluation
 python -m example.checkpoint.comparison.compare_results
+
+# All continuation strategies, including expected model-only state loss
+python -m example.checkpoint.comparison.compare_scenarios
 ```
 
 The checkpoint comparison covers counters, histories, schedules, random streams,
@@ -98,12 +102,13 @@ environments, caches, online and target networks, optimizer state, and replay. T
 comparison additionally evaluates identical rows in separate processes and verifies that the
 immutable checkpoint files did not change.
 
-Both tools print named per-category verdicts, finish with an overall verdict, write an atomic
-JSON report, and return nonzero when an expected exact comparison fails. Default reports are:
+These tools print named per-category verdicts, finish with an overall verdict, write an atomic
+JSON report, and return nonzero when an expected comparison contract fails. Default reports are:
 
 ```text
 example/checkpoint/outputs/comparison_reports/checkpoint_comparison.json
 example/checkpoint/outputs/evaluation_comparison/comparison_report.json
+example/checkpoint/outputs/comparison_reports/scenarios.json
 ```
 
 The 1,000-trial workflow is deliberately expensive and is not part of routine unit tests.
