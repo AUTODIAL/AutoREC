@@ -279,7 +279,7 @@ def test_model_only_fresh_process_command_carries_only_model_path(tmp_path):
     assert "from_checkpoint" not in command
 
 
-def test_scenario_report_requires_known_model_only_state_loss():
+def test_scenario_report_requires_known_model_only_state_loss(capsys):
     checks = [
         {"name": name, "passed": True, "detail": "Exact match."}
         for name in compare_scenarios.MODEL_ONLY_REQUIRED_MATCHES
@@ -305,6 +305,37 @@ def test_scenario_report_requires_known_model_only_state_loss():
     )
     assert assessed["passed"] is False
     assert assessed["missing_required_differences"] == [checks[-1]["name"]]
+    assessed["evaluation"] = {
+        "passed": False,
+        "error": "RuntimeError: evaluation failed",
+    }
+
+    exact_failure = compare_scenarios.assess_checkpoint_state(
+        "bounded",
+        {
+            "overall_passed": False,
+            "checks": [
+                {
+                    "name": "Replay contents",
+                    "passed": False,
+                    "detail": "replay.npy: bytes differ",
+                }
+            ],
+        },
+        expect_exact=True,
+    )
+    compare_scenarios._print_report(
+        {
+            "scenarios": [exact_failure, assessed],
+            "checkpoint_files_unchanged_by_evaluation": False,
+            "overall_passed": False,
+        }
+    )
+    output = capsys.readouterr().out
+    assert "Replay contents: replay.npy: bytes differ" in output
+    assert "Evaluation: RuntimeError: evaluation failed" in output
+    assert "Evaluation modified at least one checkpoint file" in output
+    assert "OVERALL VERDICT: FAIL" in output
 
 
 def test_scenario_orchestrator_runs_all_candidates_before_comparison():

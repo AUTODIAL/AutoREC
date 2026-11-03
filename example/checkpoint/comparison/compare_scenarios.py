@@ -163,6 +163,25 @@ def _print_report(report: dict) -> None:
             print(
                 f"  Missing required differences: {scenario['missing_required_differences']}"
             )
+        if not scenario["passed"]:
+            if scenario["expected_relation"] == "exact_match":
+                failed_checks = [
+                    check for check in scenario["state_checks"] if not check["passed"]
+                ]
+                for check in failed_checks[:3]:
+                    print(f"  {check['name']}: {check['detail']}")
+            evaluation = scenario.get("evaluation")
+            if evaluation is not None and not evaluation["passed"]:
+                if "error" in evaluation:
+                    print(f"  Evaluation: {evaluation['error']}")
+                else:
+                    failed_evaluations = [
+                        item for item in evaluation["comparisons"] if not item["exact_match"]
+                    ]
+                    for item in failed_evaluations[:3]:
+                        print(f"  Evaluation / {item['name']}: {item['detail']}")
+    if report.get("checkpoint_files_unchanged_by_evaluation") is False:
+        print("[FAIL] Evaluation modified at least one checkpoint file.")
     print("-" * 72)
     print(f"OVERALL VERDICT: {'PASS' if report['overall_passed'] else 'FAIL'}")
 
