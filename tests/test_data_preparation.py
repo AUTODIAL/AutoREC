@@ -169,6 +169,48 @@ def test_load_mode_reads_pickle_metadata_and_updates_attributes(tmp_path):
     assert prep.frequency_bounds == (10.0, 1_000.0)
     assert prep.frequency_npoints == 3
     assert prep.eis_features == ["ReZ", "ImZ"]
+    assert "source_freq" not in loaded.columns
+    assert "source_Z" not in loaded.columns
+
+
+def test_load_mode_accepts_aligned_optional_source_spectrum(tmp_path):
+    dataset = make_processed_dataset(metadata={})
+    dataset["source_freq"] = [np.array([1.0, 3.0, 10.0, 100.0])]
+    dataset["source_Z"] = [np.array([1 + 4j, 2 + 3j, 3 + 2j, 4 + 1j])]
+    pkl_path = tmp_path / "dataset_with_source.pkl"
+    dataset.to_pickle(pkl_path)
+
+    prep = EISDataPrep(pkl_path, mode="load")
+    loaded = prep.load()
+
+    pd.testing.assert_frame_equal(loaded, dataset)
+    assert not any("source_freq" in warning for warning in prep._validation_warnings)
+    assert not any("source_Z" in warning for warning in prep._validation_warnings)
+
+
+def test_load_mode_rejects_incomplete_optional_source_spectrum(tmp_path):
+    dataset = make_processed_dataset(metadata={})
+    dataset["source_freq"] = [np.array([1.0, 10.0, 100.0])]
+    pkl_path = tmp_path / "dataset_with_incomplete_source.pkl"
+    dataset.to_pickle(pkl_path)
+
+    prep = EISDataPrep(pkl_path, mode="load")
+
+    with pytest.raises(ValueError, match="must be provided together; missing: source_Z"):
+        prep.load()
+
+
+def test_load_mode_rejects_misaligned_optional_source_spectrum(tmp_path):
+    dataset = make_processed_dataset(metadata={})
+    dataset["source_freq"] = [np.array([1.0, 10.0, 100.0])]
+    dataset["source_Z"] = [np.array([1 + 1j, 2 + 2j])]
+    pkl_path = tmp_path / "dataset_with_misaligned_source.pkl"
+    dataset.to_pickle(pkl_path)
+
+    prep = EISDataPrep(pkl_path, mode="load")
+
+    with pytest.raises(ValueError, match="same nonzero number"):
+        prep.load()
 
 
 def test_load_mode_rejects_pickle_that_is_not_dataframe(tmp_path):
@@ -317,6 +359,8 @@ def test_process_raw_csv_without_linkk_interpolates_dataset(tmp_path, monkeypatc
     expected_freq = np.array([10.0, 100.0, 1_000.0])
     np.testing.assert_allclose(row["freq"], expected_freq)
     np.testing.assert_allclose(row["Z_true"], expected_freq + 1j * expected_freq**2)
+    np.testing.assert_array_equal(row["source_freq"], raw_freq)
+    np.testing.assert_array_equal(row["source_Z"], raw_impedance)
     assert len(row["flatten_Z"]) == 2 * len(expected_freq)
     assert row["chi_thresh"] == 0.01
     assert row["r2_thresh"] == 0.95
@@ -369,6 +413,8 @@ def test_process_raw_csv_with_linkk_preprocesses_before_interpolation(tmp_path, 
     expected_freq = np.array([10.0, 100.0, 1_000.0])
     np.testing.assert_allclose(row["freq"], expected_freq)
     np.testing.assert_allclose(row["Z_true"], expected_freq + 1j * expected_freq**2)
+    np.testing.assert_array_equal(row["source_freq"], raw_freq[1:])
+    np.testing.assert_array_equal(row["source_Z"], raw_impedance[1:])
     assert len(preprocess_calls) == 1
     np.testing.assert_allclose(preprocess_calls[0][0], raw_freq)
     np.testing.assert_allclose(preprocess_calls[0][1], raw_impedance)
