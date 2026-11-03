@@ -14,7 +14,9 @@ from autorec import cli
 from autorec.checkpoint import RecoveryPlan
 
 
-_CHECKPOINT_SCRIPT = Path(__file__).parents[1] / "example" / "checkpoint_training.py"
+_CHECKPOINT_SCRIPT = (
+    Path(__file__).parents[1] / "example" / "checkpoint" / "complete_checkpoint" / "cli.py"
+)
 _CHECKPOINT_SPEC = spec_from_file_location("checkpoint_training_example", _CHECKPOINT_SCRIPT)
 checkpoint_training = module_from_spec(_CHECKPOINT_SPEC)
 _CHECKPOINT_SPEC.loader.exec_module(checkpoint_training)

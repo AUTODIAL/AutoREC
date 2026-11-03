@@ -409,21 +409,23 @@ def compare(first: Path, second: Path):
 
 def main():
     directory = Path(__file__).resolve().parent
+    checkpoint_directory = directory.parent
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--continuous",
         type=Path,
-        default=directory / "outputs/continuous/checkpoints/trial-00001000",
+        default=checkpoint_directory / "outputs/continuous/checkpoints/trial-00001000",
     )
     parser.add_argument(
         "--sequential",
         type=Path,
-        default=directory / "outputs/sequential/checkpoints/trial-00001000",
+        default=checkpoint_directory
+        / "outputs/complete_checkpoint/checkpoints/trial-00001000",
     )
     parser.add_argument(
         "--report",
         type=Path,
-        default=directory / "outputs/comparison_reports/checkpoint_comparison.json",
+        default=checkpoint_directory / "outputs/comparison_reports/checkpoint_comparison.json",
         help="JSON destination for the detailed comparison report.",
     )
     args = parser.parse_args()

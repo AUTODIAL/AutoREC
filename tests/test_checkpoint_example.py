@@ -1,35 +1,20 @@
 """Tests for the open-ended checkpoint example configuration workflow."""
 
-from importlib.util import module_from_spec, spec_from_file_location
 from io import StringIO
 from pathlib import Path
-import sys
 from types import SimpleNamespace
 
 import pytest
 import yaml
 
 
-_SCRIPT = Path(__file__).parents[1] / "example" / "checkpoint" / "main_factory.py"
-_RUNTIME_SCRIPT = _SCRIPT.with_name("checkpoint_runtime.py")
-_RUNTIME_SPEC = spec_from_file_location("checkpoint_runtime", _RUNTIME_SCRIPT)
-checkpoint_runtime = module_from_spec(_RUNTIME_SPEC)
-sys.modules[_RUNTIME_SPEC.name] = checkpoint_runtime
-_RUNTIME_SPEC.loader.exec_module(checkpoint_runtime)
+from example.checkpoint import checkpoint_runtime
+from example.checkpoint import train_session as example
+from example.checkpoint.comparison import compare_checkpoints as comparison
+from example.checkpoint.complete_checkpoint import run as runner
 
-_SPEC = spec_from_file_location("checkpoint_example_main", _SCRIPT)
-example = module_from_spec(_SPEC)
-_SPEC.loader.exec_module(example)
 
-_RUNNER_SCRIPT = _SCRIPT.with_name("run_sequential.py")
-_RUNNER_SPEC = spec_from_file_location("checkpoint_example_runner", _RUNNER_SCRIPT)
-runner = module_from_spec(_RUNNER_SPEC)
-_RUNNER_SPEC.loader.exec_module(runner)
-
-_COMPARE_SCRIPT = _SCRIPT.with_name("compare_checkpoints.py")
-_COMPARE_SPEC = spec_from_file_location("checkpoint_example_compare", _COMPARE_SCRIPT)
-comparison = module_from_spec(_COMPARE_SPEC)
-_COMPARE_SPEC.loader.exec_module(comparison)
+_SCRIPT = Path(example.__file__)
 
 
 def config(tmp_path, *, num_trials=100, resume_from=None):

@@ -7,7 +7,7 @@ from pathlib import Path
 import pickle
 import random
 
-from checkpoint_runtime import (
+from ..checkpoint_runtime import (
     configure_cache_environment,
     configure_tensorflow_for_checkpoint,
 )

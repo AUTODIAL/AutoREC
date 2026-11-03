@@ -142,7 +142,8 @@ Automatic recovery records a checkpoint-series ID and a fingerprint of the confi
 training configuration and initial seed policy. It permits changes to `agent.num_trials`
 (to extend a cumulative target) and `agent.save_dir`, but rejects other configuration
 changes. It scans immutable `trial-NNNNNNNN` directories; it does not maintain a mutable
-`latest` pointer. The same option is available through `example/checkpoint_training.py`.
+`latest` pointer. The same option is available through
+`example/checkpoint/complete_checkpoint/cli.py`.
 Extending a target does not recompute schedules already owned by the checkpoint; configure
 absolute cumulative schedule values when later extension is possible.
 

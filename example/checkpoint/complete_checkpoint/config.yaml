@@ -32,13 +32,14 @@ environment:
   cache_type: lru
 
 agent:
-  save_dir: ${AUTOREC_ROOT}/example/checkpoint/outputs/continuous
+  save_dir: ${AUTOREC_ROOT}/example/checkpoint/outputs/complete_checkpoint
   save_start: 0
   save_frequency: 100
   action_cap: null
   random_seed: 42
-  # One 1,000-trial session used as the continuous equivalence baseline.
-  num_trials: 1000
+  # Trials to run in this session. Generated continuation files retain this value,
+  # but it may be changed before starting the next session.
+  num_trials: 100
   episodes_trial: 1
   gamma: 0.99
   continuous_deadloop: 2
@@ -69,12 +70,13 @@ agent:
   prioritized_replay_eps: 1.0E-6
   initial_beta: 0.4
   beta_jump: 1.06
-  # Match the sequential experiment's absolute cumulative schedule.
+  # Absolute cumulative schedule shared with ../continuous/config.yaml. These values
+  # do not depend on this session's num_trials.
   start_jump: 400
   beta_anneal_trials: 595
   final_beta: 0.7
 
 checkpoint:
-  save_dir: ${AUTOREC_ROOT}/example/checkpoint/outputs/continuous/checkpoints
-  generated_config_dir: ${AUTOREC_ROOT}/example/checkpoint/outputs/continuous/configs
+  save_dir: ${AUTOREC_ROOT}/example/checkpoint/outputs/complete_checkpoint/checkpoints
+  generated_config_dir: ${AUTOREC_ROOT}/example/checkpoint/outputs/complete_checkpoint/configs
   resume_from: null

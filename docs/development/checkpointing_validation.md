@@ -28,7 +28,8 @@ Append the Python commands below to that prefix. The long test additionally set
 
 Ruff checks/formatting and `git diff --check` passed for the changed files. Both
 `autorec_env/bin/python -m autorec.cli train --help` and
-`autorec_env/bin/python example/checkpoint_training.py --help` succeeded. Commit hooks
+`autorec_env/bin/python -m example.checkpoint.complete_checkpoint.cli --help` succeeded.
+Commit hooks
 also run whitespace, file-size and Ruff checks.
 
 The process comparisons use real replay insertion/sampling, neural gradients, scheduled

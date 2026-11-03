@@ -10,8 +10,8 @@ import subprocess
 import sys
 import traceback
 
-from checkpoint_runtime import deterministic_subprocess_environment
-from compare_checkpoints import (
+from ..checkpoint_runtime import REPOSITORY_ROOT, deterministic_subprocess_environment
+from .compare_checkpoints import (
     _finalize_report,
     _print_detailed_report,
     _print_verdict,
@@ -30,10 +30,11 @@ def _checkpoint_digest(directory):
     return digest.hexdigest()
 
 
-def _evaluate(worker, checkpoint, output, args, environment):
+def _evaluate(checkpoint, output, args, environment):
     command = [
         sys.executable,
-        str(worker),
+        "-m",
+        "example.checkpoint.comparison.evaluate_checkpoint",
         "--checkpoint",
         str(checkpoint),
         "--output",
@@ -47,7 +48,7 @@ def _evaluate(worker, checkpoint, output, args, environment):
         command += ["--num-samples", str(args.num_samples)]
     if args.max_actions is not None:
         command += ["--max-actions", str(args.max_actions)]
-    subprocess.run(command, env=environment, check=True)
+    subprocess.run(command, env=environment, cwd=REPOSITORY_ROOT, check=True)
     with (output / "evaluation.pkl").open("rb") as stream:
         return pickle.load(stream)
 
@@ -67,16 +68,18 @@ def _fail_with_report(report, report_path, *details):
 
 def main():
     directory = Path(__file__).resolve().parent
+    checkpoint_directory = directory.parent
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--continuous",
         type=Path,
-        default=directory / "outputs/continuous/checkpoints/trial-00001000",
+        default=checkpoint_directory / "outputs/continuous/checkpoints/trial-00001000",
     )
     parser.add_argument(
         "--sequential",
         type=Path,
-        default=directory / "outputs/sequential/checkpoints/trial-00001000",
+        default=checkpoint_directory
+        / "outputs/complete_checkpoint/checkpoints/trial-00001000",
     )
     selection = parser.add_mutually_exclusive_group()
     selection.add_argument("--indices", help="Comma-separated training dataset row positions.")
@@ -84,7 +87,9 @@ def main():
     parser.add_argument("--sample-seed", type=int, default=2026)
     parser.add_argument("--max-actions", type=int)
     parser.add_argument(
-        "--output-dir", type=Path, default=directory / "outputs/evaluation_comparison"
+        "--output-dir",
+        type=Path,
+        default=checkpoint_directory / "outputs/evaluation_comparison",
     )
     parser.add_argument(
         "--report",
@@ -129,11 +134,10 @@ def main():
     }
 
     environment = deterministic_subprocess_environment()
-    worker = directory / "evaluate_checkpoint.py"
     print("\n[2/2] Evaluating identical training rows in fresh processes...", flush=True)
     try:
-        first = _evaluate(worker, continuous, output_dir / "continuous", args, environment)
-        second = _evaluate(worker, sequential, output_dir / "sequential", args, environment)
+        first = _evaluate(continuous, output_dir / "continuous", args, environment)
+        second = _evaluate(sequential, output_dir / "complete_checkpoint", args, environment)
     except Exception as error:
         traceback.print_exc()
         checks.append(

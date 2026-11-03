@@ -14,7 +14,7 @@ for top-level scripts below assume the current directory is `example/`.
 | [`main.py`](main.py) | Construct the data preparation, environment, and agent directly in Python | Quick mode trains for 50 trials |
 | [`main_factory.py`](main_factory.py) | Build the same pipeline from YAML configuration | Defaults to the 50-trial demo configuration |
 | [`bounded_training.py`](bounded_training.py) | Continue cumulative training for a fixed number of sessions in one Python process | Controlled by the selected configuration and CLI arguments |
-| [`checkpoint_training.py`](checkpoint_training.py) | Save or resume complete training checkpoints across Python processes | One configurable session per invocation |
+| [`checkpoint/complete_checkpoint/cli.py`](checkpoint/complete_checkpoint/cli.py) | Save or resume complete training checkpoints across Python processes | One configurable session per invocation |
 | [`checkpoint/`](checkpoint/) | Validate continuous versus fresh-process checkpoint-resumed equivalence | Full example compares 1,000 continuous trials with ten 100-trial sessions |
 | [`hyperparameter_tuning/`](hyperparameter_tuning/) | Run checkpointed multi-fidelity Optuna tuning on Slurm | Potentially expensive HPC workflow |
 
@@ -73,12 +73,12 @@ This is useful for testing cumulative continuation semantics without checkpoint 
 
 ## General checkpoint training
 
-[`checkpoint_training.py`](checkpoint_training.py) is a compact interface for one
+[`checkpoint/complete_checkpoint/cli.py`](checkpoint/complete_checkpoint/cli.py) is a compact interface for one
 checkpointed training session. To make one configured cumulative target automatically
 recoverable after interruption, rerun this command as needed:
 
 ```bash
-python checkpoint_training.py \
+python checkpoint/complete_checkpoint/cli.py \
   --config ../configs_yaml/examples/demo_pipeline_config.yaml \
   --checkpoint-dir checkpoint_outputs \
   --checkpoint-every 10 \
@@ -89,7 +89,7 @@ A missing checkpoint starts fresh, a partial checkpoint runs only the remaining 
 an already reached target is a no-op. The explicit manual equivalent remains available:
 
 ```bash
-python checkpoint_training.py \
+python checkpoint/complete_checkpoint/cli.py \
   --resume checkpoint_outputs/trial-00000050 \
   --additional-trials 50 \
   --checkpoint-dir checkpoint_outputs

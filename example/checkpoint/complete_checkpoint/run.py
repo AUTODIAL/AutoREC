@@ -11,7 +11,7 @@ import sys
 
 import yaml
 
-from checkpoint_runtime import deterministic_subprocess_environment
+from ..checkpoint_runtime import REPOSITORY_ROOT, deterministic_subprocess_environment
 
 
 CHECKPOINT_SECTION = "checkpoint"
@@ -39,7 +39,7 @@ def main():
         "--config",
         "-c",
         type=Path,
-        default=Path(__file__).with_name("sequential_config.yaml"),
+        default=Path(__file__).with_name("config.yaml"),
         help="Initial or generated full configuration file.",
     )
     parser.add_argument(
@@ -52,9 +52,8 @@ def main():
     if args.sessions < 1:
         parser.error("--sessions must be positive")
 
-    os.environ.setdefault("AUTOREC_ROOT", str(Path(__file__).resolve().parents[2]))
+    os.environ.setdefault("AUTOREC_ROOT", str(REPOSITORY_ROOT))
     config_path = args.config.resolve()
-    worker = Path(__file__).with_name("main_factory.py")
     environment = deterministic_subprocess_environment()
 
     for session in range(1, args.sessions + 1):
@@ -63,8 +62,15 @@ def main():
             flush=True,
         )
         subprocess.run(
-            [sys.executable, str(worker), "--config", str(config_path)],
+            [
+                sys.executable,
+                "-m",
+                "example.checkpoint.train_session",
+                "--config",
+                str(config_path),
+            ],
             env=environment,
+            cwd=REPOSITORY_ROOT,
             check=True,
         )
         config_path = _next_config(config_path)

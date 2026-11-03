@@ -122,7 +122,7 @@ checkpoint-owned and cannot be changed during an exact resume.
 The same automatic option is exposed by the Python entry script:
 
 ```bash
-python example/checkpoint_training.py --config config.yaml \
+python -m example.checkpoint.complete_checkpoint.cli --config config.yaml \
   --checkpoint-dir checkpoints --checkpoint-every 10 --resume-latest
 ```
 
@@ -178,13 +178,13 @@ evidence, read `docs/checkpointing.md` in the repository. The
 `example/checkpoint/` workflow compares one continuous run with sequential
 fresh-process sessions and exports per-category JSON comparison reports.
 
-From `example/checkpoint/`, the complete validation workflow is:
+From the repository root, the complete validation workflow is:
 
 ```bash
-python run_continuous.py
-python run_sequential.py --config sequential_config.yaml --sessions 10
-python compare_checkpoints.py
-python compare_results.py
+python -m example.checkpoint.continuous.run
+python -m example.checkpoint.complete_checkpoint.run --sessions 10
+python -m example.checkpoint.comparison.compare_checkpoints
+python -m example.checkpoint.comparison.compare_results
 ```
 
 `compare_checkpoints.py` is the faster persisted-state comparison. It checks
