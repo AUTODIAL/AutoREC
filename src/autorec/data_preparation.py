@@ -34,8 +34,8 @@ class EISDataPrep:
 
     Expectations
     ------------
-        The final dataset must have the following 6 columns with an optional column that's
-        required only for evaluation.
+        The final dataset contains the following prepared-data columns, with
+        ``true_circuit`` required for evaluation and ``metadata`` required for training.
 
         - sub_id: Identifier tracking which subfolder/file the data came from
         - true_circuit: Circuit representation as string (from folder name)
@@ -44,6 +44,11 @@ class EISDataPrep:
         - flatten_Z: Flattened EIS representation (array)
         - chi_thresh: Chi-square threshold value
         - r2_thresh: R-squared threshold value
+
+        Newly processed datasets additionally retain the aligned ``source_freq`` and
+        ``source_Z`` arrays supplied to interpolation. These optional columns preserve the
+        post-Lin-KK measurements (or the original CSV measurements when Lin-KK is disabled)
+        for progressive physical fitting. Older pickles without them remain valid.
 
         We expect each EIS to have the same number of values in their freq, Z_imag, Z_real
         columns.
@@ -95,6 +100,11 @@ class EISDataPrep:
         "chi_thresh",
         "r2_thresh",
     ]
+
+    # Optional physical-spectrum source retained by newly processed datasets. These arrays
+    # contain the post-Lin-KK values supplied to process_single_EIS before interpolation.
+    # They remain optional so existing processed pickles continue to load unchanged.
+    SOURCE_COLUMNS = ("source_freq", "source_Z")
 
     def __init__(
         self,
@@ -376,15 +386,17 @@ class EISDataPrep:
     ) -> Optional[dict]:
         """
         Process a single EIS data, including:
+        * Retaining the post-Lin-KK, pre-interpolation source spectrum
         * Frequency interpolation to ensure all data of the same length
         * Computing EIS representation (flatten_Z)
 
         Parameters
         ----------
         freq : np.array
-            Frequency values of the EIS data
+            Frequency values after optional Lin-KK preprocessing and before interpolation.
         Z : np.array
-            Complex impedance values of the EIS data
+            Complex impedance values after optional Lin-KK preprocessing and before
+            interpolation.
         csv_path : Path
             Path to the CSV file (used for sub_id and circuit extraction)
         base_path : Path
@@ -426,6 +438,8 @@ class EISDataPrep:
             return {
                 "sub_id": sub_id,
                 "true_circuit": circuit_string,
+                "source_freq": np.array(freq, dtype=float, copy=True),
+                "source_Z": np.array(Z, dtype=complex, copy=True),
                 "freq": freq_new,
                 "Z_true": Z_new,
                 "flatten_Z": flatten_Z,
@@ -704,7 +718,8 @@ class EISDataPrep:
             self._validation_errors.append(error_msg)
 
         # Check for extra columns (as warning only)
-        extra_columns = [col for col in self.dataset.columns if col not in required_cols]
+        recognized_columns = set(required_cols) | set(self.SOURCE_COLUMNS)
+        extra_columns = [col for col in self.dataset.columns if col not in recognized_columns]
         if extra_columns:
             self._validation_warnings.append(
                 f"Dataset contains extra columns (will be ignored): {', '.join(extra_columns)}"
@@ -713,6 +728,7 @@ class EISDataPrep:
         # Validate column data types and structure (if all required columns present)
         if not missing_columns:
             self._validate_column_types()
+            self._validate_source_columns()
             self._validate_circuits()  # New: validate circuit strings
 
         return len(self._validation_errors) == 0
@@ -789,7 +805,7 @@ class EISDataPrep:
                     )
 
         # Validate array columns
-        for col in ["Z_true", "freq", "flatten_Z"]:
+        for col in ["Z_true", "freq", "flatten_Z", *self.SOURCE_COLUMNS]:
             check_array_column(col)
 
         # Validate string columns
@@ -799,6 +815,58 @@ class EISDataPrep:
         # Validate numeric columns
         for col in ["chi_thresh", "r2_thresh"]:
             check_numeric_column(col)
+
+    def _validate_source_columns(self):
+        """Validate optional aligned post-Lin-KK, pre-interpolation source spectra.
+
+        The two source columns are an all-or-nothing extension to the legacy processed-data
+        schema. Every row must contain aligned, nonempty, finite one-dimensional arrays with
+        unique, strictly positive frequencies. Validation records errors on the preparation
+        instance instead of raising, matching the existing dataset-validation contract.
+        """
+        present_columns = [col for col in self.SOURCE_COLUMNS if col in self.dataset.columns]
+        if not present_columns:
+            return
+        if len(present_columns) != len(self.SOURCE_COLUMNS):
+            missing_columns = [
+                col for col in self.SOURCE_COLUMNS if col not in self.dataset.columns
+            ]
+            self._validation_errors.append(
+                "Source spectrum columns must be provided together; missing: "
+                + ", ".join(missing_columns)
+            )
+            return
+
+        for index, row in self.dataset.iterrows():
+            source_freq = np.asarray(row["source_freq"])
+            source_Z = np.asarray(row["source_Z"])
+            row_label = row.get("sub_id", f"row {index}")
+
+            if source_freq.ndim != 1 or source_Z.ndim != 1:
+                self._validation_errors.append(
+                    f"Source spectrum for {row_label} must contain one-dimensional arrays"
+                )
+                continue
+            if len(source_freq) == 0 or len(source_freq) != len(source_Z):
+                self._validation_errors.append(
+                    f"Source spectrum for {row_label} must contain the same nonzero number "
+                    "of frequency and impedance values"
+                )
+                continue
+            if not np.all(np.isfinite(source_freq)) or np.any(source_freq <= 0):
+                self._validation_errors.append(
+                    f"Source frequencies for {row_label} must be finite and strictly positive"
+                )
+            if len(np.unique(source_freq)) != len(source_freq):
+                self._validation_errors.append(
+                    f"Source frequencies for {row_label} must be unique"
+                )
+            if not np.all(np.isfinite(source_Z.real)) or not np.all(
+                np.isfinite(source_Z.imag)
+            ):
+                self._validation_errors.append(
+                    f"Source impedance for {row_label} must be finite"
+                )
 
     # TODO: double check if it works fine
     def _validate_EIS_len(self):

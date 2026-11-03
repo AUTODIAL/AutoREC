@@ -24,6 +24,10 @@ from tensorflow.python.framework import config as tf_config
 
 from autorec.neural_state import neural_state_dict, restore_neural_state
 from autorec.optimized_data_structures.circular_buffer import CircularBuffer
+from autorec.progressive_spectrum import (
+    progressive_runtime_state_dict,
+    restore_progressive_runtime_state,
+)
 from autorec.runtime_state import (
     environment_state_dict,
     environment_source_modules,
@@ -145,6 +149,7 @@ def _capture(agent):
             "_continuation_mode",
             "_checkpoint_series_id",
             "_checkpoint_config_fingerprint",
+            "progressive_spectrum",
         }
     )
     # Performance caches are derived from checkpoint-owned environments, models, and
@@ -158,10 +163,22 @@ def _capture(agent):
         raise ValueError("Checkpoints require a completed-trial boundary.")
     if state.schedule_config != agent._training_schedule_config():
         raise ValueError("The epsilon/beta schedules have changed.")
+    if state.workflow_config is not None:
+        if agent.progressive_spectrum is None or not agent.progressive_spectrum.enabled:
+            raise ValueError(
+                "Progressive checkpoint training requires an attached runtime configuration."
+            )
+        if state.workflow_config != agent.progressive_spectrum.metadata:
+            raise ValueError("Progressive checkpoint runtime differs from training state.")
     replay = agent._replay_buffer.state_dict()
     config = {
         "agent": {key: getattr(agent, key) for key in sorted(_CONFIG_FIELDS)},
         "output": {"save_dir": str(agent.save_dir), "model_name": str(agent.model_name)},
+        "progressive_spectrum": progressive_runtime_state_dict(
+            agent.progressive_spectrum,
+            training_dataprep=agent.training_env.dataprep,
+            evaluation_dataprep=agent.eval_env.dataprep,
+        ),
     }
     training = {
         "attributes": {key: getattr(agent, key) for key in sorted(_DYNAMIC_FIELDS)},
@@ -236,7 +253,7 @@ def save_checkpoint(agent, destination) -> Path:
                 stream.flush()
                 os.fsync(stream.fileno())
         manifest = {
-            "format_version": 6,
+            "format_version": 7,
             "series_id": agent._checkpoint_series_id,
             "config_fingerprint": agent._checkpoint_config_fingerprint,
             "completed_trials": agent.completed_trials,
@@ -277,7 +294,7 @@ def _read_manifest(directory):
             "runtime",
             "files",
         }
-        or manifest["format_version"] != 6
+        or manifest["format_version"] != 7
     ):
         raise ValueError("Unsupported checkpoint manifest/version.")
     if not isinstance(manifest["series_id"], str) or not re.fullmatch(
@@ -441,7 +458,10 @@ def load_checkpoint(directory, *, save_dir=None, num_trials=None):
         manifest = payloads.pop("manifest.json")
         config = payloads["config.json"]
         training = payloads["training.pkl"]
-        if set(config) != {"agent", "output"} or set(config["agent"]) != _CONFIG_FIELDS:
+        if (
+            set(config) != {"agent", "output", "progressive_spectrum"}
+            or set(config["agent"]) != _CONFIG_FIELDS
+        ):
             raise ValueError("Invalid checkpoint agent configuration.")
         if set(config["output"]) != {"save_dir", "model_name"}:
             raise ValueError("Invalid checkpoint output configuration.")
@@ -476,6 +496,21 @@ def load_checkpoint(directory, *, save_dir=None, num_trials=None):
         agent.training_env, agent.eval_env, agent._active_env = restore_environment_state(
             payloads["environments.pkl"]
         )
+        agent.progressive_spectrum = restore_progressive_runtime_state(
+            config["progressive_spectrum"],
+            training_dataprep=agent.training_env.dataprep,
+            evaluation_dataprep=agent.eval_env.dataprep,
+        )
+        if agent.progressive_spectrum is not None and agent.progressive_spectrum.enabled:
+            if (
+                agent.progressive_spectrum.training_encoder.observation_size
+                != agent.training_env.EIS_INPUT_SIZE
+                or agent.progressive_spectrum.evaluation_encoder.observation_size
+                != agent.eval_env.EIS_INPUT_SIZE
+            ):
+                raise ValueError(
+                    "Checkpoint progressive encoders do not match environment input sizes."
+                )
         agent._replay_buffer = CircularBuffer.from_state_dict(
             dict(training["replay"], buffer=payloads["replay.npy"])
         )

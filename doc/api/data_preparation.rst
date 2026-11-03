@@ -23,5 +23,5 @@ EISDataPrep
 -----------
 
 .. autoapiclass:: autorec.data_preparation.EISDataPrep
-   :members: load, save, get_summary, get_validation_summary, metadata
+   :members: load, save, get_summary, get_validation_summary, flatten_EIS, metadata
    :member-order: bysource

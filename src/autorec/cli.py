@@ -57,7 +57,11 @@ def _read_config_with_overrides(config_path: Path, output_dir: Path | None = Non
 def _recovery_config_fingerprint(config: dict, *, seed: int, deterministic_ops: bool) -> str:
     """Fingerprint training inputs while allowing target and output changes."""
     pipeline = deepcopy(
-        {name: config[name] for name in ("dataprep", "environment", "agent") if name in config}
+        {
+            name: config[name]
+            for name in ("dataprep", "environment", "agent", "progressive_spectrum")
+            if name in config
+        }
     )
     agent = pipeline.get("agent", {})
     agent.pop("num_trials", None)

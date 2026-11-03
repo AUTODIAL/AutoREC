@@ -152,9 +152,12 @@ def run_training(
         original_add = buffer.add
 
         def add(**transition):
-            trace["transitions"].append(
-                {key: value for key, value in transition.items() if "encoded" not in key}
-            )
+            recorded = {
+                key: value for key, value in transition.items() if "encoded" not in key
+            }
+            if "EIS_flatten" in recorded:
+                recorded["EIS_flatten"] = array_state(recorded["EIS_flatten"])
+            trace["transitions"].append(recorded)
             original_add(**transition)
             trace["events"].append(("insert", len(trace["transitions"])))
 
@@ -687,6 +690,7 @@ def test_ddqn_update_matches_hand_calculated_targets_loss_and_priorities():
         2,
         [
             ("EIS", "i4"),
+            ("EIS_flatten", "f4", (1,)),
             ("encoded_state", "f4", (1,)),
             ("encoded_new_state", "f4", (1,)),
             ("action_index", "i4"),
@@ -697,6 +701,7 @@ def test_ddqn_update_matches_hand_calculated_targets_loss_and_priorities():
     )
     history.add(
         EIS=0,
+        EIS_flatten=np.zeros(1),
         encoded_state=np.zeros(1),
         encoded_new_state=np.zeros(1),
         action_index=1,
@@ -706,6 +711,7 @@ def test_ddqn_update_matches_hand_calculated_targets_loss_and_priorities():
     )
     history.add(
         EIS=0,
+        EIS_flatten=np.zeros(1),
         encoded_state=np.zeros(1),
         encoded_new_state=np.zeros(1),
         action_index=0,

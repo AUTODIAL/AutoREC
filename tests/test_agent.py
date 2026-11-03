@@ -9,6 +9,14 @@ import pandas as pd
 import pytest
 
 from autorec import agent as agent_module
+from autorec.data_preparation import EISDataPrep
+from autorec.progressive_spectrum import (
+    CarryBestStatePolicy,
+    EqualPointWindowSelector,
+    InterpolatingSpectrumEncoder,
+    ProgressiveSpectrumRuntimeConfig,
+    StageTransitionDecision,
+)
 
 
 class DummyEnv:
@@ -47,6 +55,31 @@ class DummyModel:
         for line in lines:
             print_fn(line)
         return None
+
+
+class ProgressiveEvaluationEnv:
+    """Small prepared dataset container for progressive coordinator tests."""
+
+    EIS_INPUT_SIZE = 12
+
+    def __init__(self):
+        frequency = np.geomspace(1e4, 1e-1, 6)
+        log_frequency = np.log10(frequency)
+        impedance = (10 + log_frequency**2) + 1j * (5 - log_frequency)
+        dataprep = object.__new__(EISDataPrep)
+        dataprep.frequency_npoints = 6
+        dataprep.eis_features = ["ReZ", "ImZ"]
+        self.dataprep = dataprep
+        self.dataset = pd.DataFrame(
+            {
+                "freq": [frequency],
+                "Z_true": [impedance],
+                "flatten_Z": [dataprep.flatten_EIS(impedance, dataprep.eis_features)],
+                "true_circuit": ["R0"],
+            }
+        )
+        self.START_STATE = None
+        self.current_spectrum_view_id = None
 
 
 def dense_signature(model):
@@ -215,7 +248,6 @@ def test_train_model_resamples_and_performs_requested_gradient_steps():
         "TrainingEnv",
         (),
         {
-            "dataset": pd.DataFrame({"flatten_Z": [np.array([1.0])]}),
             "ACTIONS_LIST": pd.DataFrame([{"action_type": "R", "action_position": 0}]),
         },
     )()
@@ -223,6 +255,7 @@ def test_train_model_resamples_and_performs_requested_gradient_steps():
         capacity=1,
         dtypes=[
             ("EIS", "i4"),
+            ("EIS_flatten", "f4", (1,)),
             ("encoded_state", "f4", (1,)),
             ("action_index", "i4"),
             ("encoded_new_state", "f4", (1,)),
@@ -233,6 +266,7 @@ def test_train_model_resamples_and_performs_requested_gradient_steps():
     )
     history.add(
         EIS=0,
+        EIS_flatten=np.array([1.0]),
         encoded_state=np.array([0.0]),
         action_index=0,
         encoded_new_state=np.array([0.0]),
@@ -255,6 +289,93 @@ def test_train_model_resamples_and_performs_requested_gradient_steps():
     assert agent.optimizer.iterations.numpy() == 3
     assert np.isfinite(loss)
     assert history["priority"][0] != 1.0
+
+
+def test_replay_buffer_has_fixed_observation_and_view_identity_fields():
+    agent = object.__new__(agent_module.DDQN_ECM)
+    agent.buffer_capacity = 3
+    agent._active_env = type(
+        "ReplayEnv",
+        (),
+        {
+            "chromosome_len": 2,
+            "ELEMENTS_EXTENDED": ["R", "P", "X"],
+            "EIS_INPUT_SIZE": 4,
+        },
+    )()
+
+    buffer = agent._create_replay_buffer()
+
+    assert buffer.buffer.dtype["EIS_flatten"].shape == (4,)
+    assert buffer.buffer.dtype["EIS_flatten"].base == np.dtype("f4")
+    assert buffer.buffer.dtype["spectrum_view_id"].kind == "U"
+    assert buffer.buffer.dtype["encoded_state"].shape == (6,)
+
+
+def test_interaction_stores_exact_active_eis_observation_in_replay():
+    class ReplayEnv:
+        EIS_INPUT_SIZE = 3
+        current_spectrum_view_id = "partial-view"
+        ACTIONS_LIST = pd.DataFrame([{"action_type": "P", "action_position": 1}])
+
+        def __init__(self):
+            self.state = "+RR"
+            self.encoded_state = np.array([1.0, 0.0])
+
+        def step(self, action_type, action_position):
+            self.state = "+PR"
+            self.encoded_state = np.array([0.0, 1.0])
+            return {
+                "reward": 0.5,
+                "validity": 1,
+                "terminated": False,
+                "coding": "+PR",
+            }
+
+    class RecordingBuffer:
+        def __init__(self):
+            self.buffer = np.zeros(1, dtype=[("priority", "f4")])
+            self.size = 0
+            self.added = None
+
+        def __len__(self):
+            return self.size
+
+        def add(self, **kwargs):
+            self.added = kwargs
+            self.size += 1
+
+    agent = object.__new__(agent_module.DDQN_ECM)
+    agent._active_env = ReplayEnv()
+    agent.eps_greedy = lambda flatten_Z, **kwargs: (1, "P")
+    agent._check_and_train = lambda gradient_steps, buffer, iteration, memory: (None, memory)
+    agent._check_and_update_target = lambda target_freq: target_freq + 1
+    agent._detect_deadloop = lambda *args: ([], False)
+    agent._action_index_maps = {}
+    buffer = RecordingBuffer()
+    partial_observation = np.array([0.2, 0.4, 0.8])
+
+    agent._interact_update(
+        action_num=0,
+        flatten_Z=partial_observation,
+        deadloop_flag=False,
+        episode_history=[],
+        deadloop_chain=[],
+        episode=0,
+        EIS_i=7,
+        gradient_steps=1,
+        buffer=buffer,
+        iteration=0,
+        target_freq=0,
+        memory=0,
+    )
+    partial_observation[:] = -1
+
+    np.testing.assert_array_equal(
+        buffer.added["EIS_flatten"], np.array([0.2, 0.4, 0.8], dtype=np.float32)
+    )
+    assert buffer.added["spectrum_view_id"] == "partial-view"
+    assert buffer.added["EIS"] == 7
 
 
 def test_check_and_train_passes_numpy_buffer_without_dataframe_conversion():
@@ -304,6 +425,169 @@ def test_agent_switches_between_training_and_eval_envs(light_agent, tmp_path):
     agent.switch_to_training()
     assert agent.get_active_env is training_env
     assert agent.get_current_env_type() == "training"
+
+
+def test_progressive_evaluation_carries_best_state_and_runs_every_stage(monkeypatch):
+    training_env = ProgressiveEvaluationEnv()
+    eval_env = ProgressiveEvaluationEnv()
+    agent = object.__new__(agent_module.DDQN_ECM)
+    agent.training_env = training_env
+    agent.eval_env = eval_env
+    agent._active_env = training_env
+    agent.action_cap = 3
+    calls = []
+    best_states = ["+PR", "+LR", "+PP"]
+
+    def fake_generate_ecm(**kwargs):
+        stage_index = len(calls)
+        calls.append(kwargs)
+        active_env = agent._active_env
+        active_env.START_STATE = kwargs["initial_state"] or "+RR"
+        active_env.current_spectrum_view_id = f"view-{stage_index}"
+        return {
+            "ground_truth_circuit": "R0",
+            "found_solution": stage_index == 0,
+            "best_reward": 3.0 - stage_index,
+            "best_state": best_states[stage_index],
+        }
+
+    monkeypatch.setattr(agent, "generate_ECM", fake_generate_ecm)
+
+    result = agent.generate_progressive_ECM(
+        EIS_i=0,
+        num_windows=3,
+        max_actions=2,
+        verbose=False,
+        use_eval_env=True,
+    )
+
+    assert agent.get_active_env is eval_env
+    assert [call["initial_state"] for call in calls] == [None, "+PR", "+LR"]
+    assert [stage["selected_point_count"] for stage in result["stage_results"]] == [
+        2,
+        4,
+        6,
+    ]
+    assert [stage["continued_to_next_stage"] for stage in result["stage_results"]] == [
+        True,
+        True,
+        False,
+    ]
+    assert result["completed_all_stages"] is True
+    assert result["final_result"]["best_state"] == "+PP"
+
+
+def test_progressive_evaluation_policy_can_reroute_and_stop(monkeypatch):
+    env = ProgressiveEvaluationEnv()
+    agent = object.__new__(agent_module.DDQN_ECM)
+    agent.training_env = env
+    agent.eval_env = env
+    agent._active_env = env
+    agent.action_cap = 3
+    calls = []
+
+    def fake_generate_ecm(**kwargs):
+        stage_index = len(calls)
+        calls.append(kwargs)
+        env.START_STATE = kwargs["initial_state"] or "+RR"
+        env.current_spectrum_view_id = f"view-{stage_index}"
+        return {
+            "ground_truth_circuit": "R0",
+            "found_solution": False,
+            "best_reward": stage_index + 1.0,
+            "best_state": ["+PR", "+LR"][stage_index],
+        }
+
+    class RerouteThenStopPolicy:
+        def decide(self, outcome):
+            if outcome.stage_index == 0:
+                return StageTransitionDecision("+PP", True)
+            return StageTransitionDecision(None, False)
+
+    monkeypatch.setattr(agent, "generate_ECM", fake_generate_ecm)
+
+    result = agent.generate_progressive_ECM(
+        EIS_i=0,
+        num_windows=3,
+        verbose=False,
+        transition_policy=RerouteThenStopPolicy(),
+    )
+
+    assert [call["initial_state"] for call in calls] == [None, "+PP"]
+    assert len(result["stage_results"]) == 2
+    assert result["completed_all_stages"] is False
+    assert result["final_result"]["best_state"] == "+LR"
+
+
+def test_progressive_evaluation_requires_dataprep_for_default_encoder():
+    env = ProgressiveEvaluationEnv()
+    env.dataprep = None
+    agent = object.__new__(agent_module.DDQN_ECM)
+    agent.training_env = env
+    agent.eval_env = env
+    agent._active_env = env
+
+    with pytest.raises(ValueError, match="must retain a loaded EISDataPrep"):
+        agent.generate_progressive_ECM(EIS_i=0, num_windows=2, verbose=False)
+
+
+def test_batch_evaluation_uses_runtime_and_can_disable_progressive_mode():
+    env = ProgressiveEvaluationEnv()
+    encoder = InterpolatingSpectrumEncoder(env.dataprep)
+    runtime = ProgressiveSpectrumRuntimeConfig(
+        enabled=True,
+        num_windows=2,
+        selector=EqualPointWindowSelector(2),
+        training_encoder=encoder,
+        evaluation_encoder=encoder,
+        transition_policy=CarryBestStatePolicy(),
+    )
+    agent = object.__new__(agent_module.DDQN_ECM)
+    agent.training_env = env
+    agent.eval_env = env
+    agent._active_env = env
+    agent.progressive_spectrum = runtime
+    progressive_calls = []
+    final_result = {
+        "EIS_i": 0,
+        "environment_type": "evaluation",
+        "ground_truth_circuit": "R0",
+        "found_solution": True,
+        "best_reward": 2.0,
+        "best_action_number": 1,
+        "best_circuit": "R0",
+        "best_coding": "R",
+        "best_metrics": {"chi_square": 0.1},
+        "best_param": {"R0": 1.0},
+        "total_actions_taken": 2,
+        "action_history": [],
+    }
+
+    def fake_progressive(**kwargs):
+        progressive_calls.append(kwargs)
+        return {
+            "num_windows": 2,
+            "completed_all_stages": True,
+            "stage_results": [
+                {"evaluation_result": {"total_actions_taken": 1}},
+                {"evaluation_result": final_result},
+            ],
+            "final_result": final_result,
+        }
+
+    agent.generate_progressive_ECM = fake_progressive
+    progressive_results = agent.eval_batch_eis(eis_indices=[0])
+
+    assert progressive_calls[0]["encoder"] is encoder
+    assert progressive_results.loc[0, "total_actions"] == 3
+    assert progressive_results.loc[0, "progressive_completed_all_stages"]
+
+    full_calls = []
+    agent.generate_ECM = lambda **kwargs: full_calls.append(kwargs) or final_result
+    full_results = agent.eval_batch_eis(eis_indices=[0], progressive=False)
+
+    assert len(full_calls) == 1
+    assert "progressive_num_windows" not in full_results
 
 
 def test_agent_can_replace_envs(light_agent, tmp_path):

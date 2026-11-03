@@ -3,13 +3,21 @@
 import json
 import pickle
 
+import numpy as np
 import pytest
 
-from test_training_baseline import environment_factory as _environment_factory
+from test_training_baseline import controlled_fit, environment_factory as _environment_factory
 from checkpoint_worker import exact
 from autorec.agent import DDQN_ECM
 from autorec import checkpoint
+from autorec.data_preparation import EISDataPrep
 from autorec.environment import EIS_ECM_Env
+from autorec.progressive_spectrum import (
+    CarryBestStatePolicy,
+    EqualPointWindowSelector,
+    InterpolatingSpectrumEncoder,
+    ProgressiveSpectrumRuntimeConfig,
+)
 from autorec.runtime_state import rng_state_dict, restore_rng_state
 
 
@@ -57,6 +65,114 @@ def test_save_read_is_exact_and_rng_inert(agent, tmp_path):
     assert payloads["manifest.json"]["series_id"] == agent._checkpoint_series_id
     with pytest.raises(FileExistsError):
         checkpoint.save_checkpoint(agent, path)
+
+
+def test_checkpoint_restores_progressive_runtime_against_restored_environment(
+    environment_factory, tmp_path
+):
+    env = environment_factory()
+    env.dataset["flatten_Z"] = [np.linspace(0.0, 1.0, 6) for _ in range(len(env.dataset))]
+    env.EIS_INPUT_SIZE = 6
+    dataprep = object.__new__(EISDataPrep)
+    dataprep.frequency_npoints = 3
+    dataprep.eis_features = ["ReZ", "ImZ"]
+    dataprep.dataset = env.dataset
+    env.dataprep = dataprep
+    encoder = InterpolatingSpectrumEncoder(dataprep)
+    runtime = ProgressiveSpectrumRuntimeConfig(
+        enabled=True,
+        num_windows=2,
+        selector=EqualPointWindowSelector(2),
+        training_encoder=encoder,
+        evaluation_encoder=encoder,
+        transition_policy=CarryBestStatePolicy(),
+    )
+    instance = DDQN_ECM(
+        env,
+        save_dir=tmp_path / "outputs",
+        num_trials=2,
+        hidden_layers=[{"type": "Dense", "units": 4, "activation": "relu"}],
+        action_cap=2,
+        batch_size=2,
+        buffer_capacity=7,
+        NN_sleep=3,
+        progressive_spectrum=runtime,
+    )
+    instance.train(additional_trials=0)
+
+    path = checkpoint.save_checkpoint(instance, tmp_path / "progressive-checkpoint")
+    restored = checkpoint.load_checkpoint(path, save_dir=tmp_path / "restored")
+
+    restored_runtime = restored.progressive_spectrum
+    assert restored_runtime.metadata == instance.progressive_spectrum.metadata
+    assert restored_runtime.training_encoder is restored_runtime.evaluation_encoder
+    assert restored_runtime.training_encoder.dataprep is restored.training_env.dataprep
+    assert restored.training_env.dataprep.dataset is restored.training_env.dataset
+
+
+def test_progressive_training_checkpoint_resumes_at_next_trial(
+    environment_factory, tmp_path, monkeypatch
+):
+    env = environment_factory()
+    frequency = np.array([1.0, 10.0, 100.0, 1_000.0])
+    for row_position in range(len(env.dataset)):
+        env.dataset.at[row_position, "freq"] = frequency.copy()
+        env.dataset.at[row_position, "Z_true"] = np.array([1 + 4j, 2 + 3j, 3 + 2j, 4 + 1j])
+        env.dataset.at[row_position, "flatten_Z"] = np.linspace(0.0, 1.0, 3)
+    env.EIS_measurement_size = 4
+    env.EIS_INPUT_SIZE = 3
+    dataprep = object.__new__(EISDataPrep)
+    dataprep.frequency_npoints = 3
+    dataprep.eis_features = ["ReZ"]
+    dataprep.dataset = env.dataset
+    env.dataprep = dataprep
+    encoder = InterpolatingSpectrumEncoder(dataprep)
+    runtime = ProgressiveSpectrumRuntimeConfig(
+        enabled=True,
+        num_windows=2,
+        selector=EqualPointWindowSelector(2),
+        training_encoder=encoder,
+        evaluation_encoder=encoder,
+        transition_policy=CarryBestStatePolicy(),
+    )
+    instance = DDQN_ECM(
+        env,
+        save_dir=tmp_path / "first",
+        num_trials=2,
+        hidden_layers=[{"type": "Dense", "units": 4, "activation": "relu"}],
+        action_cap=1,
+        batch_size=2,
+        buffer_capacity=8,
+        NN_sleep=100,
+        save_start=100,
+        progressive_spectrum=runtime,
+    )
+    monkeypatch.setattr(
+        type(env),
+        "_evaluate_circuit",
+        lambda self, circuit, components: controlled_fit(circuit, components),
+    )
+    monkeypatch.setattr(type(instance.model), "save", lambda *args, **kwargs: None)
+    monkeypatch.setattr(DDQN_ECM, "_plot_training_metrics", lambda *args: None)
+    checkpoint_root = tmp_path / "checkpoints"
+
+    first = instance.train(additional_trials=1, checkpoint_dir=checkpoint_root)
+
+    assert instance.completed_trials == 1
+    assert len(first["stage_history"]) == 2
+    restored = checkpoint.load_checkpoint(
+        checkpoint_root / "trial-00000001", save_dir=tmp_path / "resumed"
+    )
+    resumed = restored.train(additional_trials=1)
+
+    assert restored.completed_trials == 2
+    assert len(resumed["stage_history"]) == 4
+    assert resumed["stage_history"]["trial"].tolist() == [0, 0, 1, 1]
+    assert restored.progressive_spectrum.metadata == runtime.metadata
+    assert set(restored._replay_buffer["spectrum_view_id"]) == {
+        resumed["stage_history"].iloc[-2]["spectrum_view_id"],
+        resumed["stage_history"].iloc[-1]["spectrum_view_id"],
+    }
 
 
 def test_reconstructible_performance_caches_are_not_checkpoint_state(agent):

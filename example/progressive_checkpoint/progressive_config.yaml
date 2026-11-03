@@ -1,0 +1,50 @@
+dataprep:
+  path: ${AUTOREC_ROOT}/data/examples/training_dataset.pkl
+  mode: load
+  evaluation: false
+  frequency_npoints: null
+  eis_features: [ImZ, phi, mag, nphi]
+
+environment:
+  elements: ["+", "/", R, L, P]
+  initial_state: [+RRRRRR, ++RRRRRR, +++RRRRRR]
+  seed: 42
+  chromosome_HEAD_len: 10
+  cache_enabled: true
+  cache_capacity: 128
+  cache_type: lru
+
+agent:
+  save_dir: ${AUTOREC_ROOT}/example/progressive_checkpoint/outputs/progressive
+  save_start: 0
+  save_frequency: 100
+  action_cap: 4
+  random_seed: 42
+  num_trials: 2
+  episodes_trial: 1
+  hidden_layers:
+    - {type: Dense, units: 40, activation: relu}
+    - {type: Dense, units: 40, activation: relu}
+  optimizer: {type: Adam, learning_rate: 0.0005}
+  batch_size: 2
+  train_frequency: 1
+  gradient_steps: 1
+  update_target_frequency: 10
+  NN_sleep: 2
+  buffer_capacity: 32
+
+progressive_spectrum:
+  enabled: true
+  num_windows: 4
+  window_selector:
+    type: EqualPointWindowSelector
+    parameters: {}
+  observation_encoder:
+    type: InterpolatingSpectrumEncoder
+    parameters: {}
+  spectrum_source:
+    type: PreparedSpectrumSource
+    parameters: {}
+  stage_transition_policy:
+    type: CarryBestStatePolicy
+    parameters: {}

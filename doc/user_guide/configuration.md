@@ -1,9 +1,9 @@
 # Configuration guide
 
 AutoREC's factory accepts a YAML file or Python dictionary with `dataprep`,
-`environment`, and `agent` sections. Section keys are passed as constructor
-arguments to the corresponding AutoREC class, with a few factory-specific rules
-described below.
+`environment`, and `agent` sections, plus an optional `progressive_spectrum`
+section. Section keys are passed as constructor arguments to the corresponding
+AutoREC class, with a few factory-specific rules described below.
 
 Start from `configs_yaml/examples/demo_pipeline_config.yaml` in the repository
 and keep experiment-specific copies outside the tracked example.
@@ -153,9 +153,76 @@ on exact continuation.
 If `action_cap` is `null`, evaluation must receive an explicit `max_actions`
 argument or CLI `--max-actions` value.
 
+## Progressive-spectrum options
+
+Progressive execution is opt-in. Omitting `progressive_spectrum`, setting
+`enabled: false`, or using `num_windows: 1` without explicitly enabling it
+preserves the ordinary full-spectrum training and evaluation path. When enabled,
+the same runtime is used automatically by `agent.train()` and batch evaluation:
+
+```yaml
+progressive_spectrum:
+  enabled: true
+  num_windows: 4
+  window_selector:
+    type: EqualPointWindowSelector
+    parameters: {}
+  observation_encoder:
+    type: InterpolatingSpectrumEncoder
+    parameters: {}
+  spectrum_source:
+    type: PreparedSpectrumSource
+    parameters: {}
+  stage_transition_policy:
+    type: CarryBestStatePolicy
+    parameters: {}
+```
+
+`EqualPointWindowSelector` divides points in their source order and exposes
+cumulative windows: stage 0 uses window 0, stage 1 uses windows 0 and 1, and so
+on. It expects the source spectrum to be ordered from high to low frequency.
+`PreparedSpectrumSource` reads the prepared `freq` and `Z_true` columns.
+`RetainedSpectrumSource` instead reads `source_freq` and `source_Z`, which are
+available when data preparation retained the original measurements.
+
+The encoder always produces the feature dimension expected by the network while
+the environment fits every physical point selected for the current stage.
+`InterpolatingSpectrumEncoder` maps selected points to the configured prepared
+frequency grid. `RawSpectrumEncoder` preserves selected measurements, pads short
+observations, and deterministically downsamples only the observation when needed:
+
+```yaml
+observation_encoder:
+  type: RawSpectrumEncoder
+  parameters:
+    padding_value: -1.0
+    normalizer:
+      type: SentinelSafeMinMaxNormalizer
+      parameters: {}
+    downsampler:
+      type: UniformIndexDownsampler
+      parameters: {}
+```
+
+Padding and downsampling never remove points from physical ECM fitting. The raw
+encoder's sentinel-safe normalizer keeps valid features in `[0, 1]`, so `-1`
+remains an unambiguous padding value. `LegacyEISFeatureNormalizer` is available
+for controlled comparisons with existing feature conventions, subject to its
+documented sentinel constraints.
+
+`CarryBestStatePolicy` starts the next stage from the best state found in the
+current stage and continues until every configured stage is complete. Component
+types are registry names rather than import paths. Custom Python components can
+be supplied through direct APIs, but complete checkpoint restoration currently
+supports only the registered built-ins. See the
+{doc}`progressive API reference <../api/progressive_spectrum>` and the runnable
+[`example/progressive_checkpoint/`](https://github.com/AUTODIAL/AutoREC/tree/main/example/progressive_checkpoint).
+
 ## Configuration validation
 
 Before a long run, build the pipeline and inspect the selected data and model
 shapes in a small, controlled test. YAML parsing and factory construction catch
-structural errors but do not establish scientific suitability. The definitive
+structural errors but do not establish scientific suitability. Progressive
+windowing changes the sequence of fitting datasets and generally requires
+training or fine-tuning for that observation distribution. The definitive
 argument lists are in the {doc}`API reference <../api/index>`.

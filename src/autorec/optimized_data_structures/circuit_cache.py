@@ -510,14 +510,22 @@ class HistoryCache:
             "fit_penalty",
         }
         for key, payload in state["entries"]:
-            if len(key) != 2:
-                raise ValueError("HistoryCache keys must have two components.")
+            if len(key) not in (2, 3):
+                raise ValueError(
+                    "HistoryCache keys must have two components for full spectra or three "
+                    "components for progressive views."
+                )
             if not fields <= payload.keys():
                 raise ValueError(
                     f"HistoryCache payload is missing fields: {fields - payload.keys()}."
                 )
 
-    def _make_key(self, circuit_code: str, eis_index: int) -> Tuple:
+    def _make_key(
+        self,
+        circuit_code: str,
+        eis_index: int,
+        spectrum_view_id: str | None = None,
+    ) -> Tuple:
         """
         Create a cache key from the evaluated circuit and EIS measurement.
 
@@ -527,12 +535,16 @@ class HistoryCache:
             The circuit coding string (GEP representation).
         eis_index : int
             Index of the EIS measurement in the dataset.
+        spectrum_view_id : str or None
+            Stable identity for a progressive physical spectrum. ``None`` preserves the
+            legacy two-component full-spectrum key.
         Returns
         -------
         tuple
             Tuple key for cache lookup.
         """
-        return (circuit_code, eis_index)
+        key = (circuit_code, eis_index)
+        return key if spectrum_view_id is None else (*key, spectrum_view_id)
 
     def get(
         self,
@@ -540,6 +552,7 @@ class HistoryCache:
         eis_index: int,
         action_type: str | None = None,
         action_position: int | None = None,
+        spectrum_view_id: str | None = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Retrieve cached circuit evaluation result.
@@ -554,12 +567,14 @@ class HistoryCache:
             Ignored compatibility argument. Cache identity is independent of action path.
         action_position : int, optional
             Ignored compatibility argument. Cache identity is independent of action path.
+        spectrum_view_id : str or None, optional
+            Stable identity for a progressive physical spectrum.
         Returns
         -------
         dict or None
             Dictionary with cached results or None if not found.
         """
-        key = self._make_key(circuit_code, eis_index)
+        key = self._make_key(circuit_code, eis_index, spectrum_view_id)
         return self.cache.get(key)
 
     def put(
@@ -576,6 +591,7 @@ class HistoryCache:
         depth_penalty: float = 0.0,
         fit_bonus: float = 0.0,
         fit_penalty: float = 0.0,
+        spectrum_view_id: str | None = None,
     ) -> None:
         """
         Cache a circuit evaluation result.
@@ -606,8 +622,10 @@ class HistoryCache:
             Bonus for fit quality.
         fit_penalty : float
             Penalty for fit issues.
+        spectrum_view_id : str or None, optional
+            Stable identity for a progressive physical spectrum.
         """
-        key = self._make_key(circuit_code, eis_index)
+        key = self._make_key(circuit_code, eis_index, spectrum_view_id)
         value = {
             "reward": reward,
             "metrics": metrics,

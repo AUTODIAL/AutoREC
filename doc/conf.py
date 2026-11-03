@@ -40,6 +40,7 @@ nitpick_ignore = [
     # These documented aliases are Python data objects; Sphinx treats annotations as classes.
     ("py:class", "LayerConfig"),
     ("py:class", "OptimizerConfig"),
+    ("py:class", "collections.abc.Mapping"),
 ]
 
 # Local preview URLs are instructions for a server started by the reader, not

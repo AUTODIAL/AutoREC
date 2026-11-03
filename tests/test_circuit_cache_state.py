@@ -157,6 +157,17 @@ def test_history_cache_preserves_full_and_failed_results_without_rng_use(
     assert frozen(restored.get("RLR", 3, "L", 1)) == frozen(failure)
 
 
+@pytest.mark.parametrize("cache_type", ["lru", "clock"])
+def test_history_cache_roundtrip_preserves_progressive_view_identity(cache_type):
+    cache = HistoryCache(3, cache_type)
+    cache.put("RPR", 2, "P", 1, spectrum_view_id="stage-0", **payload())
+    restored = HistoryCache.from_state_dict(cache.state_dict())
+
+    assert restored.get("RPR", 2, spectrum_view_id="stage-0") is not None
+    assert restored.get("RPR", 2, spectrum_view_id="stage-1") is None
+    assert ("RPR", 2, "stage-0") in restored.cache
+
+
 @pytest.mark.parametrize("cache_class", [LRUCache, ClockCache])
 def test_cache_payload_preserves_cpu_jax_scalars(cache_class):
     import jax.numpy as jnp

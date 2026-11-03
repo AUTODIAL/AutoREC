@@ -18,11 +18,11 @@ from autorec.optimized_data_structures.circuit_cache import HistoryCache
 
 
 _ENV_FIELDS = frozenset(
-    "dataset ELEMENTS ELEMENTS_EXTENDED _operator _terminal seed _all_start_states "
+    "dataset dataprep ELEMENTS ELEMENTS_EXTENDED _operator _terminal seed _all_start_states "
     "EIS_measurement_size EIS_INPUT_SIZE chromosome_HEAD_len chromosome_TAIL_len "
     "chromosome_len cache_enabled cache_capacity cache_type start_state_list ACTIONS_LIST "
-    "current_eis_index encoded_state START_STATE state Z freq Z_norm_flatten true_circuit "
-    "chi_threshold r2_threshold".split()
+    "current_eis_index active_spectrum_view current_spectrum_view_id encoded_state "
+    "START_STATE state Z freq Z_norm_flatten true_circuit chi_threshold r2_threshold".split()
 )
 
 

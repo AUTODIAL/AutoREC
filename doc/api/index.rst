@@ -37,6 +37,7 @@ Reference pages
    data_preparation
    environment
    agent
+   progressive_spectrum
    factory
    runtime
    utilities

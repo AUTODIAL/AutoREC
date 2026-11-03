@@ -20,6 +20,21 @@ from autorec.utils import (
 from autorec.factory import create_model, get_model_config
 from autorec.factory import create_optimizer, get_optimizer_config
 from autorec.optimized_data_structures.circular_buffer import CircularBuffer
+from autorec.progressive_spectrum import (
+    CarryBestStatePolicy,
+    EqualPointWindowSelector,
+    InterpolatingSpectrumEncoder,
+    PREPARED_SPECTRUM_SOURCE,
+    ProgressiveStageOutcome,
+    ProgressiveSpectrumRuntimeConfig,
+    SpectrumObservationEncoder,
+    SpectrumSource,
+    SpectrumView,
+    SpectrumWindowSelector,
+    StageTransitionPolicy,
+    build_spectrum_view,
+    decide_stage_transition,
+)
 
 
 default_hidden_layers = [
@@ -55,15 +70,20 @@ class _TrainingState:
     statistical_analysis: dict[str, list] = field(
         default_factory=lambda: {"episodic_cumul_reward": [], "episodic_mean_reward": []}
     )
+    workflow_config: dict | None = None
+    stage_history: pd.DataFrame = field(default_factory=pd.DataFrame)
 
     def results(self) -> dict:
         """Return the current histories without copying or consuming randomness."""
-        return {
+        results = {
             "NN_loss": self.NN_loss,
             "success_rate": self.success_rate,
             "terminal_states": self.terminal_states,
             "statistical_analysis": self.statistical_analysis,
         }
+        if self.workflow_config is not None:
+            results["stage_history"] = self.stage_history
+        return results
 
 
 class DDQN_ECM:
@@ -98,6 +118,7 @@ class DDQN_ECM:
         epsilon_decay: float = 0.99968,
         start_decay: int = 10,
         bayesian: bool = False,
+        progressive_spectrum: Optional[ProgressiveSpectrumRuntimeConfig] = None,
         # NN hyperparameters
         model: Optional[str] = None,
         hidden_layers: Optional[Sequence[dict[str, Any]]] = None,
@@ -185,6 +206,10 @@ class DDQN_ECM:
             If True, a Bayesian posterior-based bonus is added to the reward. This option is
             currently retained for compatibility and is not active in the reward calculation.
 
+        progressive_spectrum : ProgressiveSpectrumRuntimeConfig, optional
+            Resolved progressive components. When omitted, training and batch evaluation retain
+            their original full-spectrum behavior.
+
         model : str, optional
             Path to a pre-trained model to load. This argument takes precedence over creating
             a new model from the hidden_layers configuration.
@@ -254,6 +279,13 @@ class DDQN_ECM:
             eval_env if eval_env is not None else training_env
         )  # Default to training_env
         self._active_env = self.training_env  # Start with training environment active
+        if progressive_spectrum is not None and not isinstance(
+            progressive_spectrum, ProgressiveSpectrumRuntimeConfig
+        ):
+            raise TypeError(
+                "progressive_spectrum must be a ProgressiveSpectrumRuntimeConfig or None"
+            )
+        self.progressive_spectrum = progressive_spectrum
 
         # Store circuit chromosome parameters as private (read-only via properties)
         self.random_seed = random_seed
@@ -695,19 +727,6 @@ class DDQN_ECM:
 
         return samples, indices, weights
 
-    def _get_flatten_z_matrix(self) -> np.ndarray:
-        """Return a cached dense matrix of flattened EIS inputs for the active dataset."""
-        dataset = self._active_env.dataset
-        cache_key = id(dataset)
-        cache = getattr(self, "_flatten_z_matrices", None)
-        if cache is None:
-            cache = self._flatten_z_matrices = {}
-        if cache_key not in cache:
-            cache[cache_key] = np.stack(dataset["flatten_Z"].to_numpy()).astype(
-                np.float32, copy=False
-            )
-        return cache[cache_key]
-
     def _get_action_index_map(self) -> dict[tuple[str, int], int]:
         """Map environment action values to their neural-network output positions."""
         actions = self._active_env.ACTIONS_LIST
@@ -923,7 +942,9 @@ class DDQN_ECM:
             Number of replay mini-batches to sample and optimizer updates to perform.
 
         history : CircularBuffer
-            NumPy-backed experience replay buffer.
+            NumPy-backed experience replay buffer. Every transition retains the exact
+            fixed-size ``EIS_flatten`` observation used for action selection; observations
+            are not reconstructed from the current environment dataset.
 
         Returns
         -------
@@ -931,14 +952,12 @@ class DDQN_ECM:
             Mean mini-batch loss across all optimizer updates in this training step.
         """
         losses = []
-        flatten_z_matrix = self._get_flatten_z_matrix()
         train_step = self._get_compiled_train_step()
         for _ in range(gradient_steps):
             samples, sample_indices, weights = self._sample_experience(
                 history, self.prioritized_replay_beta
             )
-            eis_indices = samples["EIS"].astype(np.intp, copy=False)
-            sample_flatten_z = flatten_z_matrix[eis_indices]
+            sample_flatten_z = samples["EIS_flatten"]
             states = np.concatenate(
                 (sample_flatten_z, samples["encoded_state"]), axis=1
             ).astype(np.float32, copy=False)
@@ -1014,6 +1033,11 @@ class DDQN_ECM:
         additional_trials: Optional[int] = None,
         checkpoint_dir: str | Path | None = None,
         checkpoint_every: Optional[int] = None,
+        num_windows: Optional[int] = None,
+        selector: Optional[SpectrumWindowSelector] = None,
+        encoder: Optional[SpectrumObservationEncoder] = None,
+        transition_policy: Optional[StageTransitionPolicy] = None,
+        spectrum_source: Optional[SpectrumSource] = None,
     ):
         """Train one session, retaining cumulative state when continuation is enabled.
 
@@ -1037,6 +1061,12 @@ class DDQN_ECM:
         checkpoint_every : int or None, optional
             Positive cumulative trial interval. Requires checkpoint_dir. None saves only
             at the session end. A zero-trial call does not automatically save a checkpoint.
+        num_windows, selector, encoder, transition_policy, spectrum_source : optional
+            Explicit progressive-spectrum components. When all are omitted, an enabled
+            ``progressive_spectrum`` runtime attached to the agent is used; otherwise training
+            follows the original full-spectrum path. Explicit components support ordinary and
+            same-process continuation. Persistent progressive checkpoints require an attached
+            runtime configuration so the component specification can be restored safely.
 
         Returns
         -------
@@ -1066,6 +1096,79 @@ class DDQN_ECM:
             if additional_trials < 0:
                 raise ValueError("additional_trials must be nonnegative.")
 
+        explicit_progressive = any(
+            component is not None
+            for component in (
+                num_windows,
+                selector,
+                encoder,
+                transition_policy,
+                spectrum_source,
+            )
+        )
+        runtime_progressive = getattr(self, "progressive_spectrum", None)
+        configured_progressive = (
+            not explicit_progressive
+            and runtime_progressive is not None
+            and runtime_progressive.enabled
+        )
+        if configured_progressive:
+            num_windows = runtime_progressive.num_windows
+            selector = runtime_progressive.selector
+            encoder = runtime_progressive.training_encoder
+            transition_policy = runtime_progressive.transition_policy
+            spectrum_source = runtime_progressive.spectrum_source
+        elif num_windows is None:
+            num_windows = 1
+        if isinstance(num_windows, bool) or not isinstance(num_windows, int):
+            raise TypeError("num_windows must be an integer")
+        if num_windows <= 0:
+            raise ValueError("num_windows must be greater than zero")
+
+        use_spectrum_views = num_windows > 1 or any(
+            component is not None
+            for component in (selector, encoder, transition_policy, spectrum_source)
+        )
+        if use_spectrum_views:
+            if selector is None:
+                selector = EqualPointWindowSelector(num_windows)
+            elif selector.num_windows != num_windows:
+                raise ValueError(
+                    "selector.num_windows must match num_windows: "
+                    f"{selector.num_windows} != {num_windows}"
+                )
+            if encoder is None:
+                if self.training_env.dataprep is None:
+                    raise ValueError(
+                        "the training environment must retain a loaded EISDataPrep instance "
+                        "when no encoder is provided"
+                    )
+                encoder = InterpolatingSpectrumEncoder(self.training_env.dataprep)
+            if encoder.observation_size != self.training_env.EIS_INPUT_SIZE:
+                raise ValueError(
+                    "encoder observation size must match the training environment input size: "
+                    f"{encoder.observation_size} != {self.training_env.EIS_INPUT_SIZE}"
+                )
+            if transition_policy is None:
+                transition_policy = CarryBestStatePolicy()
+            if spectrum_source is None:
+                spectrum_source = PREPARED_SPECTRUM_SOURCE
+            workflow_config = {
+                "enabled": True,
+                "num_windows": num_windows,
+                "window_selector": type(selector).__name__,
+                "observation_encoder": type(encoder).__name__,
+                "stage_transition_policy": type(transition_policy).__name__,
+                "spectrum_source": spectrum_source.name,
+            }
+            if checkpoint_dir is not None and not configured_progressive:
+                raise ValueError(
+                    "checkpointed progressive training requires an attached "
+                    "ProgressiveSpectrumRuntimeConfig"
+                )
+        else:
+            workflow_config = None
+
         continuation = (
             additional_trials is not None
             or self._continuation_mode
@@ -1088,6 +1191,11 @@ class DDQN_ECM:
                     )
                 if self._replay_buffer is None:
                     raise RuntimeError("Cannot continue without the retained replay buffer.")
+                if state.workflow_config != workflow_config:
+                    raise ValueError(
+                        "Cannot change full/progressive workflow configuration during "
+                        "continuation."
+                    )
                 start = state.completed_trials
             session_trials = (
                 self.num_trials if additional_trials is None else additional_trials
@@ -1099,12 +1207,19 @@ class DDQN_ECM:
             return state.results()
 
         self.switch_to_training()
-        print(f"Training on: {self.training_env.dataset.shape[0]} EIS samples")
+        if use_spectrum_views:
+            print(
+                f"Progressive training on {len(self.training_env.dataset)} EIS samples "
+                f"across {num_windows} stages"
+            )
+        else:
+            print(f"Training on: {self.training_env.dataset.shape[0]} EIS samples")
         initial_time = time.time()
 
         if not continuation or state is None:
             self._training_state = state = _TrainingState(
-                schedule_config=self._training_schedule_config()
+                schedule_config=self._training_schedule_config(),
+                workflow_config=workflow_config,
             )
             self._replay_buffer = self._create_replay_buffer()
         buffer = self._replay_buffer
@@ -1116,41 +1231,142 @@ class DDQN_ECM:
         for t in range(start, stop):
             state.at_trial_boundary = False
             EIS_i, _ = self._active_env.reset()
-            flatten_Z = self._active_env.Z_norm_flatten
             ground_truth = self._active_env.dataset["true_circuit"][EIS_i]
             print("Trial: ", t, f"for EIS_i: {EIS_i} (EIS of {ground_truth})")
-
-            # Run all episodes for this trial
-            for e in range(self.episodes_trial):
-                episode_result = self._run_episode(
-                    EIS_i,
-                    t,
-                    e,
-                    flatten_Z,
-                    self.gradient_steps,
-                    buffer,
-                    state.terminal_states,
-                    state.iteration,
-                    state.target_freq,
-                    state.memory,
-                    state.success_count,
+            carried_state = self._active_env.START_STATE
+            if use_spectrum_views:
+                source_frequency, source_impedance = spectrum_source.read(
+                    self._active_env.dataset.iloc[EIS_i]
                 )
+            trial_stage_records = []
 
-                # Update counters from episode
-                state.iteration = episode_result["iteration"]
-                state.target_freq = episode_result["target_freq"]
-                state.memory = episode_result["memory"]
-                state.success_count = episode_result["success_count"]
+            for stage_index in range(num_windows):
+                spectrum_view = None
+                if use_spectrum_views:
+                    spectrum_view = build_spectrum_view(
+                        source_frequency,
+                        source_impedance,
+                        stage_index,
+                        selector=selector,
+                        encoder=encoder,
+                        spectrum_source=spectrum_source,
+                    )
+                    self._active_env.reset(
+                        EIS_i,
+                        initial_state=carried_state,
+                        spectrum_view=spectrum_view,
+                    )
+                starting_state = self._active_env.START_STATE
+                stage_best_reward = -np.inf
+                stage_best_state = None
+                stage_found_solution = False
+                stage_actions_start = state.iteration
 
-                # Track episode statistics
-                state.NN_loss = self._update_loss_tracking(
-                    state.NN_loss, episode_result["losses"], t
+                for e in range(self.episodes_trial):
+                    episode_result = self._run_episode(
+                        EIS_i,
+                        t,
+                        e,
+                        self._active_env.Z_norm_flatten,
+                        self.gradient_steps,
+                        buffer,
+                        state.terminal_states,
+                        state.iteration,
+                        state.target_freq,
+                        state.memory,
+                        state.success_count,
+                    )
+                    state.iteration = episode_result["iteration"]
+                    state.target_freq = episode_result["target_freq"]
+                    state.memory = episode_result["memory"]
+                    state.success_count = episode_result["success_count"]
+                    episode_found_solution = episode_result["found_solution"]
+                    should_update_best = (
+                        episode_found_solution and not stage_found_solution
+                    ) or (
+                        episode_found_solution == stage_found_solution
+                        and episode_result["best_reward"] > stage_best_reward
+                    )
+                    if should_update_best:
+                        stage_best_reward = episode_result["best_reward"]
+                        stage_best_state = episode_result["best_state"]
+                    stage_found_solution = stage_found_solution or episode_found_solution
+
+                    state.NN_loss = self._update_loss_tracking(
+                        state.NN_loss, episode_result["losses"], t
+                    )
+                    state.success_rate = self._update_success_rate_tracking(
+                        state.success_rate, state.success_count, state.iteration, t
+                    )
+                    state.statistical_analysis = self._update_episode_statistics(
+                        state.statistical_analysis, episode_result["total_reward"]
+                    )
+
+                if not use_spectrum_views:
+                    continue
+                if stage_best_state is None:
+                    raise ValueError(
+                        f"progressive training stage {stage_index} did not produce a state"
+                    )
+                has_next_stage = stage_index + 1 < num_windows
+                next_state = None
+                continue_to_next_stage = False
+                if has_next_stage:
+                    outcome = ProgressiveStageOutcome(
+                        stage_index=stage_index,
+                        num_stages=num_windows,
+                        initial_state=starting_state,
+                        best_state=stage_best_state,
+                        best_reward=stage_best_reward,
+                        found_solution=stage_found_solution,
+                        metadata={
+                            "mode": "training",
+                            "trial": t,
+                            "EIS_i": EIS_i,
+                            "actions_taken": state.iteration - stage_actions_start,
+                            "spectrum_view": spectrum_view,
+                            "included_window_indices": (
+                                spectrum_view.selection.included_window_indices
+                            ),
+                        },
+                    )
+                    decision = decide_stage_transition(transition_policy, outcome)
+                    next_state = decision.next_state
+                    continue_to_next_stage = decision.continue_to_next_stage
+                trial_stage_records.append(
+                    {
+                        "trial": t,
+                        "EIS_i": EIS_i,
+                        "stage_index": stage_index,
+                        "included_window_indices": (
+                            spectrum_view.selection.included_window_indices
+                        ),
+                        "selected_point_count": len(spectrum_view.selection.frequency),
+                        "selected_frequency_min": float(
+                            np.min(spectrum_view.selection.frequency)
+                        ),
+                        "selected_frequency_max": float(
+                            np.max(spectrum_view.selection.frequency)
+                        ),
+                        "spectrum_view_id": self._active_env.current_spectrum_view_id,
+                        "initial_state": starting_state,
+                        "best_state": stage_best_state,
+                        "best_reward": stage_best_reward,
+                        "found_solution": stage_found_solution,
+                        "actions_taken": state.iteration - stage_actions_start,
+                        "next_state": next_state,
+                        "continued_to_next_stage": continue_to_next_stage,
+                    }
                 )
-                state.success_rate = self._update_success_rate_tracking(
-                    state.success_rate, state.success_count, state.iteration, t
-                )
-                state.statistical_analysis = self._update_episode_statistics(
-                    state.statistical_analysis, episode_result["total_reward"]
+                if has_next_stage and not continue_to_next_stage:
+                    break
+                if has_next_stage:
+                    carried_state = next_state
+
+            if trial_stage_records:
+                state.stage_history = pd.concat(
+                    [state.stage_history, pd.DataFrame(trial_stage_records)],
+                    ignore_index=True,
                 )
 
             # intermediate saving
@@ -1183,39 +1399,36 @@ class DDQN_ECM:
         pd.DataFrame(state.statistical_analysis).to_pickle(
             self.save_dir / "statistical_analysis.pkl"
         )
+        if state.workflow_config is not None:
+            state.stage_history.to_pickle(self.save_dir / "progressive_stage_history.pkl")
 
         self._plot_training_metrics(state.NN_loss, state.statistical_analysis)
 
         return state.results()
 
     def _create_replay_buffer(self) -> CircularBuffer:
-        """Allocate fresh replay using the active training environment's dimensions."""
+        """Allocate stage-safe replay using the active environment dimensions.
+
+        Each transition owns its fixed-size neural-network EIS observation. The optional
+        spectrum-view identity records the physical fitting view without changing input
+        dimensions; ordinary full-spectrum training stores an empty identity.
+        """
+        encoded_state_size = self._active_env.chromosome_len * len(
+            self._active_env.ELEMENTS_EXTENDED
+        )
         return CircularBuffer(
             capacity=self.buffer_capacity,
             dtypes=[
-                # Standard for NumPy: (name, dtype, shape) for multi-dimensional fields
                 ("EIS", "i4"),
+                ("EIS_flatten", "f4", (self._active_env.EIS_INPUT_SIZE,)),
+                ("spectrum_view_id", "U64"),
                 ("state", "U50"),
-                (
-                    "encoded_state",
-                    "f4",
-                    (
-                        self._active_env.chromosome_len
-                        * len(self._active_env.ELEMENTS_EXTENDED),
-                    ),
-                ),  # ADDED THIS
+                ("encoded_state", "f4", (encoded_state_size,)),
                 ("action_type", "U10"),
                 ("action_position", "i4"),
                 ("action_index", "i4"),
                 ("new_state", "U50"),
-                (
-                    "encoded_new_state",
-                    "f4",
-                    (
-                        self._active_env.chromosome_len
-                        * len(self._active_env.ELEMENTS_EXTENDED),
-                    ),
-                ),  # ADDED THIS
+                ("encoded_new_state", "f4", (encoded_state_size,)),
                 ("reward", "f4"),
                 ("terminal_flag", "i1"),
                 ("priority", "f4"),
@@ -1242,6 +1455,9 @@ class DDQN_ECM:
         deadloop_chain = []
         deadloop_flag = False
         losses = []
+        best_reward = -np.inf
+        best_state = None
+        found_solution = False
 
         for a in range(self.action_cap):
             # Execute single action step
@@ -1263,6 +1479,9 @@ class DDQN_ECM:
             # Update episode tracking
             episode_history.append(step_result["history_entry"])
             total_reward += step_result["reward"]
+            if step_result["reward"] > best_reward:
+                best_reward = step_result["reward"]
+                best_state = step_result["history_entry"]["new_state"]
             deadloop_chain = step_result["deadloop_chain"]
             deadloop_flag = step_result["deadloop_flag"]
             iteration = step_result["iteration"]
@@ -1274,6 +1493,9 @@ class DDQN_ECM:
 
             # Check for terminal conditions
             if step_result["good_fit"]:
+                found_solution = True
+                best_reward = step_result["reward"]
+                best_state = step_result["history_entry"]["new_state"]
                 success_count += 1
                 terminal_states = self._record_terminal_state(
                     terminal_states, EIS_i, episode, a, step_result["env_output"]
@@ -1290,6 +1512,9 @@ class DDQN_ECM:
             "success_count": success_count,
             "total_reward": total_reward,
             "losses": losses,
+            "best_reward": best_reward,
+            "best_state": best_state,
+            "found_solution": found_solution,
         }
 
     def _interact_update(
@@ -1346,11 +1571,22 @@ class DDQN_ECM:
         new_encoded_state = self._active_env.encoded_state.copy()
         action_index = self._get_action_index_map()[(str(action_type), int(action_position))]
 
+        eis_observation = np.array(flatten_Z, dtype=np.float32, copy=True)
+        expected_observation_shape = (self._active_env.EIS_INPUT_SIZE,)
+        if eis_observation.shape != expected_observation_shape:
+            raise ValueError(
+                "flatten_Z must match the environment EIS input shape: "
+                f"expected {expected_observation_shape}, got {eis_observation.shape}"
+            )
+        spectrum_view_id = getattr(self._active_env, "current_spectrum_view_id", None)
+
         # Add experience to buffer with priority
         priority = buffer.buffer["priority"][: buffer.size].max() if len(buffer) > 0 else 1.0
 
         buffer.add(
             EIS=EIS_i,
+            EIS_flatten=eis_observation,
+            spectrum_view_id=spectrum_view_id or "",
             state=prev_state,
             encoded_state=prev_encoded_state,  # NEW: Store encoded state
             action_type=action_type,
@@ -1644,6 +1880,8 @@ class DDQN_ECM:
         get_fit_plots: bool = True,
         gif_generation: bool = True,
         use_eval_env: bool = True,  # ADD THIS
+        initial_state: Optional[str] = None,
+        spectrum_view: Optional[SpectrumView] = None,
     ) -> Dict[str, Any]:
         """
         Evaluate the trained agent on a single EIS measurement.
@@ -1672,6 +1910,11 @@ class DDQN_ECM:
         use_eval_env : bool
             Whether to run on the evaluation environment instead
             of the training environment
+        initial_state : str, optional
+            Explicit full chromosome used to initialize this evaluation episode.
+        spectrum_view : SpectrumView, optional
+            Progressive view whose raw selection is used for fitting and whose fixed-size
+            observation is used as neural-network input.
 
         Returns
         -------
@@ -1691,15 +1934,26 @@ class DDQN_ECM:
             raise ValueError("Must provide either EIS_i or flatten_Z")
         if EIS_i is not None and flatten_Z is not None:
             raise ValueError("Cannot provide both EIS_i and flatten_Z - choose one")
+        if flatten_Z is not None and (initial_state is not None or spectrum_view is not None):
+            raise ValueError(
+                "initial_state and spectrum_view are supported only with dataset-index "
+                "evaluation"
+            )
 
         if max_actions is None:
             max_actions = self.action_cap
 
+        reset_options = {}
+        if initial_state is not None:
+            reset_options["initial_state"] = initial_state
+        if spectrum_view is not None:
+            reset_options["spectrum_view"] = spectrum_view
+
         # If using dataset index, fetch the data
         if EIS_i is not None:
-            EIS_i, _ = self._active_env.reset(EIS_i)
+            EIS_i, _ = self._active_env.reset(EIS_i, **reset_options)
         else:
-            EIS_i, _ = self._active_env.reset()  # Reset to valid state
+            EIS_i, _ = self._active_env.reset(**reset_options)  # Reset to valid state
 
         Z_true = self._active_env.Z
         flatten_Z = self._active_env.Z_norm_flatten
@@ -1862,6 +2116,196 @@ class DDQN_ECM:
 
         return eval_result
 
+    def generate_progressive_ECM(
+        self,
+        EIS_i: int,
+        num_windows: int,
+        max_actions: Optional[int] = None,
+        verbose: bool = True,
+        use_eval_env: bool = True,
+        selector: Optional[SpectrumWindowSelector] = None,
+        encoder: Optional[SpectrumObservationEncoder] = None,
+        transition_policy: Optional[StageTransitionPolicy] = None,
+        spectrum_source: Optional[SpectrumSource] = None,
+    ) -> Dict[str, Any]:
+        """Generate an ECM through cumulative partial-spectrum evaluation stages.
+
+        Each stage fits all raw points selected from the physical spectrum while the policy
+        receives the encoder's fixed-size observation. The default transition policy carries
+        the previous stage's best chromosome and evaluates every configured stage.
+
+        Parameters
+        ----------
+        EIS_i : int
+            Zero-based row position used for every stage.
+        num_windows : int
+            Number of cumulative high-to-low-frequency stages.
+        max_actions : int, optional
+            Maximum actions per stage. Defaults to ``self.action_cap``.
+        verbose : bool, default=True
+            Print stage and evaluation progress.
+        use_eval_env : bool, default=True
+            Use the evaluation rather than training environment.
+        selector : SpectrumWindowSelector, optional
+            Window selection strategy. Defaults to equal-point cumulative windows.
+        encoder : SpectrumObservationEncoder, optional
+            Fixed-size observation encoder. Defaults to interpolation configured by the
+            active environment's retained ``EISDataPrep`` instance.
+        transition_policy : StageTransitionPolicy, optional
+            Strategy selecting the next starting chromosome and whether to continue.
+        spectrum_source : SpectrumSource, optional
+            Dataset source for progressive selection and fitting. Defaults to prepared
+            ``freq`` and ``Z_true`` columns.
+
+        Returns
+        -------
+        dict
+            Per-stage results, final result, and whether all stages completed.
+        """
+        if isinstance(EIS_i, bool) or not isinstance(EIS_i, int):
+            raise TypeError("EIS_i must be an integer row position")
+        if isinstance(num_windows, bool) or not isinstance(num_windows, int):
+            raise TypeError("num_windows must be an integer")
+        if num_windows <= 0:
+            raise ValueError("num_windows must be greater than zero")
+        if max_actions is not None and (
+            isinstance(max_actions, bool)
+            or not isinstance(max_actions, int)
+            or max_actions <= 0
+        ):
+            raise ValueError("max_actions must be a positive integer")
+
+        if use_eval_env:
+            self.switch_to_eval()
+        else:
+            self.switch_to_training()
+        active_env = self._active_env
+        if not 0 <= EIS_i < len(active_env.dataset):
+            raise ValueError(
+                f"EIS_i must be between 0 and {len(active_env.dataset) - 1}, got {EIS_i}"
+            )
+
+        if selector is None:
+            selector = EqualPointWindowSelector(num_windows=num_windows)
+        elif selector.num_windows != num_windows:
+            raise ValueError(
+                "selector.num_windows must match num_windows: "
+                f"{selector.num_windows} != {num_windows}"
+            )
+        if encoder is None:
+            if active_env.dataprep is None:
+                raise ValueError(
+                    "the active environment must retain a loaded EISDataPrep instance when "
+                    "no encoder is provided"
+                )
+            encoder = InterpolatingSpectrumEncoder(active_env.dataprep)
+        if encoder.observation_size != active_env.EIS_INPUT_SIZE:
+            raise ValueError(
+                "encoder observation size must match the active environment input size: "
+                f"{encoder.observation_size} != {active_env.EIS_INPUT_SIZE}"
+            )
+        if transition_policy is None:
+            transition_policy = CarryBestStatePolicy()
+        if spectrum_source is None:
+            spectrum_source = PREPARED_SPECTRUM_SOURCE
+
+        row = active_env.dataset.iloc[EIS_i]
+        source_frequency, source_impedance = spectrum_source.read(row)
+        carried_state = None
+        stage_results = []
+
+        for stage_index in range(num_windows):
+            spectrum_view = build_spectrum_view(
+                source_frequency,
+                source_impedance,
+                stage_index,
+                selector=selector,
+                encoder=encoder,
+                spectrum_source=spectrum_source,
+            )
+            if verbose:
+                included = ", ".join(
+                    str(index) for index in spectrum_view.selection.included_window_indices
+                )
+                print(f"\nProgressive stage {stage_index}: windows {included}")
+
+            evaluation_result = self.generate_ECM(
+                EIS_i=EIS_i,
+                max_actions=max_actions,
+                verbose=verbose,
+                get_fit_plots=False,
+                gif_generation=False,
+                use_eval_env=use_eval_env,
+                initial_state=carried_state,
+                spectrum_view=spectrum_view,
+            )
+            starting_state = active_env.START_STATE
+            best_state = evaluation_result["best_state"]
+            if best_state is None:
+                raise ValueError(
+                    f"progressive stage {stage_index} did not return a best chromosome"
+                )
+
+            has_next_stage = stage_index + 1 < num_windows
+            next_state = None
+            continue_to_next_stage = False
+            if has_next_stage:
+                outcome = ProgressiveStageOutcome(
+                    stage_index=stage_index,
+                    num_stages=num_windows,
+                    initial_state=starting_state,
+                    best_state=best_state,
+                    best_reward=evaluation_result["best_reward"],
+                    found_solution=bool(evaluation_result["found_solution"]),
+                    metadata={
+                        "mode": "evaluation",
+                        "EIS_i": EIS_i,
+                        "spectrum_view": spectrum_view,
+                        "included_window_indices": (
+                            spectrum_view.selection.included_window_indices
+                        ),
+                        "evaluation_result": evaluation_result,
+                    },
+                )
+                decision = decide_stage_transition(transition_policy, outcome)
+                next_state = decision.next_state
+                continue_to_next_stage = decision.continue_to_next_stage
+
+            stage_results.append(
+                {
+                    "stage_index": stage_index,
+                    "included_window_indices": (
+                        spectrum_view.selection.included_window_indices
+                    ),
+                    "selected_point_count": len(spectrum_view.selection.frequency),
+                    "selected_frequency_bounds": (
+                        float(np.min(spectrum_view.selection.frequency)),
+                        float(np.max(spectrum_view.selection.frequency)),
+                    ),
+                    "initial_state": starting_state,
+                    "spectrum_view_id": active_env.current_spectrum_view_id,
+                    "spectrum_view": spectrum_view,
+                    "evaluation_result": evaluation_result,
+                    "next_state": next_state,
+                    "continued_to_next_stage": continue_to_next_stage,
+                }
+            )
+            if has_next_stage and not continue_to_next_stage:
+                break
+            if has_next_stage:
+                carried_state = next_state
+
+        final_result = stage_results[-1]["evaluation_result"]
+        return {
+            "EIS_i": EIS_i,
+            "environment_type": self.get_current_env_type(),
+            "ground_truth_circuit": final_result["ground_truth_circuit"],
+            "num_windows": num_windows,
+            "completed_all_stages": len(stage_results) == num_windows,
+            "stage_results": stage_results,
+            "final_result": final_result,
+        }
+
     def eval_batch_eis(
         self,
         eis_indices: Optional[list[int]] = None,
@@ -1871,6 +2315,7 @@ class DDQN_ECM:
         gif_generation: bool = False,
         all_rows: bool = False,
         num_samples: Optional[int] = None,  # NEW: Quick check with random samples
+        progressive: Optional[bool] = None,
     ) -> pd.DataFrame:
         """
         Evaluate the trained agent on a batch of EIS measurements.
@@ -1914,12 +2359,34 @@ class DDQN_ECM:
         num_samples : int, optional
             If set, randomly sample this many EIS indices for quick evaluation. Overrides
             ``eis_indices``.
+        progressive : bool, optional
+            Use the attached progressive runtime. Omitted uses an enabled configuration
+            automatically; false explicitly selects ordinary full-spectrum evaluation.
 
         Returns
         -------
         pd.DataFrame
             DataFrame containing evaluation results for all EIS.
         """
+        runtime_progressive = getattr(self, "progressive_spectrum", None)
+        if progressive is None:
+            use_progressive = runtime_progressive is not None and runtime_progressive.enabled
+        else:
+            if not isinstance(progressive, bool):
+                raise TypeError("progressive must be a boolean or None")
+            use_progressive = progressive
+        if use_progressive and (
+            runtime_progressive is None or not runtime_progressive.enabled
+        ):
+            raise ValueError(
+                "progressive batch evaluation requires an enabled progressive-spectrum "
+                "runtime configuration"
+            )
+        if use_progressive and gif_generation:
+            raise ValueError(
+                "gif_generation is not supported during progressive batch evaluation"
+            )
+
         # Switch to appropriate environment
         if use_eval_env:
             self.switch_to_eval()
@@ -1962,49 +2429,80 @@ class DDQN_ECM:
 
         for idx, eis_i in enumerate(tqdm(eis_indices, desc="Evaluating EIS")):
             try:
-                result = self.generate_ECM(
-                    EIS_i=eis_i,
-                    max_actions=max_actions,
-                    verbose=verbose,
-                    use_eval_env=use_eval_env,
-                    gif_generation=gif_generation,
-                )
-                results.append(
-                    {
-                        "EIS_i": result["EIS_i"],
-                        "environment_type": result["environment_type"],
-                        # 'ground_truth_state': result['ground_truth_state'],
-                        "ground_truth_circuit": result["ground_truth_circuit"],
-                        "found_solution": result["found_solution"],
-                        "best_reward": result["best_reward"],
-                        "best_action_number": result["best_action_number"],
-                        "best_circuit": result["best_circuit"],
-                        "best_coding": result["best_coding"],
-                        "best_metrics": result["best_metrics"],
-                        "best_param": result["best_param"],
-                        "total_actions": result["total_actions_taken"],
-                        "action_history": result["action_history"],
-                    }
-                )
+                if use_progressive:
+                    progressive_result = self.generate_progressive_ECM(
+                        EIS_i=eis_i,
+                        num_windows=runtime_progressive.num_windows,
+                        max_actions=max_actions,
+                        verbose=verbose,
+                        use_eval_env=use_eval_env,
+                        selector=runtime_progressive.selector,
+                        encoder=runtime_progressive.encoder_for(use_eval_env),
+                        transition_policy=runtime_progressive.transition_policy,
+                        spectrum_source=runtime_progressive.spectrum_source,
+                    )
+                    result = progressive_result["final_result"]
+                    total_actions = sum(
+                        stage["evaluation_result"]["total_actions_taken"]
+                        for stage in progressive_result["stage_results"]
+                    )
+                else:
+                    progressive_result = None
+                    result = self.generate_ECM(
+                        EIS_i=eis_i,
+                        max_actions=max_actions,
+                        verbose=verbose,
+                        use_eval_env=use_eval_env,
+                        gif_generation=gif_generation,
+                    )
+                    total_actions = result["total_actions_taken"]
+
+                result_row = {
+                    "EIS_i": result["EIS_i"],
+                    "environment_type": result["environment_type"],
+                    "ground_truth_circuit": result["ground_truth_circuit"],
+                    "found_solution": result["found_solution"],
+                    "best_reward": result["best_reward"],
+                    "best_action_number": result["best_action_number"],
+                    "best_circuit": result["best_circuit"],
+                    "best_coding": result["best_coding"],
+                    "best_metrics": result["best_metrics"],
+                    "best_param": result["best_param"],
+                    "total_actions": total_actions,
+                    "action_history": result["action_history"],
+                }
+                if progressive_result is not None:
+                    result_row.update(
+                        progressive_num_windows=progressive_result["num_windows"],
+                        progressive_completed_all_stages=progressive_result[
+                            "completed_all_stages"
+                        ],
+                        progressive_stage_results=progressive_result["stage_results"],
+                    )
+                results.append(result_row)
             except Exception as e:
                 print(f"\n⚠ Error evaluating EIS {eis_i}: {e}")
-                results.append(
-                    {
-                        "EIS_i": eis_i,
-                        "environment_type": None,
-                        # 'ground_truth_state': None,
-                        "ground_truth_circuit": None,
-                        "found_solution": False,
-                        "best_reward": -np.inf,
-                        "best_action_number": -1,
-                        "best_circuit": None,
-                        "best_coding": None,
-                        "best_metrics": None,
-                        "best_param": None,
-                        "total_actions": 0,
-                        "action_history": [],
-                    }
-                )
+                error_row = {
+                    "EIS_i": eis_i,
+                    "environment_type": None,
+                    "ground_truth_circuit": None,
+                    "found_solution": False,
+                    "best_reward": -np.inf,
+                    "best_action_number": -1,
+                    "best_circuit": None,
+                    "best_coding": None,
+                    "best_metrics": None,
+                    "best_param": None,
+                    "total_actions": 0,
+                    "action_history": [],
+                }
+                if use_progressive:
+                    error_row.update(
+                        progressive_num_windows=runtime_progressive.num_windows,
+                        progressive_completed_all_stages=False,
+                        progressive_stage_results=[],
+                    )
+                results.append(error_row)
 
         eval_time = time.time() - start_time
         results_df = pd.DataFrame(results)
@@ -2038,6 +2536,7 @@ class DDQN_ECM:
         verbose: bool = False,
         use_eval_env: bool = True,
         gif_generation: bool = False,
+        progressive: Optional[bool] = None,
     ) -> pd.DataFrame:
         """
         Evaluate the trained agent on every EIS row in the selected dataset.
@@ -2057,6 +2556,8 @@ class DDQN_ECM:
             use the training environment.
         gif_generation : bool
             Generate a circuit-evolution GIF for each EIS.
+        progressive : bool, optional
+            Override automatic use of an attached progressive runtime.
 
         Returns
         -------
@@ -2069,12 +2570,13 @@ class DDQN_ECM:
             use_eval_env=use_eval_env,
             gif_generation=gif_generation,
             all_rows=True,
+            progressive=progressive,
         )
 
     @property
     def metadata(self) -> dict:
         """Return metadata about the agent and its training configuration."""
-        return {
+        metadata = {
             "training_env": self.training_env.metadata,
             "eval_env": self.eval_env.metadata,
             "save_dir": str(self.save_dir),
@@ -2111,3 +2613,6 @@ class DDQN_ECM:
             "beta_anneal_trials": self.beta_anneal_trials,
             "final_beta": self.final_beta,
         }
+        if self.progressive_spectrum is not None:
+            metadata["progressive_spectrum"] = self.progressive_spectrum.metadata
+        return metadata
