@@ -26,6 +26,7 @@ from autorec.progressive_spectrum import (
     InterpolatingSpectrumEncoder,
     PREPARED_SPECTRUM_SOURCE,
     ProgressiveStageOutcome,
+    ProgressiveSpectrumRuntimeConfig,
     SpectrumObservationEncoder,
     SpectrumSource,
     SpectrumView,
@@ -112,6 +113,7 @@ class DDQN_ECM:
         epsilon_decay: float = 0.99968,
         start_decay: int = 10,
         bayesian: bool = False,
+        progressive_spectrum: Optional[ProgressiveSpectrumRuntimeConfig] = None,
         # NN hyperparameters
         model: Optional[str] = None,
         hidden_layers: Optional[Sequence[dict[str, Any]]] = None,
@@ -199,6 +201,10 @@ class DDQN_ECM:
             If True, a Bayesian posterior-based bonus is added to the reward. This option is
             currently retained for compatibility and is not active in the reward calculation.
 
+        progressive_spectrum : ProgressiveSpectrumRuntimeConfig, optional
+            Resolved progressive components. When omitted, training and batch evaluation retain
+            their original full-spectrum behavior.
+
         model : str, optional
             Path to a pre-trained model to load. This argument takes precedence over creating
             a new model from the hidden_layers configuration.
@@ -268,6 +274,13 @@ class DDQN_ECM:
             eval_env if eval_env is not None else training_env
         )  # Default to training_env
         self._active_env = self.training_env  # Start with training environment active
+        if progressive_spectrum is not None and not isinstance(
+            progressive_spectrum, ProgressiveSpectrumRuntimeConfig
+        ):
+            raise TypeError(
+                "progressive_spectrum must be a ProgressiveSpectrumRuntimeConfig or None"
+            )
+        self.progressive_spectrum = progressive_spectrum
 
         # Store circuit chromosome parameters as private (read-only via properties)
         self.random_seed = random_seed

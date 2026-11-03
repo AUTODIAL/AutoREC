@@ -1177,3 +1177,226 @@ class ProgressiveSpectrumRuntimeConfig:
             ),
             "spectrum_source": self.spectrum_source.name,
         }
+
+
+def _component_state(component, supported: dict[type, tuple[str, dict]]) -> dict:
+    """Return a JSON-compatible state for one supported built-in component."""
+    try:
+        component_type, parameters = supported[type(component)]
+    except KeyError as exc:
+        raise ValueError(
+            f"unsupported checkpoint component: {type(component).__name__}"
+        ) from exc
+    return {"type": component_type, "parameters": parameters}
+
+
+def _encoder_state(encoder: SpectrumObservationEncoder) -> dict:
+    """Return the checkpoint specification for a built-in observation encoder."""
+    if type(encoder) is InterpolatingSpectrumEncoder:
+        return {"type": "InterpolatingSpectrumEncoder", "parameters": {}}
+    if type(encoder) is RawSpectrumEncoder:
+        normalizer = _component_state(
+            encoder.normalizer,
+            {
+                SentinelSafeMinMaxNormalizer: ("SentinelSafeMinMaxNormalizer", {}),
+                LegacyEISFeatureNormalizer: ("LegacyEISFeatureNormalizer", {}),
+            },
+        )
+        downsampler = _component_state(
+            encoder.downsampler,
+            {UniformIndexDownsampler: ("UniformIndexDownsampler", {})},
+        )
+        return {
+            "type": "RawSpectrumEncoder",
+            "parameters": {
+                "padding_value": encoder.padding_value,
+                "normalizer": normalizer,
+                "downsampler": downsampler,
+            },
+        }
+    raise ValueError(f"unsupported checkpoint encoder: {type(encoder).__name__}")
+
+
+def progressive_runtime_state_dict(
+    config: ProgressiveSpectrumRuntimeConfig | None,
+    *,
+    training_dataprep: EISDataPrep | None = None,
+    evaluation_dataprep: EISDataPrep | None = None,
+) -> dict | None:
+    """Serialize a resolved built-in progressive runtime without pickling components.
+
+    The returned mapping is JSON-compatible and records component types and constructor
+    parameters. Encoder ``EISDataPrep`` objects remain environment-owned and are rebound when
+    the checkpoint is restored. Unsupported custom components fail explicitly so a checkpoint
+    cannot silently restore different scientific behavior.
+    """
+    if config is None:
+        return None
+    if not isinstance(config, ProgressiveSpectrumRuntimeConfig):
+        raise TypeError("config must be a ProgressiveSpectrumRuntimeConfig or None")
+    state = {
+        "version": 1,
+        "enabled": config.enabled,
+        "num_windows": config.num_windows,
+        "selector": None,
+        "training_encoder": None,
+        "evaluation_encoder": None,
+        "transition_policy": None,
+        "spectrum_source": None,
+    }
+    if not config.enabled:
+        return state
+    if getattr(config.training_encoder, "dataprep", None) is not training_dataprep:
+        raise ValueError("training encoder is not bound to the training environment dataprep")
+    if getattr(config.evaluation_encoder, "dataprep", None) is not evaluation_dataprep:
+        raise ValueError(
+            "evaluation encoder is not bound to the evaluation environment dataprep"
+        )
+    state.update(
+        selector=_component_state(
+            config.selector,
+            {
+                EqualPointWindowSelector: (
+                    "EqualPointWindowSelector",
+                    {"num_windows": config.selector.num_windows},
+                )
+            },
+        ),
+        training_encoder=_encoder_state(config.training_encoder),
+        evaluation_encoder=_encoder_state(config.evaluation_encoder),
+        transition_policy=_component_state(
+            config.transition_policy,
+            {CarryBestStatePolicy: ("CarryBestStatePolicy", {})},
+        ),
+        spectrum_source=_component_state(
+            config.spectrum_source,
+            {
+                DataFrameSpectrumSource: (
+                    "DataFrameSpectrumSource",
+                    {
+                        "name": config.spectrum_source.name,
+                        "frequency_column": config.spectrum_source.frequency_column,
+                        "impedance_column": config.spectrum_source.impedance_column,
+                    },
+                )
+            },
+        ),
+    )
+    return state
+
+
+def _validate_component_state(state: dict, name: str) -> tuple[str, dict]:
+    """Validate and unpack one declarative checkpoint component."""
+    if not isinstance(state, dict) or set(state) != {"type", "parameters"}:
+        raise ValueError(f"invalid progressive {name} checkpoint state")
+    if not isinstance(state["type"], str) or not isinstance(state["parameters"], dict):
+        raise ValueError(f"invalid progressive {name} checkpoint state")
+    return state["type"], state["parameters"]
+
+
+def _restore_encoder(state: dict, dataprep: EISDataPrep) -> SpectrumObservationEncoder:
+    """Rebind a built-in encoder specification to restored data preparation."""
+    encoder_type, parameters = _validate_component_state(state, "encoder")
+    if encoder_type == "InterpolatingSpectrumEncoder" and not parameters:
+        return InterpolatingSpectrumEncoder(dataprep)
+    if encoder_type != "RawSpectrumEncoder" or set(parameters) != {
+        "padding_value",
+        "normalizer",
+        "downsampler",
+    }:
+        raise ValueError(f"unsupported progressive encoder checkpoint type: {encoder_type}")
+    normalizer_type, normalizer_parameters = _validate_component_state(
+        parameters["normalizer"], "normalizer"
+    )
+    downsampler_type, downsampler_parameters = _validate_component_state(
+        parameters["downsampler"], "downsampler"
+    )
+    normalizers = {
+        "SentinelSafeMinMaxNormalizer": SentinelSafeMinMaxNormalizer,
+        "LegacyEISFeatureNormalizer": LegacyEISFeatureNormalizer,
+    }
+    if normalizer_type not in normalizers or normalizer_parameters:
+        raise ValueError(f"unsupported progressive normalizer: {normalizer_type}")
+    if downsampler_type != "UniformIndexDownsampler" or downsampler_parameters:
+        raise ValueError(f"unsupported progressive downsampler: {downsampler_type}")
+    return RawSpectrumEncoder(
+        dataprep,
+        normalizer=normalizers[normalizer_type](),
+        downsampler=UniformIndexDownsampler(),
+        padding_value=parameters["padding_value"],
+    )
+
+
+def restore_progressive_runtime_state(
+    state: dict | None,
+    *,
+    training_dataprep: EISDataPrep | None,
+    evaluation_dataprep: EISDataPrep | None,
+) -> ProgressiveSpectrumRuntimeConfig | None:
+    """Restore declarative progressive configuration against restored environments."""
+    if state is None:
+        return None
+    required = {
+        "version",
+        "enabled",
+        "num_windows",
+        "selector",
+        "training_encoder",
+        "evaluation_encoder",
+        "transition_policy",
+        "spectrum_source",
+    }
+    if not isinstance(state, dict) or set(state) != required or state["version"] != 1:
+        raise ValueError("invalid progressive runtime checkpoint schema/version")
+    if not state["enabled"]:
+        if any(
+            state[name] is not None
+            for name in required - {"version", "enabled", "num_windows"}
+        ):
+            raise ValueError("disabled progressive runtime must not contain components")
+        return ProgressiveSpectrumRuntimeConfig(False, state["num_windows"])
+    if training_dataprep is None or evaluation_dataprep is None:
+        raise ValueError("enabled progressive checkpoint requires environment dataprep")
+
+    selector_type, selector_parameters = _validate_component_state(
+        state["selector"], "selector"
+    )
+    if selector_type != "EqualPointWindowSelector" or set(selector_parameters) != {
+        "num_windows"
+    }:
+        raise ValueError(f"unsupported progressive selector: {selector_type}")
+    selector = EqualPointWindowSelector(**selector_parameters)
+    if selector.num_windows != state["num_windows"]:
+        raise ValueError("progressive selector window count does not match runtime")
+
+    policy_type, policy_parameters = _validate_component_state(
+        state["transition_policy"], "transition policy"
+    )
+    if policy_type != "CarryBestStatePolicy" or policy_parameters:
+        raise ValueError(f"unsupported progressive transition policy: {policy_type}")
+    source_type, source_parameters = _validate_component_state(
+        state["spectrum_source"], "spectrum source"
+    )
+    if source_type != "DataFrameSpectrumSource" or set(source_parameters) != {
+        "name",
+        "frequency_column",
+        "impedance_column",
+    }:
+        raise ValueError(f"unsupported progressive spectrum source: {source_type}")
+
+    training_encoder = _restore_encoder(state["training_encoder"], training_dataprep)
+    evaluation_encoder = (
+        training_encoder
+        if evaluation_dataprep is training_dataprep
+        and state["evaluation_encoder"] == state["training_encoder"]
+        else _restore_encoder(state["evaluation_encoder"], evaluation_dataprep)
+    )
+    return ProgressiveSpectrumRuntimeConfig(
+        enabled=True,
+        num_windows=state["num_windows"],
+        selector=selector,
+        training_encoder=training_encoder,
+        evaluation_encoder=evaluation_encoder,
+        transition_policy=CarryBestStatePolicy(),
+        spectrum_source=DataFrameSpectrumSource(**source_parameters),
+    )

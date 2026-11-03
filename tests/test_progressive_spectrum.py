@@ -19,6 +19,7 @@ from autorec.progressive_spectrum import (
     PREPARED_SPECTRUM_SOURCE,
     RETAINED_SPECTRUM_SOURCE,
     ProgressiveStageOutcome,
+    ProgressiveSpectrumRuntimeConfig,
     RawSpectrumEncoder,
     SentinelSafeMinMaxNormalizer,
     SpectrumView,
@@ -27,6 +28,8 @@ from autorec.progressive_spectrum import (
     UniformIndexDownsampler,
     build_spectrum_view,
     decide_stage_transition,
+    progressive_runtime_state_dict,
+    restore_progressive_runtime_state,
 )
 
 
@@ -46,6 +49,62 @@ def make_spectrum(npoints=10):
         5.0 - 0.4 * log_frequency + 0.05 * log_frequency**2
     )
     return frequency, impedance
+
+
+def test_progressive_runtime_checkpoint_state_rebinds_builtin_components(tmp_path):
+    dataprep = make_dataprep(tmp_path, npoints=6)
+    encoder = RawSpectrumEncoder(dataprep)
+    runtime = ProgressiveSpectrumRuntimeConfig(
+        enabled=True,
+        num_windows=3,
+        selector=EqualPointWindowSelector(3),
+        training_encoder=encoder,
+        evaluation_encoder=encoder,
+        transition_policy=CarryBestStatePolicy(),
+        spectrum_source=RETAINED_SPECTRUM_SOURCE,
+    )
+
+    state = progressive_runtime_state_dict(
+        runtime,
+        training_dataprep=dataprep,
+        evaluation_dataprep=dataprep,
+    )
+    restored = restore_progressive_runtime_state(
+        state,
+        training_dataprep=dataprep,
+        evaluation_dataprep=dataprep,
+    )
+
+    assert restored.metadata == runtime.metadata
+    assert isinstance(restored.training_encoder, RawSpectrumEncoder)
+    assert restored.training_encoder is restored.evaluation_encoder
+    assert restored.training_encoder.dataprep is dataprep
+    assert isinstance(restored.training_encoder.normalizer, SentinelSafeMinMaxNormalizer)
+    assert isinstance(restored.training_encoder.downsampler, UniformIndexDownsampler)
+
+
+def test_progressive_runtime_checkpoint_rejects_custom_components(tmp_path):
+    dataprep = make_dataprep(tmp_path, npoints=6)
+
+    class CustomPolicy:
+        def decide(self, outcome):
+            return StageTransitionDecision(outcome.best_state, True)
+
+    runtime = ProgressiveSpectrumRuntimeConfig(
+        enabled=True,
+        num_windows=2,
+        selector=EqualPointWindowSelector(2),
+        training_encoder=InterpolatingSpectrumEncoder(dataprep),
+        evaluation_encoder=InterpolatingSpectrumEncoder(dataprep),
+        transition_policy=CustomPolicy(),
+    )
+
+    with pytest.raises(ValueError, match="unsupported checkpoint component"):
+        progressive_runtime_state_dict(
+            runtime,
+            training_dataprep=dataprep,
+            evaluation_dataprep=dataprep,
+        )
 
 
 # Window selection, physical sources, and one-window compatibility
