@@ -163,6 +163,13 @@ def _capture(agent):
         raise ValueError("Checkpoints require a completed-trial boundary.")
     if state.schedule_config != agent._training_schedule_config():
         raise ValueError("The epsilon/beta schedules have changed.")
+    if state.workflow_config is not None:
+        if agent.progressive_spectrum is None or not agent.progressive_spectrum.enabled:
+            raise ValueError(
+                "Progressive checkpoint training requires an attached runtime configuration."
+            )
+        if state.workflow_config != agent.progressive_spectrum.metadata:
+            raise ValueError("Progressive checkpoint runtime differs from training state.")
     replay = agent._replay_buffer.state_dict()
     config = {
         "agent": {key: getattr(agent, key) for key in sorted(_CONFIG_FIELDS)},
