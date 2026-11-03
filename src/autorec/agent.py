@@ -695,19 +695,6 @@ class DDQN_ECM:
 
         return samples, indices, weights
 
-    def _get_flatten_z_matrix(self) -> np.ndarray:
-        """Return a cached dense matrix of flattened EIS inputs for the active dataset."""
-        dataset = self._active_env.dataset
-        cache_key = id(dataset)
-        cache = getattr(self, "_flatten_z_matrices", None)
-        if cache is None:
-            cache = self._flatten_z_matrices = {}
-        if cache_key not in cache:
-            cache[cache_key] = np.stack(dataset["flatten_Z"].to_numpy()).astype(
-                np.float32, copy=False
-            )
-        return cache[cache_key]
-
     def _get_action_index_map(self) -> dict[tuple[str, int], int]:
         """Map environment action values to their neural-network output positions."""
         actions = self._active_env.ACTIONS_LIST
@@ -923,7 +910,9 @@ class DDQN_ECM:
             Number of replay mini-batches to sample and optimizer updates to perform.
 
         history : CircularBuffer
-            NumPy-backed experience replay buffer.
+            NumPy-backed experience replay buffer. Every transition retains the exact
+            fixed-size ``EIS_flatten`` observation used for action selection; observations
+            are not reconstructed from the current environment dataset.
 
         Returns
         -------
@@ -931,14 +920,12 @@ class DDQN_ECM:
             Mean mini-batch loss across all optimizer updates in this training step.
         """
         losses = []
-        flatten_z_matrix = self._get_flatten_z_matrix()
         train_step = self._get_compiled_train_step()
         for _ in range(gradient_steps):
             samples, sample_indices, weights = self._sample_experience(
                 history, self.prioritized_replay_beta
             )
-            eis_indices = samples["EIS"].astype(np.intp, copy=False)
-            sample_flatten_z = flatten_z_matrix[eis_indices]
+            sample_flatten_z = samples["EIS_flatten"]
             states = np.concatenate(
                 (sample_flatten_z, samples["encoded_state"]), axis=1
             ).astype(np.float32, copy=False)
@@ -1189,33 +1176,28 @@ class DDQN_ECM:
         return state.results()
 
     def _create_replay_buffer(self) -> CircularBuffer:
-        """Allocate fresh replay using the active training environment's dimensions."""
+        """Allocate stage-safe replay using the active environment dimensions.
+
+        Each transition owns its fixed-size neural-network EIS observation. The optional
+        spectrum-view identity records the physical fitting view without changing input
+        dimensions; ordinary full-spectrum training stores an empty identity.
+        """
+        encoded_state_size = self._active_env.chromosome_len * len(
+            self._active_env.ELEMENTS_EXTENDED
+        )
         return CircularBuffer(
             capacity=self.buffer_capacity,
             dtypes=[
-                # Standard for NumPy: (name, dtype, shape) for multi-dimensional fields
                 ("EIS", "i4"),
+                ("EIS_flatten", "f4", (self._active_env.EIS_INPUT_SIZE,)),
+                ("spectrum_view_id", "U64"),
                 ("state", "U50"),
-                (
-                    "encoded_state",
-                    "f4",
-                    (
-                        self._active_env.chromosome_len
-                        * len(self._active_env.ELEMENTS_EXTENDED),
-                    ),
-                ),  # ADDED THIS
+                ("encoded_state", "f4", (encoded_state_size,)),
                 ("action_type", "U10"),
                 ("action_position", "i4"),
                 ("action_index", "i4"),
                 ("new_state", "U50"),
-                (
-                    "encoded_new_state",
-                    "f4",
-                    (
-                        self._active_env.chromosome_len
-                        * len(self._active_env.ELEMENTS_EXTENDED),
-                    ),
-                ),  # ADDED THIS
+                ("encoded_new_state", "f4", (encoded_state_size,)),
                 ("reward", "f4"),
                 ("terminal_flag", "i1"),
                 ("priority", "f4"),
@@ -1346,11 +1328,22 @@ class DDQN_ECM:
         new_encoded_state = self._active_env.encoded_state.copy()
         action_index = self._get_action_index_map()[(str(action_type), int(action_position))]
 
+        eis_observation = np.array(flatten_Z, dtype=np.float32, copy=True)
+        expected_observation_shape = (self._active_env.EIS_INPUT_SIZE,)
+        if eis_observation.shape != expected_observation_shape:
+            raise ValueError(
+                "flatten_Z must match the environment EIS input shape: "
+                f"expected {expected_observation_shape}, got {eis_observation.shape}"
+            )
+        spectrum_view_id = getattr(self._active_env, "current_spectrum_view_id", None)
+
         # Add experience to buffer with priority
         priority = buffer.buffer["priority"][: buffer.size].max() if len(buffer) > 0 else 1.0
 
         buffer.add(
             EIS=EIS_i,
+            EIS_flatten=eis_observation,
+            spectrum_view_id=spectrum_view_id or "",
             state=prev_state,
             encoded_state=prev_encoded_state,  # NEW: Store encoded state
             action_type=action_type,
