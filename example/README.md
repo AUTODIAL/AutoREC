@@ -98,9 +98,10 @@ Checkpoint continuation requires the deterministic CPU/runtime conditions docume
 
 ## Checkpoint equivalence experiment
 
-The [`checkpoint/`](checkpoint/) workflow compares a continuous 1,000-trial run with ten
-fresh 100-trial processes. It includes tools that compare complete checkpoint state and run
-fresh-process agent evaluation with exact equality checks.
+The [`checkpoint/`](checkpoint/) workflow compares a continuous 1,000-trial run with retained
+same-process sessions, complete-checkpoint fresh processes, and deliberately incomplete
+model-only restarts. It includes tools that compare complete state and run fresh-process agent
+evaluation with exact equality checks where equality is expected.
 
 See [`checkpoint/README.md`](checkpoint/README.md) for commands, output structure, comparison
 categories, and reproducibility limitations.

@@ -1,10 +1,11 @@
 # Complete-checkpoint continuation and equivalence
 
-This directory currently contains three controlled scenarios:
+This directory contains four controlled scenarios:
 
 - `continuous/`: one uninterrupted 1,000-trial reference process;
 - `bounded/`: ten retained 100-trial sessions in one process;
 - `complete_checkpoint/`: ten fresh 100-trial processes that restore complete checkpoints.
+- `model_only_restart/`: ten fresh processes that carry only the preceding online model.
 
 Shared session, runtime, evaluation, and comparison code remains at this directory level or
 under `comparison/`. Run commands from the repository root with the AutoREC environment active.
@@ -65,6 +66,7 @@ Use clean output paths because checkpoint destinations are immutable:
 python -m example.checkpoint.continuous.run
 python -m example.checkpoint.bounded.run --sessions 10
 python -m example.checkpoint.complete_checkpoint.run --sessions 10
+python -m example.checkpoint.model_only_restart.run --sessions 10
 ```
 
 The expected final checkpoints are:
@@ -73,7 +75,13 @@ The expected final checkpoints are:
 example/checkpoint/outputs/continuous/checkpoints/trial-00001000/
 example/checkpoint/outputs/bounded/checkpoints/trial-00001000/
 example/checkpoint/outputs/complete_checkpoint/checkpoints/trial-00001000/
+example/checkpoint/outputs/model_only_restart/checkpoints/final/
 ```
+
+The model-only final snapshot is for inspection, not continuation. Its internal completed-trial
+counter covers only the last fresh session. Replay, optimizer slots, target-network history,
+exploration schedules, caches, histories, and random streams were not restored. Model-only
+restart is therefore expected to differ from the uninterrupted reference.
 
 Choose the comparison appropriate for the desired validation:
 

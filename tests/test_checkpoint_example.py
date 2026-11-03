@@ -13,6 +13,8 @@ from example.checkpoint import train_session as example
 from example.checkpoint.bounded import run as bounded
 from example.checkpoint.comparison import compare_checkpoints as comparison
 from example.checkpoint.complete_checkpoint import run as runner
+from example.checkpoint.model_only_restart import run as model_only_runner
+from example.checkpoint.model_only_restart import train_session as model_only_session
 
 
 _SCRIPT = Path(example.__file__)
@@ -65,8 +67,9 @@ def test_comparison_scenarios_share_training_configuration():
     continuous = _training_config(_CHECKPOINT_EXAMPLE / "continuous" / "config.yaml")
     bounded_config = _training_config(_CHECKPOINT_EXAMPLE / "bounded" / "config.yaml")
     complete = _training_config(_CHECKPOINT_EXAMPLE / "complete_checkpoint" / "config.yaml")
+    model_only = _training_config(_CHECKPOINT_EXAMPLE / "model_only_restart" / "config.yaml")
 
-    assert continuous == bounded_config == complete
+    assert continuous == bounded_config == complete == model_only
 
 
 def test_configuration_uses_num_trials_as_current_session_length(tmp_path):
@@ -223,6 +226,50 @@ def test_bounded_runner_retains_one_agent_and_saves_only_final_snapshot(tmp_path
     assert agent.completed_trials == 75
     assert destination == tmp_path / "checkpoints" / "trial-00000075"
     assert agent.saved == [destination]
+
+
+def test_model_only_session_loads_no_complete_checkpoint(tmp_path):
+    class Agent:
+        model_name = tmp_path / "session" / "dqn_model.keras"
+
+        def __init__(self):
+            self.calls = []
+
+        def load_model(self, path):
+            self.calls.append(("load_model", path))
+
+        def train(self):
+            self.calls.append(("train",))
+
+        def save_checkpoint(self, path):
+            self.calls.append(("save_checkpoint", path))
+
+    previous = tmp_path / "previous.keras"
+    snapshot = tmp_path / "inspection"
+    agent = Agent()
+
+    model_path = model_only_session.train_model_only_session(agent, previous, snapshot)
+
+    assert model_path == agent.model_name
+    assert agent.calls == [
+        ("load_model", previous),
+        ("train",),
+        ("save_checkpoint", snapshot),
+    ]
+
+
+def test_model_only_fresh_process_command_carries_only_model_path(tmp_path):
+    command = model_only_runner.session_command(
+        tmp_path / "config.yaml",
+        tmp_path / "session-2",
+        tmp_path / "session-1" / "dqn_model.keras",
+        tmp_path / "final-snapshot",
+    )
+
+    assert "--model" in command
+    assert "--final-snapshot" in command
+    assert "--resume" not in command
+    assert "from_checkpoint" not in command
 
 
 def test_checkpoint_comparison_excludes_only_session_and_output_configuration(tmp_path):
