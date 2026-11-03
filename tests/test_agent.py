@@ -10,7 +10,13 @@ import pytest
 
 from autorec import agent as agent_module
 from autorec.data_preparation import EISDataPrep
-from autorec.progressive_spectrum import StageTransitionDecision
+from autorec.progressive_spectrum import (
+    CarryBestStatePolicy,
+    EqualPointWindowSelector,
+    InterpolatingSpectrumEncoder,
+    ProgressiveSpectrumRuntimeConfig,
+    StageTransitionDecision,
+)
 
 
 class DummyEnv:
@@ -523,6 +529,65 @@ def test_progressive_evaluation_requires_dataprep_for_default_encoder():
 
     with pytest.raises(ValueError, match="must retain a loaded EISDataPrep"):
         agent.generate_progressive_ECM(EIS_i=0, num_windows=2, verbose=False)
+
+
+def test_batch_evaluation_uses_runtime_and_can_disable_progressive_mode():
+    env = ProgressiveEvaluationEnv()
+    encoder = InterpolatingSpectrumEncoder(env.dataprep)
+    runtime = ProgressiveSpectrumRuntimeConfig(
+        enabled=True,
+        num_windows=2,
+        selector=EqualPointWindowSelector(2),
+        training_encoder=encoder,
+        evaluation_encoder=encoder,
+        transition_policy=CarryBestStatePolicy(),
+    )
+    agent = object.__new__(agent_module.DDQN_ECM)
+    agent.training_env = env
+    agent.eval_env = env
+    agent._active_env = env
+    agent.progressive_spectrum = runtime
+    progressive_calls = []
+    final_result = {
+        "EIS_i": 0,
+        "environment_type": "evaluation",
+        "ground_truth_circuit": "R0",
+        "found_solution": True,
+        "best_reward": 2.0,
+        "best_action_number": 1,
+        "best_circuit": "R0",
+        "best_coding": "R",
+        "best_metrics": {"chi_square": 0.1},
+        "best_param": {"R0": 1.0},
+        "total_actions_taken": 2,
+        "action_history": [],
+    }
+
+    def fake_progressive(**kwargs):
+        progressive_calls.append(kwargs)
+        return {
+            "num_windows": 2,
+            "completed_all_stages": True,
+            "stage_results": [
+                {"evaluation_result": {"total_actions_taken": 1}},
+                {"evaluation_result": final_result},
+            ],
+            "final_result": final_result,
+        }
+
+    agent.generate_progressive_ECM = fake_progressive
+    progressive_results = agent.eval_batch_eis(eis_indices=[0])
+
+    assert progressive_calls[0]["encoder"] is encoder
+    assert progressive_results.loc[0, "total_actions"] == 3
+    assert progressive_results.loc[0, "progressive_completed_all_stages"]
+
+    full_calls = []
+    agent.generate_ECM = lambda **kwargs: full_calls.append(kwargs) or final_result
+    full_results = agent.eval_batch_eis(eis_indices=[0], progressive=False)
+
+    assert len(full_calls) == 1
+    assert "progressive_num_windows" not in full_results
 
 
 def test_agent_can_replace_envs(light_agent, tmp_path):

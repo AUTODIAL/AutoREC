@@ -2315,6 +2315,7 @@ class DDQN_ECM:
         gif_generation: bool = False,
         all_rows: bool = False,
         num_samples: Optional[int] = None,  # NEW: Quick check with random samples
+        progressive: Optional[bool] = None,
     ) -> pd.DataFrame:
         """
         Evaluate the trained agent on a batch of EIS measurements.
@@ -2358,12 +2359,34 @@ class DDQN_ECM:
         num_samples : int, optional
             If set, randomly sample this many EIS indices for quick evaluation. Overrides
             ``eis_indices``.
+        progressive : bool, optional
+            Use the attached progressive runtime. Omitted uses an enabled configuration
+            automatically; false explicitly selects ordinary full-spectrum evaluation.
 
         Returns
         -------
         pd.DataFrame
             DataFrame containing evaluation results for all EIS.
         """
+        runtime_progressive = getattr(self, "progressive_spectrum", None)
+        if progressive is None:
+            use_progressive = runtime_progressive is not None and runtime_progressive.enabled
+        else:
+            if not isinstance(progressive, bool):
+                raise TypeError("progressive must be a boolean or None")
+            use_progressive = progressive
+        if use_progressive and (
+            runtime_progressive is None or not runtime_progressive.enabled
+        ):
+            raise ValueError(
+                "progressive batch evaluation requires an enabled progressive-spectrum "
+                "runtime configuration"
+            )
+        if use_progressive and gif_generation:
+            raise ValueError(
+                "gif_generation is not supported during progressive batch evaluation"
+            )
+
         # Switch to appropriate environment
         if use_eval_env:
             self.switch_to_eval()
@@ -2406,49 +2429,80 @@ class DDQN_ECM:
 
         for idx, eis_i in enumerate(tqdm(eis_indices, desc="Evaluating EIS")):
             try:
-                result = self.generate_ECM(
-                    EIS_i=eis_i,
-                    max_actions=max_actions,
-                    verbose=verbose,
-                    use_eval_env=use_eval_env,
-                    gif_generation=gif_generation,
-                )
-                results.append(
-                    {
-                        "EIS_i": result["EIS_i"],
-                        "environment_type": result["environment_type"],
-                        # 'ground_truth_state': result['ground_truth_state'],
-                        "ground_truth_circuit": result["ground_truth_circuit"],
-                        "found_solution": result["found_solution"],
-                        "best_reward": result["best_reward"],
-                        "best_action_number": result["best_action_number"],
-                        "best_circuit": result["best_circuit"],
-                        "best_coding": result["best_coding"],
-                        "best_metrics": result["best_metrics"],
-                        "best_param": result["best_param"],
-                        "total_actions": result["total_actions_taken"],
-                        "action_history": result["action_history"],
-                    }
-                )
+                if use_progressive:
+                    progressive_result = self.generate_progressive_ECM(
+                        EIS_i=eis_i,
+                        num_windows=runtime_progressive.num_windows,
+                        max_actions=max_actions,
+                        verbose=verbose,
+                        use_eval_env=use_eval_env,
+                        selector=runtime_progressive.selector,
+                        encoder=runtime_progressive.encoder_for(use_eval_env),
+                        transition_policy=runtime_progressive.transition_policy,
+                        spectrum_source=runtime_progressive.spectrum_source,
+                    )
+                    result = progressive_result["final_result"]
+                    total_actions = sum(
+                        stage["evaluation_result"]["total_actions_taken"]
+                        for stage in progressive_result["stage_results"]
+                    )
+                else:
+                    progressive_result = None
+                    result = self.generate_ECM(
+                        EIS_i=eis_i,
+                        max_actions=max_actions,
+                        verbose=verbose,
+                        use_eval_env=use_eval_env,
+                        gif_generation=gif_generation,
+                    )
+                    total_actions = result["total_actions_taken"]
+
+                result_row = {
+                    "EIS_i": result["EIS_i"],
+                    "environment_type": result["environment_type"],
+                    "ground_truth_circuit": result["ground_truth_circuit"],
+                    "found_solution": result["found_solution"],
+                    "best_reward": result["best_reward"],
+                    "best_action_number": result["best_action_number"],
+                    "best_circuit": result["best_circuit"],
+                    "best_coding": result["best_coding"],
+                    "best_metrics": result["best_metrics"],
+                    "best_param": result["best_param"],
+                    "total_actions": total_actions,
+                    "action_history": result["action_history"],
+                }
+                if progressive_result is not None:
+                    result_row.update(
+                        progressive_num_windows=progressive_result["num_windows"],
+                        progressive_completed_all_stages=progressive_result[
+                            "completed_all_stages"
+                        ],
+                        progressive_stage_results=progressive_result["stage_results"],
+                    )
+                results.append(result_row)
             except Exception as e:
                 print(f"\n⚠ Error evaluating EIS {eis_i}: {e}")
-                results.append(
-                    {
-                        "EIS_i": eis_i,
-                        "environment_type": None,
-                        # 'ground_truth_state': None,
-                        "ground_truth_circuit": None,
-                        "found_solution": False,
-                        "best_reward": -np.inf,
-                        "best_action_number": -1,
-                        "best_circuit": None,
-                        "best_coding": None,
-                        "best_metrics": None,
-                        "best_param": None,
-                        "total_actions": 0,
-                        "action_history": [],
-                    }
-                )
+                error_row = {
+                    "EIS_i": eis_i,
+                    "environment_type": None,
+                    "ground_truth_circuit": None,
+                    "found_solution": False,
+                    "best_reward": -np.inf,
+                    "best_action_number": -1,
+                    "best_circuit": None,
+                    "best_coding": None,
+                    "best_metrics": None,
+                    "best_param": None,
+                    "total_actions": 0,
+                    "action_history": [],
+                }
+                if use_progressive:
+                    error_row.update(
+                        progressive_num_windows=runtime_progressive.num_windows,
+                        progressive_completed_all_stages=False,
+                        progressive_stage_results=[],
+                    )
+                results.append(error_row)
 
         eval_time = time.time() - start_time
         results_df = pd.DataFrame(results)
@@ -2482,6 +2536,7 @@ class DDQN_ECM:
         verbose: bool = False,
         use_eval_env: bool = True,
         gif_generation: bool = False,
+        progressive: Optional[bool] = None,
     ) -> pd.DataFrame:
         """
         Evaluate the trained agent on every EIS row in the selected dataset.
@@ -2501,6 +2556,8 @@ class DDQN_ECM:
             use the training environment.
         gif_generation : bool
             Generate a circuit-evolution GIF for each EIS.
+        progressive : bool, optional
+            Override automatic use of an attached progressive runtime.
 
         Returns
         -------
@@ -2513,12 +2570,13 @@ class DDQN_ECM:
             use_eval_env=use_eval_env,
             gif_generation=gif_generation,
             all_rows=True,
+            progressive=progressive,
         )
 
     @property
     def metadata(self) -> dict:
         """Return metadata about the agent and its training configuration."""
-        return {
+        metadata = {
             "training_env": self.training_env.metadata,
             "eval_env": self.eval_env.metadata,
             "save_dir": str(self.save_dir),
@@ -2555,3 +2613,6 @@ class DDQN_ECM:
             "beta_anneal_trials": self.beta_anneal_trials,
             "final_beta": self.final_beta,
         }
+        if self.progressive_spectrum is not None:
+            metadata["progressive_spectrum"] = self.progressive_spectrum.metadata
+        return metadata

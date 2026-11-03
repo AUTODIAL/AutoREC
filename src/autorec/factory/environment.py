@@ -15,9 +15,9 @@ def environment_builder(args: Union[str, Path, Dict]) -> EIS_ECM_Env:
 
     Notes
     -----
-    The "dataset" keyword here can be either a pd.DataFrame or a string indicating the path to
-    the .pkl processed dataset file. If a path is provided, then the dataset will be loaded
-    from the specified file.
+    The "dataset" keyword can be either a DataFrame or a processed pickle path. An in-memory
+    ``EISDataPrep`` instance can instead be supplied with "dataprep"; it is never represented
+    directly in YAML.
 
     Parameters
     ----------
@@ -36,10 +36,12 @@ def environment_builder(args: Union[str, Path, Dict]) -> EIS_ECM_Env:
     else:
         raise TypeError("The 'args' parameter must be a str, Path, or dict.")
 
-    # Deal with the dataset argument
-    if "dataset" not in config:
-        raise KeyError("The environment configuration must include a 'dataset' key.")
-    if isinstance(config["dataset"], (str, Path)):
+    if "dataset" not in config and "dataprep" not in config:
+        raise KeyError(
+            "The environment configuration must include a 'dataset' key or an in-memory "
+            "'dataprep' key."
+        )
+    if "dataset" in config and isinstance(config["dataset"], (str, Path)):
         # In this case, we need to load the dataset
         dataset_path = config.pop("dataset")
         dataset = pd.read_pickle(dataset_path)

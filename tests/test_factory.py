@@ -11,6 +11,7 @@ import types
 import pandas as pd
 import pytest
 
+from autorec.data_preparation import EISDataPrep
 
 factory_package = importlib.import_module("autorec.factory")
 agent_module = importlib.import_module("autorec.agent")
@@ -19,6 +20,7 @@ dataprep_factory = importlib.import_module("autorec.factory.dataprep")
 environment_factory = importlib.import_module("autorec.factory.environment")
 optimizer_factory = importlib.import_module("autorec.factory.optimizer")
 pipeline_factory = importlib.import_module("autorec.factory.pipeline")
+progressive_factory = importlib.import_module("autorec.factory.progressive_spectrum")
 
 
 @pytest.fixture
@@ -36,14 +38,25 @@ def factory(monkeypatch):
         def __init__(self, **kwargs):
             self.kwargs = kwargs
             self.dataset = kwargs.get("dataset")
+            self.dataprep = kwargs.get("dataprep")
 
     class Agent:
         def __init__(self, **kwargs):
             self.kwargs = kwargs
 
+    class Encoder:
+        def __init__(self, dataprep, **kwargs):
+            self.dataprep = dataprep
+            self.kwargs = kwargs
+
     monkeypatch.setattr(dataprep_factory, "EISDataPrep", DataPrep)
     monkeypatch.setattr(environment_factory, "EIS_ECM_Env", Env)
     monkeypatch.setattr(agent_module, "DDQN_ECM", Agent)
+    monkeypatch.setitem(
+        progressive_factory.OBSERVATION_ENCODER_TYPES,
+        "InterpolatingSpectrumEncoder",
+        Encoder,
+    )
 
     return types.SimpleNamespace(
         agent_builder=factory_package.agent_builder,
@@ -51,6 +64,7 @@ def factory(monkeypatch):
         dataprep_builder=factory_package.dataprep_builder,
         environment_builder=factory_package.environment_builder,
         pipeline_builder=factory_package.pipeline_builder,
+        progressive_spectrum_builder=factory_package.progressive_spectrum_builder,
         _validate_pipeline_config=pipeline_factory._validate_pipeline_config,
     )
 
@@ -60,6 +74,10 @@ def test_factory_package_exports_builders_from_split_modules():
     assert factory_package.dataprep_builder is dataprep_factory.dataprep_builder
     assert factory_package.environment_builder is environment_factory.environment_builder
     assert factory_package.pipeline_builder is pipeline_factory.pipeline_builder
+    assert (
+        factory_package.progressive_spectrum_builder
+        is progressive_factory.progressive_spectrum_builder
+    )
     assert factory_package.create_optimizer is optimizer_factory.create_optimizer
     assert factory_package.get_optimizer_config is optimizer_factory.get_optimizer_config
 
@@ -190,6 +208,89 @@ def test_pipeline_builder_wires_single_dataprep_environment_and_agent(factory):
     assert agent.kwargs["training_env"] is env
     assert agent.kwargs["eval_env"] is None
     assert agent.kwargs["num_trials"] == 5
+    assert env.dataprep is dataprep
+    assert "progressive_spectrum" not in agent.kwargs
+
+
+def test_progressive_builder_keeps_one_window_disabled_without_dataprep(factory):
+    runtime = factory.progressive_spectrum_builder({"num_windows": 1}, training_dataprep=None)
+
+    assert runtime.enabled is False
+    assert runtime.num_windows == 1
+
+
+def test_progressive_builder_constructs_registered_components():
+    dataprep = object.__new__(EISDataPrep)
+    dataprep.frequency_npoints = 6
+    dataprep.eis_features = ["ReZ", "ImZ"]
+
+    runtime = progressive_factory.progressive_spectrum_builder(
+        {
+            "enabled": True,
+            "num_windows": 3,
+            "observation_encoder": {
+                "type": "RawSpectrumEncoder",
+                "parameters": {
+                    "normalizer": {"type": "SentinelSafeMinMaxNormalizer"},
+                    "downsampler": {"type": "UniformIndexDownsampler"},
+                },
+            },
+            "spectrum_source": {"type": "RetainedSpectrumSource"},
+        },
+        training_dataprep=dataprep,
+    )
+
+    assert runtime.enabled is True
+    assert runtime.num_windows == 3
+    assert runtime.training_encoder.dataprep is dataprep
+    assert runtime.evaluation_encoder is runtime.training_encoder
+    assert runtime.spectrum_source.name == "retained"
+
+
+def test_yaml_pipeline_builds_progressive_runtime_components(factory, tmp_path):
+    config_path = tmp_path / "progressive.yaml"
+    config_path.write_text(
+        """dataprep:
+  path: training.pkl
+environment:
+  seed: 1
+agent:
+  num_trials: 2
+progressive_spectrum:
+  enabled: true
+  num_windows: 3
+"""
+    )
+
+    dataprep, _, env, _, agent = factory.pipeline_builder(config_path)
+    runtime = agent.kwargs["progressive_spectrum"]
+
+    assert env.dataprep is dataprep
+    assert runtime.enabled is True
+    assert runtime.num_windows == 3
+    assert runtime.selector.num_windows == 3
+    assert runtime.training_encoder.dataprep is dataprep
+
+
+@pytest.mark.parametrize(
+    ("config", "error_type", "message"),
+    [
+        ({"enabled": "yes"}, TypeError, "enabled must be a boolean"),
+        ({"num_windows": 0}, ValueError, "must be greater than zero"),
+        ({"unexpected": 1}, KeyError, "Unknown progressive_spectrum keys"),
+        (
+            {"enabled": True, "window_selector": {"type": "UnknownSelector"}},
+            ValueError,
+            "Unknown progressive_spectrum.window_selector type",
+        ),
+    ],
+)
+def test_progressive_builder_rejects_invalid_configuration(
+    factory, config, error_type, message
+):
+    dataprep, _ = factory.dataprep_builder({"path": "training.pkl"})
+    with pytest.raises(error_type, match=message):
+        factory.progressive_spectrum_builder(config, training_dataprep=dataprep)
 
 
 def test_pipeline_builder_wires_separate_training_and_eval_sections(factory):
@@ -260,6 +361,15 @@ def test_validate_pipeline_config_rejects_invalid_structures(factory):
             {"environment": {"dataset": object()}},
             KeyError,
             "include an 'agent' section",
+        ),
+        (
+            {
+                "environment": {"dataset": object()},
+                "agent": {},
+                "progressive_spectrum": [],
+            },
+            TypeError,
+            "must be a dictionary",
         ),
     )
     for config, error_type, message in cases:

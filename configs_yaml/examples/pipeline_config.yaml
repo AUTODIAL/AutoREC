@@ -92,3 +92,8 @@ agent:
   anneal_fraction: null  # Legacy fraction relative to num_trials; mutually exclusive with beta_anneal_trials
   beta_anneal_trials: null  # Preferred absolute cumulative-trial duration for open-ended training
   final_beta: 0.7
+
+# Optional progressive-spectrum workflow. Omitting this section (as shown here), setting
+# enabled: false, or using num_windows: 1 without explicitly enabling it preserves ordinary
+# full-spectrum training and evaluation. See progressive_checkpoint_pipeline_config.yaml for
+# a complete enabled configuration.

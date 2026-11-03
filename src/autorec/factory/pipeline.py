@@ -8,6 +8,7 @@ from autorec.factory.utils import config_reader
 from autorec.factory.dataprep import dataprep_builder
 from autorec.factory.environment import environment_builder
 from autorec.factory.agent import agent_builder
+from autorec.factory.progressive_spectrum import progressive_spectrum_builder
 
 if TYPE_CHECKING:
     from autorec.data_preparation import EISDataPrep
@@ -24,7 +25,8 @@ def pipeline_builder(
 
     Notes
     -----
-    * The available sections in the configurations are: "dataprep", "environment", and "agent".
+    * Available sections are ``dataprep``, ``environment``, ``agent``, and optional
+      ``progressive_spectrum``.
     * The "dataprep" section is optional. If not provided, then "dataset" key must be specified
       in the "environment" section.
     * The "dataprep" and "environment" sections can have 2 subsections: "training" and
@@ -67,6 +69,7 @@ def pipeline_builder(
         "environment_training": None,
         "environment_eval": None,
         "agent": None,
+        "progressive_spectrum": None,
     }
     if "dataprep" in config:
         if "training" in config["dataprep"]:
@@ -84,6 +87,8 @@ def pipeline_builder(
             section_configs["environment_eval"] = config["environment"]["eval"]
     if "agent" in config:
         section_configs["agent"] = config["agent"]
+    if "progressive_spectrum" in config:
+        section_configs["progressive_spectrum"] = config["progressive_spectrum"]
 
     # Data preparation
     if section_configs["dataprep_training"] is not None:
@@ -104,13 +109,26 @@ def pipeline_builder(
     # Environment
     if dataprep_training is not None:
         section_configs["environment_training"]["dataset"] = dataset_training
+        section_configs["environment_training"]["dataprep"] = dataprep_training
         if section_configs["environment_eval"] is not None:
             section_configs["environment_eval"]["dataset"] = dataset_eval
+            section_configs["environment_eval"]["dataprep"] = dataprep_eval
     env_training = environment_builder(section_configs["environment_training"])
     if section_configs["environment_eval"] is not None:
         env_eval = environment_builder(section_configs["environment_eval"])
     else:
         env_eval = None
+
+    if section_configs["progressive_spectrum"] is not None:
+        training_dataprep = getattr(env_training, "dataprep", None)
+        evaluation_dataprep = (
+            getattr(env_eval, "dataprep", None) if env_eval is not None else training_dataprep
+        )
+        section_configs["agent"]["progressive_spectrum"] = progressive_spectrum_builder(
+            section_configs["progressive_spectrum"],
+            training_dataprep=training_dataprep,
+            evaluation_dataprep=evaluation_dataprep,
+        )
 
     # Agent
     section_configs["agent"]["training_env"] = env_training
@@ -174,3 +192,8 @@ def _validate_pipeline_config(config):
     # agent section
     if "agent" not in config:
         raise KeyError("The configuration must include an 'agent' section.")
+
+    if "progressive_spectrum" in config and not isinstance(
+        config["progressive_spectrum"], dict
+    ):
+        raise TypeError("The 'progressive_spectrum' section must be a dictionary.")
