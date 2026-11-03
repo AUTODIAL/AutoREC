@@ -4,27 +4,13 @@ dataprep:
   evaluation: false
   perform_linKK_validation: false
   tol_linKK: 5.0E-2
-  frequency_bounds:
-    - null
-    - null
+  frequency_bounds: [null, null]
   frequency_npoints: null
-  eis_features:
-    - ImZ
-    - phi
-    - mag
-    - nphi
+  eis_features: [ImZ, phi, mag, nphi]
 
 environment:
-  elements:
-    - "+"
-    - "/"
-    - R
-    - L
-    - P
-  initial_state:
-    - +RRRRRR
-    - ++RRRRRR
-    - +++RRRRRR
+  elements: ["+", "/", R, L, P]
+  initial_state: [+RRRRRR, ++RRRRRR, +++RRRRRR]
   seed: 42
   chromosome_HEAD_len: 10
   cache_enabled: true
@@ -32,13 +18,11 @@ environment:
   cache_type: lru
 
 agent:
-  save_dir: ${AUTOREC_ROOT}/example/checkpoint/outputs/sequential
+  save_dir: ${AUTOREC_ROOT}/example/checkpoint/outputs/model_only_restart
   save_start: 0
   save_frequency: 100
   action_cap: null
   random_seed: 42
-  # Trials to run in this session. Generated continuation files retain this value,
-  # but it may be changed before starting the next session.
   num_trials: 100
   episodes_trial: 1
   gamma: 0.99
@@ -51,15 +35,9 @@ agent:
   start_decay: 10
   bayesian: false
   hidden_layers:
-    - type: Dense
-      units: 40
-      activation: relu
-    - type: Dense
-      units: 40
-      activation: relu
-  optimizer:
-    type: Adam
-    learning_rate: 0.0005
+    - {type: Dense, units: 40, activation: relu}
+    - {type: Dense, units: 40, activation: relu}
+  optimizer: {type: Adam, learning_rate: 0.0005}
   batch_size: 150
   train_frequency: 5
   gradient_steps: 1
@@ -70,13 +48,12 @@ agent:
   prioritized_replay_eps: 1.0E-6
   initial_beta: 0.4
   beta_jump: 1.06
-  # Absolute cumulative schedule shared with continuous_config.yaml. These values
-  # do not depend on this session's num_trials.
   start_jump: 400
   beta_anneal_trials: 595
   final_beta: 0.7
 
 checkpoint:
-  save_dir: ${AUTOREC_ROOT}/example/checkpoint/outputs/sequential/checkpoints
-  generated_config_dir: ${AUTOREC_ROOT}/example/checkpoint/outputs/sequential/configs
+  # The final snapshot exposes the fresh agent state for comparison. It is never restored.
+  save_dir: ${AUTOREC_ROOT}/example/checkpoint/outputs/model_only_restart/checkpoints
+  generated_config_dir: ${AUTOREC_ROOT}/example/checkpoint/outputs/model_only_restart/configs
   resume_from: null

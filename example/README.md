@@ -13,10 +13,7 @@ for top-level scripts below assume the current directory is `example/`.
 |---|---|---|
 | [`main.py`](main.py) | Construct the data preparation, environment, and agent directly in Python | Quick mode trains for 50 trials |
 | [`main_factory.py`](main_factory.py) | Build the same pipeline from YAML configuration | Defaults to the 50-trial demo configuration |
-| [`bounded_training.py`](bounded_training.py) | Continue cumulative training for a fixed number of sessions in one Python process | Controlled by the selected configuration and CLI arguments |
-| [`checkpoint_training.py`](checkpoint_training.py) | Save or resume complete training checkpoints across Python processes | One configurable session per invocation |
-| [`checkpoint/`](checkpoint/) | Validate continuous versus fresh-process checkpoint-resumed equivalence | Full example compares 1,000 continuous trials with ten 100-trial sessions |
-| [`progressive_checkpoint/`](progressive_checkpoint/) | Train and evaluate cumulative spectrum windows with complete checkpoint resume | Two-trial workflow configuration; real fitting still required |
+| [`checkpoint/`](checkpoint/) | Compare continuous, bounded, complete-checkpoint, and model-only continuation | Four controlled 1,000-trial scenarios; intentionally expensive |
 | [`hyperparameter_tuning/`](hyperparameter_tuning/) | Run checkpointed multi-fidelity Optuna tuning on Slurm | Potentially expensive HPC workflow |
 
 ## Direct Python construction
@@ -57,60 +54,12 @@ python main_factory.py \
 `agent.num_trials` in the selected YAML file. The standard `pipeline_config.yaml` is the
 long-training configuration and currently specifies 10,000 trials.
 
-## Bounded continuation in one process
-
-[`bounded_training.py`](bounded_training.py) retains replay, histories, counters, schedules,
-and neural state while running multiple sessions in one interpreter. It does not write a
-complete checkpoint and cannot resume after the process exits.
-
-```bash
-python bounded_training.py \
-  --config ../configs_yaml/examples/demo_pipeline_config.yaml \
-  --sessions 3 \
-  --trials-per-session 20
-```
-
-This is useful for testing cumulative continuation semantics without checkpoint I/O.
-
-## General checkpoint training
-
-[`checkpoint_training.py`](checkpoint_training.py) is a compact interface for one
-checkpointed training session. To make one configured cumulative target automatically
-recoverable after interruption, rerun this command as needed:
-
-```bash
-python checkpoint_training.py \
-  --config ../configs_yaml/examples/demo_pipeline_config.yaml \
-  --checkpoint-dir checkpoint_outputs \
-  --checkpoint-every 10 \
-  --resume-latest
-```
-
-A missing checkpoint starts fresh, a partial checkpoint runs only the remaining trials, and
-an already reached target is a no-op. The explicit manual equivalent remains available:
-
-```bash
-python checkpoint_training.py \
-  --resume checkpoint_outputs/trial-00000050 \
-  --additional-trials 50 \
-  --checkpoint-dir checkpoint_outputs
-```
-
-Checkpoint continuation requires the deterministic CPU/runtime conditions documented in
-[`docs/checkpointing.md`](../docs/checkpointing.md).
-
-## Progressive checkpoint workflow
-
-[`progressive_checkpoint/`](progressive_checkpoint/) combines progressive-spectrum training
-and evaluation with complete checkpoint save and resume. Its paired YAML files show both an
-enabled four-window workflow and the original full-spectrum path with the optional section
-omitted. See its README for exact commands and the fitting-versus-observation boundary.
-
 ## Checkpoint equivalence experiment
 
-The [`checkpoint/`](checkpoint/) workflow compares a continuous 1,000-trial run with ten
-fresh 100-trial processes. It includes tools that compare complete checkpoint state and run
-fresh-process agent evaluation with exact equality checks.
+The [`checkpoint/`](checkpoint/) workflow compares a continuous 1,000-trial run with retained
+same-process sessions, complete-checkpoint fresh processes, and deliberately incomplete
+model-only restarts. It includes tools that compare complete state and run fresh-process agent
+evaluation with exact equality checks where equality is expected.
 
 See [`checkpoint/README.md`](checkpoint/README.md) for commands, output structure, comparison
 categories, and reproducibility limitations.

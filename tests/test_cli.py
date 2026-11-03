@@ -4,7 +4,6 @@ Heavy preprocess dependencies are stubbed so these tests can verify argument for
 processing EIS data. Train and evaluate execution belong in broader integration tests.
 """
 
-from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -12,12 +11,6 @@ import pytest
 
 from autorec import cli
 from autorec.checkpoint import RecoveryPlan
-
-
-_CHECKPOINT_SCRIPT = Path(__file__).parents[1] / "example" / "checkpoint_training.py"
-_CHECKPOINT_SPEC = spec_from_file_location("checkpoint_training_example", _CHECKPOINT_SCRIPT)
-checkpoint_training = module_from_spec(_CHECKPOINT_SPEC)
-_CHECKPOINT_SPEC.loader.exec_module(checkpoint_training)
 
 
 def test_train_config_and_resume_are_exclusive():
@@ -181,57 +174,6 @@ def test_recovery_fingerprint_allows_target_and_output_changes_only():
     )
     assert (
         cli._recovery_config_fingerprint(base, seed=43, deterministic_ops=True) != fingerprint
-    )
-
-
-def test_checkpoint_training_script_forwards_manual_and_automatic_modes(monkeypatch):
-    forwarded = Mock(return_value=0)
-    monkeypatch.setattr("autorec.cli.main", forwarded)
-
-    assert (
-        checkpoint_training.main(
-            [
-                "--config",
-                "config.yaml",
-                "--resume-latest",
-                "--checkpoint-dir",
-                "snapshots",
-                "--checkpoint-every",
-                "10",
-            ]
-        )
-        == 0
-    )
-    forwarded.assert_called_once_with(
-        [
-            "train",
-            "--config",
-            "config.yaml",
-            "--checkpoint-dir",
-            "snapshots",
-            "--checkpoint-every",
-            "10",
-            "--resume-latest",
-        ]
-    )
-
-    forwarded.reset_mock()
-    assert (
-        checkpoint_training.main(["--resume", "trial-00000100", "--additional-trials", "100"])
-        == 0
-    )
-    forwarded.assert_called_once_with(
-        [
-            "train",
-            "--resume",
-            "trial-00000100",
-            "--checkpoint-dir",
-            "checkpoints",
-            "--checkpoint-every",
-            "100",
-            "--additional-trials",
-            "100",
-        ]
     )
 
 

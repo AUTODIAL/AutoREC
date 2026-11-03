@@ -9,7 +9,7 @@ from pathlib import Path
 
 import yaml
 
-from checkpoint_runtime import (
+from .checkpoint_runtime import (
     REPOSITORY_ROOT,
     configure_cache_environment,
     configure_tensorflow_for_checkpoint,

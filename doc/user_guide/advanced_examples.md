@@ -18,10 +18,12 @@ new automation, prefer the documented {doc}`CLI <cli>` or the public
 
 ## Continuous and checkpoint-resumed training
 
-`example/checkpoint/` contains configurations and scripts for comparing one
-continuous training run with sequential fresh-process sessions. It also
+`example/checkpoint/` contains named scenarios for comparing one continuous
+training run with retained same-process sessions and complete-checkpoint
+fresh-process sessions. A model-only restart scenario demonstrates why restoring
+a `.keras` file is not equivalent to restoring training state. The workflow also
 provides exact persisted-state and greedy-evaluation comparison reports. Run
-these examples from their own directory in the active environment, and review
+these examples from the repository root in the active environment, and review
 the deterministic CPU requirements in the
 {doc}`checkpoint guide <checkpointing>` first.
 
