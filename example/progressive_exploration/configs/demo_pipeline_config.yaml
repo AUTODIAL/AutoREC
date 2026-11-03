@@ -5,7 +5,7 @@ dataprep:
   perform_linKK_validation: false
   tol_linKK: 5.0E-2
   frequency_bounds: [null, null]
-  frequency_npoints: null
+  frequency_npoints: 79
   eis_features: [ImZ, phi, mag, nphi]
 
 environment:

@@ -8,7 +8,7 @@ dataprep:
     frequency_bounds:
       - null
       - null
-    frequency_npoints: null
+    frequency_npoints: 79
     eis_features:
       - ImZ
       - phi
@@ -24,7 +24,7 @@ dataprep:
     frequency_bounds:
       - null
       - null
-    frequency_npoints: null
+    frequency_npoints: 79
     eis_features:
       - ImZ
       - phi

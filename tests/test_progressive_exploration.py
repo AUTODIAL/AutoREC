@@ -9,6 +9,7 @@ from copy import deepcopy
 import importlib
 from pathlib import Path
 
+import pandas as pd
 import yaml
 
 from autorec.data_preparation import EISDataPrep
@@ -50,7 +51,10 @@ def test_full_run_configs_only_add_three_window_progression():
     for progressive_name, standard_name in config_pairs:
         progressive = _read_yaml(EXAMPLE_ROOT / "configs" / progressive_name)
         standard = _read_yaml(REPOSITORY_ROOT / "configs_yaml" / "examples" / standard_name)
-        assert _without_progressive(progressive) == standard
+        assert progressive["dataprep"]["frequency_npoints"] == 79
+        comparable = _without_progressive(progressive)
+        comparable["dataprep"]["frequency_npoints"] = standard["dataprep"]["frequency_npoints"]
+        assert comparable == standard
 
 
 def test_every_progressive_exploration_config_uses_same_components():
@@ -97,11 +101,19 @@ def test_tuning_configs_only_add_progressive_section():
         assert progressive["dataprep"]["eval"]["path"] == (
             "../../reward_exploration/data/validation_dataset.pkl"
         )
+        assert progressive["dataprep"]["training"]["frequency_npoints"] == 79
+        assert progressive["dataprep"]["eval"]["frequency_npoints"] == 79
         comparable = _without_progressive(progressive)
         comparable["dataprep"]["training"]["path"] = full_spectrum["dataprep"]["training"][
             "path"
         ]
         comparable["dataprep"]["eval"]["path"] = full_spectrum["dataprep"]["eval"]["path"]
+        comparable["dataprep"]["training"]["frequency_npoints"] = full_spectrum["dataprep"][
+            "training"
+        ]["frequency_npoints"]
+        comparable["dataprep"]["eval"]["frequency_npoints"] = full_spectrum["dataprep"][
+            "eval"
+        ]["frequency_npoints"]
         assert comparable == full_spectrum
 
 
@@ -125,6 +137,10 @@ def test_progressive_cases_reuse_canonical_reward_environments_and_data():
     ):
         assert (REWARD_ROOT / "data" / name).is_file()
 
+    training_data = pd.read_pickle(REWARD_ROOT / "data" / "training_dataset.pkl")
+    assert len(training_data.iloc[0]["freq"]) == 79
+    assert len(training_data.iloc[0]["flatten_Z"]) == 79 * 4
+
 
 def test_full_run_entrypoints_select_local_progressive_configs():
     long_config = (
@@ -142,6 +158,26 @@ def test_full_run_entrypoints_select_local_progressive_configs():
         submit_job = (case_dir / "submit_job.sh").read_text()
         assert long_config in submit_job
         assert "#SBATCH --job-name=progressive_" in submit_job
+
+
+def test_tuning_entrypoints_reuse_checkpointed_reward_workflow():
+    for case in CASES:
+        case_dir = EXAMPLE_ROOT / case
+        worker = (case_dir / "tuning_main_factory.py").read_text()
+        runner = (case_dir / "tuning_runner.py").read_text()
+        job = (case_dir / "tuning_runner_job.sh").read_text()
+        assert "from example.reward_exploration.tuning.stage import main" in worker
+        assert "from example.reward_exploration.tuning.runner import main" in runner
+        assert "REPOSITORY_ROOT = CASE_DIR.parents[2]" in worker
+        assert "REPOSITORY_ROOT = CASE_DIR.parents[2]" in runner
+        assert "#SBATCH --job-name='progressive_" in job
+        assert _read_yaml(case_dir / "tuning_search_space.yaml") == _read_yaml(
+            REWARD_ROOT / case / "tuning_search_space.yaml"
+        )
+
+    copied_tuning = EXAMPLE_ROOT / "tuning"
+    assert not list(copied_tuning.glob("*.py"))
+    assert not (copied_tuning / "requirements.txt").exists()
 
 
 def test_progressive_config_resolves_registered_runtime_components():
