@@ -81,6 +81,29 @@ def test_history_cache_uses_circuit_and_eis_index_key():
     assert cache.get(circuit_code="RPRR", eis_index=6) is None
 
 
+def test_history_cache_separates_spectrum_views_and_preserves_legacy_key():
+    cache = HistoryCache(capacity=3, cache_type="lru")
+    result = {
+        "circuit_code": "RPRR",
+        "eis_index": 5,
+        "action_type": "P",
+        "action_position": 2,
+        "reward": 0.75,
+        "metrics": {"r2": 0.99},
+        "predicted_Z": [1 + 1j],
+        "param": {"R1": 1.0},
+        "good_fit": True,
+    }
+    cache.put(**result)
+    cache.put(**result, spectrum_view_id="view-0")
+
+    assert cache.get("RPRR", 5)["reward"] == 0.75
+    assert cache.get("RPRR", 5, spectrum_view_id="view-0") is not None
+    assert cache.get("RPRR", 5, spectrum_view_id="view-1") is None
+    assert ("RPRR", 5) in cache.cache
+    assert ("RPRR", 5, "view-0") in cache.cache
+
+
 def test_history_cache_rejects_unknown_cache_type():
     with pytest.raises(ValueError, match="cache_type"):
         HistoryCache(cache_type="unknown")

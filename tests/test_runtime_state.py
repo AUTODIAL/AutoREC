@@ -10,6 +10,11 @@ from tensorflow.python.ops import stateful_random_ops
 
 from test_training_baseline import environment_factory as _environment_factory
 from autorec.environment import EIS_ECM_Env
+from autorec.progressive_spectrum import (
+    PREPARED_SPECTRUM_SOURCE,
+    SpectrumView,
+    SpectrumWindowSelection,
+)
 from autorec.runtime_state import (
     environment_state_dict,
     environment_source_modules,
@@ -125,6 +130,38 @@ def test_disabled_cache_restores_without_enabling_it(environment_factory):
     assert restored is evaluation is active
     assert restored.cache is None
     assert restored.cache_enabled is False
+
+
+def test_environment_roundtrip_preserves_active_spectrum_view(environment_factory):
+    env = environment_factory()
+    row = env.dataset.iloc[0]
+    source_indices = np.arange(len(row["freq"]), dtype=int)
+    selection = SpectrumWindowSelection(
+        stage_index=0,
+        included_window_indices=(0,),
+        source_indices=source_indices,
+        frequency=np.asarray(row["freq"]),
+        impedance=np.asarray(row["Z_true"]),
+        source=PREPARED_SPECTRUM_SOURCE,
+    )
+    view = SpectrumView(
+        selection=selection,
+        frequency=selection.frequency,
+        impedance=selection.impedance,
+        observation=np.asarray(row["flatten_Z"]),
+    )
+    env.reset(EIS_i=0, spectrum_view=view)
+
+    restored, evaluation, active = restore_environment_state(
+        environment_state_dict(env, env, env)
+    )
+
+    assert restored is evaluation is active
+    assert restored.current_spectrum_view_id == env.current_spectrum_view_id
+    np.testing.assert_array_equal(restored.freq, selection.frequency)
+    np.testing.assert_array_equal(restored.Z, selection.impedance)
+    np.testing.assert_array_equal(restored.Z_norm_flatten, view.observation)
+    assert restored.active_spectrum_view.selection.source == PREPARED_SPECTRUM_SOURCE
 
 
 def test_declared_environment_subclass_state_roundtrips_without_constructor(

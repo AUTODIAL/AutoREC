@@ -1,3 +1,4 @@
+import hashlib
 import os
 
 # Limit numpy/scipy threading BEFORE importing them
@@ -15,6 +16,8 @@ import numpy as np
 import pandas as pd
 
 
+from autorec.data_preparation import EISDataPrep
+from autorec.progressive_spectrum import SpectrumView
 from autorec.utils import (
     state_encode,
     fit_circuit_parameters_NEW,
@@ -79,6 +82,7 @@ class EIS_ECM_Env:
         cache_enabled: bool = True,
         cache_capacity: int = 20000,
         cache_type: str = "lru",  # 'lru' or 'clock',
+        dataprep: EISDataPrep | None = None,
     ):
         """
         Initialize the EIS circuit modeling environment.
@@ -88,7 +92,7 @@ class EIS_ECM_Env:
 
         Parameters
         ----------
-        dataset : pd.DataFrame, required
+        dataset : pd.DataFrame, optional
             A DataFrame where each row contains:
             - 'Z_true': Complex impedance measurements (numpy array)
             - 'freq': Frequency points for measurements (numpy array)
@@ -96,6 +100,11 @@ class EIS_ECM_Env:
             - 'true_circuit': The actual circuit that generated the data (for reference)
             - 'chi_thresh': Chi-square threshold for determining good fit
             - 'r2_thresh': R² threshold for determining good fit
+            If omitted, the loaded dataset from ``dataprep`` is used.
+
+        dataprep : EISDataPrep, optional
+            Loaded data-preparation instance associated with the dataset. When both
+            ``dataset`` and ``dataprep`` are provided, the explicit dataset is authoritative.
 
         elements : list[str], default=['+', '/', 'R', 'L', 'P']
             List of circuit elements available for constructing circuits.
@@ -138,15 +147,22 @@ class EIS_ECM_Env:
         Raises
         ------
         ValueError
-            If dataset is None (a dataset must always be provided)
+            If neither a dataset nor a loaded data-preparation instance is provided.
         """
-        if dataset is None:
+        if dataprep is not None and not isinstance(dataprep, EISDataPrep):
+            raise TypeError("dataprep must be an EISDataPrep instance.")
+        if dataprep is not None and dataprep.dataset is None:
             raise ValueError(
-                "EIS_ECM_ENV: A dataset must be provided to create the environment. "
-                "Please use the EISDataPrep class to you have not already created "
-                "the dataset with data_preparation.py"
+                "EIS_ECM_ENV: The EISDataPrep instance must be loaded before it is "
+                "provided to the environment."
             )
-        self.dataset = dataset
+        if dataset is None and dataprep is None:
+            raise ValueError(
+                "EIS_ECM_ENV: A dataset must be provided directly or through a loaded "
+                "EISDataPrep instance."
+            )
+        self.dataprep = dataprep
+        self.dataset = dataset if dataset is not None else dataprep.dataset
 
         # Available circuit elements for GEP chromosome representation
         for el in elements:
@@ -185,8 +201,8 @@ class EIS_ECM_Env:
                     )
         self._all_start_states = initial_state
 
-        self.EIS_measurement_size = len(dataset.iloc[0]["Z_true"])
-        self.EIS_INPUT_SIZE = len(dataset.iloc[0]["flatten_Z"])
+        self.EIS_measurement_size = len(self.dataset.iloc[0]["Z_true"])
+        self.EIS_INPUT_SIZE = len(self.dataset.iloc[0]["flatten_Z"])
         self.chromosome_HEAD_len = chromosome_HEAD_len
         self.chromosome_TAIL_len = self.chromosome_HEAD_len * (self._N_MAX - 1) + 1
         self.chromosome_len = self.chromosome_HEAD_len + self.chromosome_TAIL_len
@@ -230,6 +246,8 @@ class EIS_ECM_Env:
 
         # Track current EIS index
         self.current_eis_index = None
+        self.active_spectrum_view = None
+        self.current_spectrum_view_id = None
         self.encoded_state = None
         self.reset()
 
@@ -286,14 +304,21 @@ class EIS_ECM_Env:
 
         return all_actions
 
-    def reset(self, EIS_i=None):
+    def reset(
+        self,
+        EIS_i=None,
+        *,
+        initial_state: str | None = None,
+        spectrum_view: SpectrumView | None = None,
+    ):
         """
         Reset the environment to start a new episode.
 
         This method:
-        1. Selects a random starting circuit from predefined templates
+        1. Selects a random starting circuit from predefined templates, unless explicitly set
         2. Samples a new EIS measurement to fit (or uses specified one)
-        3. Returns the initial observation
+        3. Optionally applies a progressive physical spectrum and fixed-size observation
+        4. Returns the initial observation
 
         This is called at the beginning of each training episode. Each episode represents one
         attempt to discover a circuit that fits a particular EIS measurement.
@@ -303,6 +328,11 @@ class EIS_ECM_Env:
         EIS_i : int or None, default=None
             If provided, uses the EIS measurement at this index in the dataset
             If None, randomly samples an EIS measurement from the dataset
+        initial_state : str or None, keyword-only, default=None
+            Complete chromosome to use as the episode starting state.
+        spectrum_view : SpectrumView or None, keyword-only, default=None
+            Progressive view whose raw selection is used for fitting and whose encoded
+            observation is used as neural-network input.
 
         Returns
         -------
@@ -311,7 +341,15 @@ class EIS_ECM_Env:
             - index: The index/row number of the selected EIS measurement.
             - observation: Initial state observation (see ``_get_obs()`` for details).
         """
-        start_state = self.start_state_list[np.random.randint(0, len(self.start_state_list))]
+        if spectrum_view is not None and EIS_i is None:
+            raise ValueError("EIS_i must be provided when spectrum_view is specified")
+
+        if initial_state is None:
+            start_state = self.start_state_list[
+                np.random.randint(0, len(self.start_state_list))
+            ]
+        else:
+            start_state = self._validate_reset_state(initial_state)
         self.START_STATE = start_state
 
         # self.state: str = start_state
@@ -319,10 +357,34 @@ class EIS_ECM_Env:
         self._update_state(new_state=start_state)
 
         index = self._set_EIS(EIS_i)
+        if spectrum_view is not None:
+            self._set_spectrum_view(spectrum_view)
 
         observation = self._get_obs()
 
         return index, observation
+
+    def _validate_reset_state(self, initial_state: str) -> str:
+        """Validate an explicit full chromosome supplied to :meth:`reset`."""
+        if not isinstance(initial_state, str):
+            raise TypeError("initial_state must be a chromosome string")
+        if len(initial_state) != self.chromosome_len:
+            raise ValueError(
+                f"initial_state must contain exactly {self.chromosome_len} chromosome elements"
+            )
+        for position, element in enumerate(initial_state):
+            if element not in self.ELEMENTS:
+                raise ValueError(
+                    f"Invalid element '{element}' in initial_state. "
+                    f"Allowed elements are: {self.ELEMENTS}"
+                )
+            if position == 0 and element not in self._operator:
+                raise ValueError("initial_state must start with a topology operator")
+            if position >= self.chromosome_HEAD_len and element not in self._terminal:
+                raise ValueError(
+                    "initial_state tail positions may contain only terminal elements"
+                )
+        return initial_state
 
     def _update_state(
         self, action_type: str = None, action_position: int = None, new_state: str = None
@@ -415,7 +477,63 @@ class EIS_ECM_Env:
         self.true_circuit = row["true_circuit"]
         self.chi_threshold = row["chi_thresh"]
         self.r2_threshold = row["r2_thresh"]
+        self.active_spectrum_view = None
+        self.current_spectrum_view_id = None
         return self.current_eis_index
+
+    def _set_spectrum_view(self, spectrum_view: SpectrumView) -> None:
+        """Apply a progressive view while keeping fitting and NN data separate.
+
+        Physical fitting uses the view selection's original frequency and impedance arrays;
+        only the neural-network observation uses the encoder output.
+        """
+        if not isinstance(spectrum_view, SpectrumView):
+            raise TypeError("spectrum_view must be a SpectrumView")
+        if self.current_eis_index is None:
+            raise ValueError("an EIS row must be selected before applying a spectrum view")
+        if len(spectrum_view.observation) != self.EIS_INPUT_SIZE:
+            raise ValueError(
+                "spectrum_view observation size must match the environment's neural-network "
+                f"input size ({self.EIS_INPUT_SIZE})"
+            )
+
+        source_frequency, source_impedance = spectrum_view.selection.source.read(
+            self.dataset.iloc[self.current_eis_index]
+        )
+        source_indices = np.asarray(spectrum_view.selection.source_indices)
+        if (
+            source_indices.ndim != 1
+            or len(source_indices) == 0
+            or np.any(source_indices < 0)
+            or np.any(source_indices >= len(source_frequency))
+        ):
+            raise ValueError("spectrum_view contains invalid source indices")
+        if not np.array_equal(
+            source_frequency[source_indices], spectrum_view.selection.frequency
+        ) or not np.array_equal(
+            source_impedance[source_indices], spectrum_view.selection.impedance
+        ):
+            raise ValueError("spectrum_view selection does not match the selected dataset row")
+
+        self.active_spectrum_view = spectrum_view
+        self.freq = spectrum_view.selection.frequency
+        self.Z = spectrum_view.selection.impedance
+        self.Z_norm_flatten = spectrum_view.observation
+        self.current_spectrum_view_id = self._spectrum_view_id(spectrum_view)
+
+    @staticmethod
+    def _spectrum_view_id(spectrum_view: SpectrumView) -> str:
+        """Return a stable digest of the raw frequency and impedance used for fitting."""
+        digest = hashlib.sha256()
+        for values in (
+            spectrum_view.selection.frequency,
+            spectrum_view.selection.impedance,
+        ):
+            array = np.ascontiguousarray(values)
+            digest.update(array.dtype.str.encode("ascii"))
+            digest.update(np.asarray(array.shape, dtype=np.int64).tobytes())
+            digest.update(array.tobytes())
+        return digest.hexdigest()
 
     def _get_obs(self):
         """
@@ -735,6 +853,7 @@ class EIS_ECM_Env:
                 eis_index=self.current_eis_index,
                 action_type=action_type,
                 action_position=action_position,
+                spectrum_view_id=self.current_spectrum_view_id,
             )
             if (self.cache_enabled and self.current_eis_index is not None)
             else None
@@ -769,6 +888,7 @@ class EIS_ECM_Env:
                     depth_penalty=result["depth_penalty"],
                     fit_bonus=0.0,
                     fit_penalty=0.0,
+                    spectrum_view_id=self.current_spectrum_view_id,
                 )
 
         # Extract values for return
