@@ -19,7 +19,8 @@ new automation, prefer the documented {doc}`CLI <cli>` or the public
 ## Continuous and checkpoint-resumed training
 
 `example/checkpoint/` contains named scenarios for comparing one continuous
-training run with complete-checkpoint fresh-process sessions. It also
+training run with retained same-process sessions and complete-checkpoint
+fresh-process sessions. It also
 provides exact persisted-state and greedy-evaluation comparison reports. Run
 these examples from their own directory in the active environment, and review
 the deterministic CPU requirements in the

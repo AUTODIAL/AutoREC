@@ -175,8 +175,9 @@ completed-trial boundaries, not in the middle of a trial.
 
 For the complete format, compatibility checks, limitations, and validation
 evidence, read `docs/checkpointing.md` in the repository. The
-`example/checkpoint/` workflow compares one continuous run with sequential
-fresh-process sessions and exports per-category JSON comparison reports.
+`example/checkpoint/` workflow compares one continuous run with complete-checkpoint
+fresh-process sessions and a bounded same-process control, and exports per-category JSON
+comparison reports.
 
 From the repository root, the complete validation workflow is:
 

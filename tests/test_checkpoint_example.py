@@ -10,11 +10,13 @@ import yaml
 
 from example.checkpoint import checkpoint_runtime
 from example.checkpoint import train_session as example
+from example.checkpoint.bounded import run as bounded
 from example.checkpoint.comparison import compare_checkpoints as comparison
 from example.checkpoint.complete_checkpoint import run as runner
 
 
 _SCRIPT = Path(example.__file__)
+_CHECKPOINT_EXAMPLE = _SCRIPT.parent
 
 
 def config(tmp_path, *, num_trials=100, resume_from=None):
@@ -48,6 +50,23 @@ def write_config(tmp_path, value):
     path = tmp_path / "config.yaml"
     path.write_text(yaml.safe_dump(value, sort_keys=False))
     return path
+
+
+def _training_config(path):
+    """Return comparison-relevant settings without scenario output/session fields."""
+    value = yaml.safe_load(path.read_text())
+    value.pop("checkpoint")
+    value["agent"].pop("save_dir")
+    value["agent"].pop("num_trials")
+    return value
+
+
+def test_comparison_scenarios_share_training_configuration():
+    continuous = _training_config(_CHECKPOINT_EXAMPLE / "continuous" / "config.yaml")
+    bounded_config = _training_config(_CHECKPOINT_EXAMPLE / "bounded" / "config.yaml")
+    complete = _training_config(_CHECKPOINT_EXAMPLE / "complete_checkpoint" / "config.yaml")
+
+    assert continuous == bounded_config == complete
 
 
 def test_configuration_uses_num_trials_as_current_session_length(tmp_path):
@@ -178,6 +197,32 @@ def test_runner_follows_generated_config_for_open_ended_progress(tmp_path):
     resumed.write_text(yaml.safe_dump(value, sort_keys=False))
 
     assert runner._next_config(resumed).name == "resume-from-trial-00000050.yaml"
+
+
+def test_bounded_runner_retains_one_agent_and_saves_only_final_snapshot(tmp_path):
+    class Agent:
+        num_trials = 25
+        completed_trials = 0
+
+        def __init__(self):
+            self.train_calls = []
+            self.saved = []
+
+        def train(self, *, additional_trials=None):
+            self.train_calls.append(additional_trials)
+            if additional_trials != 0:
+                self.completed_trials += self.num_trials
+
+        def save_checkpoint(self, destination):
+            self.saved.append(destination)
+
+    agent = Agent()
+    destination = bounded.run_retained_sessions(agent, 3, tmp_path / "checkpoints")
+
+    assert agent.train_calls == [0, None, None, None]
+    assert agent.completed_trials == 75
+    assert destination == tmp_path / "checkpoints" / "trial-00000075"
+    assert agent.saved == [destination]
 
 
 def test_checkpoint_comparison_excludes_only_session_and_output_configuration(tmp_path):

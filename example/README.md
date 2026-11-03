@@ -13,7 +13,7 @@ for top-level scripts below assume the current directory is `example/`.
 |---|---|---|
 | [`main.py`](main.py) | Construct the data preparation, environment, and agent directly in Python | Quick mode trains for 50 trials |
 | [`main_factory.py`](main_factory.py) | Build the same pipeline from YAML configuration | Defaults to the 50-trial demo configuration |
-| [`bounded_training.py`](bounded_training.py) | Continue cumulative training for a fixed number of sessions in one Python process | Controlled by the selected configuration and CLI arguments |
+| [`checkpoint/bounded/`](checkpoint/bounded/) | Compare retained same-process sessions with uninterrupted and checkpoint-resumed training | Ten 100-trial sessions in the full comparison |
 | [`checkpoint/complete_checkpoint/cli.py`](checkpoint/complete_checkpoint/cli.py) | Save or resume complete training checkpoints across Python processes | One configurable session per invocation |
 | [`checkpoint/`](checkpoint/) | Validate continuous versus fresh-process checkpoint-resumed equivalence | Full example compares 1,000 continuous trials with ten 100-trial sessions |
 | [`hyperparameter_tuning/`](hyperparameter_tuning/) | Run checkpointed multi-fidelity Optuna tuning on Slurm | Potentially expensive HPC workflow |
@@ -58,15 +58,13 @@ long-training configuration and currently specifies 10,000 trials.
 
 ## Bounded continuation in one process
 
-[`bounded_training.py`](bounded_training.py) retains replay, histories, counters, schedules,
-and neural state while running multiple sessions in one interpreter. It does not write a
-complete checkpoint and cannot resume after the process exits.
+[`checkpoint/bounded/`](checkpoint/bounded/) retains replay, histories, counters, schedules,
+and neural state while running multiple sessions in one interpreter. It writes one complete
+snapshot only after the last session so the final in-memory state can be compared; it does not
+use checkpoints to continue between sessions.
 
 ```bash
-python bounded_training.py \
-  --config ../configs_yaml/examples/demo_pipeline_config.yaml \
-  --sessions 3 \
-  --trials-per-session 20
+python -m checkpoint.bounded.run --sessions 10
 ```
 
 This is useful for testing cumulative continuation semantics without checkpoint I/O.

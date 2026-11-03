@@ -1,8 +1,9 @@
 # Complete-checkpoint continuation and equivalence
 
-This directory currently contains two controlled scenarios:
+This directory currently contains three controlled scenarios:
 
 - `continuous/`: one uninterrupted 1,000-trial reference process;
+- `bounded/`: ten retained 100-trial sessions in one process;
 - `complete_checkpoint/`: ten fresh 100-trial processes that restore complete checkpoints.
 
 Shared session, runtime, evaluation, and comparison code remains at this directory level or
@@ -62,6 +63,7 @@ Use clean output paths because checkpoint destinations are immutable:
 
 ```bash
 python -m example.checkpoint.continuous.run
+python -m example.checkpoint.bounded.run --sessions 10
 python -m example.checkpoint.complete_checkpoint.run --sessions 10
 ```
 
@@ -69,6 +71,7 @@ The expected final checkpoints are:
 
 ```text
 example/checkpoint/outputs/continuous/checkpoints/trial-00001000/
+example/checkpoint/outputs/bounded/checkpoints/trial-00001000/
 example/checkpoint/outputs/complete_checkpoint/checkpoints/trial-00001000/
 ```
 
