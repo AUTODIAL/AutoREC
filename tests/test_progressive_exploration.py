@@ -6,6 +6,7 @@ resolved progressive-spectrum configuration.
 """
 
 from copy import deepcopy
+import importlib
 from pathlib import Path
 
 import yaml
@@ -28,6 +29,7 @@ CASES = (
     "reward_calculated_with_fim_on_simplified_circuits",
     "reward_calculated_with_continuous_fim_on_simplified_circuits",
 )
+CUSTOM_CASES = CASES[1:]
 
 
 def _read_yaml(path: Path) -> dict:
@@ -89,7 +91,39 @@ def test_tuning_configs_only_add_progressive_section():
     for case in CASES:
         progressive = _read_yaml(EXAMPLE_ROOT / case / "tuning_base_config.yaml")
         full_spectrum = _read_yaml(REWARD_ROOT / case / "tuning_base_config.yaml")
-        assert _without_progressive(progressive) == full_spectrum
+        assert progressive["dataprep"]["training"]["path"] == (
+            "../../reward_exploration/data/training_dataset.pkl"
+        )
+        assert progressive["dataprep"]["eval"]["path"] == (
+            "../../reward_exploration/data/validation_dataset.pkl"
+        )
+        comparable = _without_progressive(progressive)
+        comparable["dataprep"]["training"]["path"] = full_spectrum["dataprep"]["training"][
+            "path"
+        ]
+        comparable["dataprep"]["eval"]["path"] = full_spectrum["dataprep"]["eval"]["path"]
+        assert comparable == full_spectrum
+
+
+def test_progressive_cases_reuse_canonical_reward_environments_and_data():
+    for case in CUSTOM_CASES:
+        progressive_module = importlib.import_module(
+            f"example.progressive_exploration.{case}.environment"
+        )
+        canonical_module = importlib.import_module(
+            f"example.reward_exploration.{case}.environment"
+        )
+        assert progressive_module.EIS_ECM_Env is canonical_module.EIS_ECM_Env
+
+    assert not (EXAMPLE_ROOT / "data").exists()
+    for name in (
+        "training_dataset.pkl",
+        "validation_dataset.pkl",
+        "test_dataset.pkl",
+        "battery_dataset.pkl",
+        "experimental_dataset.pkl",
+    ):
+        assert (REWARD_ROOT / "data" / name).is_file()
 
 
 def test_progressive_config_resolves_registered_runtime_components():

@@ -1,6 +1,6 @@
 dataprep:
   training:
-    path: ../data/training_dataset.pkl
+    path: ../../reward_exploration/data/training_dataset.pkl
     mode: load
     evaluation: true
     perform_linKK_validation: false
@@ -16,7 +16,7 @@ dataprep:
       - nphi
 
   eval:
-    path: ../data/validation_dataset.pkl
+    path: ../../reward_exploration/data/validation_dataset.pkl
     mode: load
     evaluation: true
     perform_linKK_validation: false
