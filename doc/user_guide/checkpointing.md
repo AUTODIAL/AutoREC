@@ -119,13 +119,6 @@ are mutually exclusive. `--output-dir` may relocate
 future outputs, but architecture, optimizer, data, and training schedules are
 checkpoint-owned and cannot be changed during an exact resume.
 
-The same automatic option is exposed by the Python entry script:
-
-```bash
-python example/checkpoint_training.py --config config.yaml \
-  --checkpoint-dir checkpoints --checkpoint-every 10 --resume-latest
-```
-
 ## What is preserved
 
 A complete checkpoint stores:
@@ -165,34 +158,40 @@ Bitwise continuation is supported only under the validated deterministic CPU
 conditions: identical AutoREC source, dependency/runtime fingerprint,
 threading and TensorFlow determinism settings, supported built-in
 network/optimizer components, and no mutation or evaluation between training
-boundaries. GPU execution, changed native libraries or hardware, arbitrary
-custom components, and nondeterministic real fitting require separate
-qualification. Checkpoints are supported at completed-trial boundaries, not
-in the middle of a trial.
+boundaries. An environment subclass must explicitly declare all additional
+instance fields through `CHECKPOINT_FIELDS` and all behavior-affecting source
+modules through `CHECKPOINT_SOURCE_MODULES`; the detailed contract is in the
+complete checkpoint documentation linked below. GPU execution, changed native
+libraries or hardware, other arbitrary custom components, and nondeterministic
+real fitting require separate qualification. Checkpoints are supported at
+completed-trial boundaries, not in the middle of a trial.
 
 For the complete format, compatibility checks, limitations, and validation
 evidence, read `docs/checkpointing.md` in the repository. The
-`example/checkpoint/` workflow compares one continuous run with sequential
-fresh-process sessions and exports per-category JSON comparison reports.
+`example/checkpoint/` workflow compares one continuous run with complete-checkpoint
+fresh-process sessions and a bounded same-process control, and exports per-category JSON
+comparison reports.
 
-From `example/checkpoint/`, the complete validation workflow is:
+From the repository root, run all controlled scenarios and the state comparison with:
 
 ```bash
-python run_continuous.py
-python run_sequential.py --config sequential_config.yaml --sessions 10
-python compare_checkpoints.py
-python compare_results.py
+python -m example.checkpoint.run_comparisons
 ```
+
+Add `--with-evaluation` to run fresh-process greedy evaluation for every final scenario.
+The bounded and complete-checkpoint results are required to match the uninterrupted reference
+exactly. The model-only scenario instead verifies named losses of non-model training state.
 
 `compare_checkpoints.py` is the faster persisted-state comparison. It checks
 counters, histories, schedules, random streams, environments, caches, online
 and target networks, optimizer state, and the replay buffer. Its default report
 is `outputs/comparison_reports/checkpoint_comparison.json`.
 
-`compare_results.py` includes those checks and additionally restores both
+`compare_results.py` includes those checks for one reference/candidate pair and additionally restores both
 agents in fresh processes, evaluates identical training rows using greedy
 actions, compares the resulting ECM records exactly, and verifies that
 evaluation did not modify either checkpoint. Its default report is
 `outputs/evaluation_comparison/comparison_report.json`. Both commands print
 named per-check verdicts, finish with a prominent overall verdict, and return a
-nonzero status when comparison fails.
+nonzero status when an expected comparison contract fails. `compare_scenarios.py` produces
+the combined report for all continuation strategies.

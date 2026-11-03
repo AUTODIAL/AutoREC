@@ -84,10 +84,11 @@ also saves at cumulative multiples of N. Automatic names use eight digits, for e
 Without checkpoint arguments, `agent.train()` and existing model exports retain their
 previous behavior. `save_model()` and `load_model()` remain model-only APIs and cannot
 resume complete training. Every non-empty retained session exports the current cumulative
-model, histories and plots. See [the runnable open-ended example](../example/checkpoint/).
-That example also compares continuous and resumed checkpoints exactly. Its faster checkpoint
-comparison and slower fresh-process evaluation comparison print per-category results, finish
-with an overall verdict, and export machine-readable JSON reports.
+model, histories and plots. See [the checkpoint comparison example](../example/checkpoint/).
+It compares uninterrupted training with bounded same-process sessions, complete-checkpoint
+fresh-process sessions, and deliberately incomplete model-only restarts. The exact state and
+optional fresh-process evaluation tools print per-category results, finish with an overall
+verdict, and export machine-readable JSON reports.
 
 ## CLI workflow
 
@@ -142,7 +143,6 @@ Automatic recovery records a checkpoint-series ID and a fingerprint of the confi
 training configuration and initial seed policy. It permits changes to `agent.num_trials`
 (to extend a cumulative target) and `agent.save_dir`, but rejects other configuration
 changes. It scans immutable `trial-NNNNNNNN` directories; it does not maintain a mutable
-`latest` pointer. The same option is available through `example/checkpoint_training.py`.
 Extending a target does not recompute schedules already owned by the checkpoint; configure
 absolute cumulative schedule values when later extension is possible.
 
@@ -206,14 +206,34 @@ optimizer, data, or schedule hyperparameters is not a resume operation. Runtime 
 does not prove identical
 hardware or native-library builds: use the same hardware and software environment as well.
 
-Checkpoint support currently requires CPU execution and ordinary `DDQN_ECM`/
-`EIS_ECM_Env` instances without extra instance state. Networks must be uncompiled built-in
-Keras Sequential models with Dense, BatchNormalization, Dropout, Activation or Flatten,
-using float32/float64. Optimizers are Adam (including AMSGrad) or SGD, with constant learning
-rate, ExponentialDecay, PiecewiseConstantDecay or CosineDecay. Custom layers/optimizers,
-Functional/compiled models, mixed precision/loss scaling, EMA, gradient accumulation,
-LoRA/quantization and stateful custom schedules are unsupported. Ordinary training retains
-its existing support for configurations outside this checkpoint subset.
+Checkpoint support currently requires CPU execution and an ordinary `DDQN_ECM` agent.
+The standard `EIS_ECM_Env` and explicitly declared subclasses are supported. A subclass
+must be importable by the same module and qualified name in the resumed process and must
+define both declarations directly on the class:
+
+```python
+class ExperimentalEnvironment(EIS_ECM_Env):
+    CHECKPOINT_FIELDS = frozenset({"reward_scale"})
+    CHECKPOINT_SOURCE_MODULES = ("my_experiment.reward_utils",)
+```
+
+`CHECKPOINT_FIELDS` must name every instance attribute added by the subclass; standard
+environment fields and `cache` must not be repeated. The environment class's module is
+fingerprinted automatically. `CHECKPOINT_SOURCE_MODULES` adds importable modules whose
+implementation affects transitions, rewards, or other future training behavior. Both
+declarations are required even when empty. Restoration creates the exact class without
+calling its constructor, then restores its declared fields. Missing, extra, changed, or
+undeclared state is rejected, and changed declared source fails compatibility validation
+before checkpoint payloads are unpickled. External resources and mutable module-level state
+are not captured by these declarations and remain unsupported.
+
+Networks must be uncompiled built-in Keras Sequential models with Dense,
+BatchNormalization, Dropout, Activation or Flatten, using float32/float64. Optimizers are
+Adam (including AMSGrad) or SGD, with constant learning rate, ExponentialDecay,
+PiecewiseConstantDecay or CosineDecay. Custom layers/optimizers, Functional/compiled models,
+mixed precision/loss scaling, EMA, gradient accumulation, LoRA/quantization and stateful
+custom schedules are unsupported. Ordinary training retains its existing support for
+configurations outside this checkpoint subset.
 
 Only completed trials are checkpoint boundaries. An interruption during a trial discards
 work since the last saved boundary; reload that checkpoint. Mid-episode gradients, temporary

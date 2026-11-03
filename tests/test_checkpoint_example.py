@@ -1,35 +1,31 @@
-"""Tests for the open-ended checkpoint example configuration workflow."""
+"""Fast contracts for checkpoint scenario configuration, orchestration, and reports.
 
-from importlib.util import module_from_spec, spec_from_file_location
+The full example performs real 1,000-trial training runs. These tests instead own its pure
+configuration, command construction, session accounting, and report-interpretation behavior.
+Fresh-process checkpoint equivalence itself is covered by ``test_checkpoint_process.py``.
+"""
+
 from io import StringIO
 from pathlib import Path
-import sys
 from types import SimpleNamespace
 
 import pytest
 import yaml
 
 
-_SCRIPT = Path(__file__).parents[1] / "example" / "checkpoint" / "main_factory.py"
-_RUNTIME_SCRIPT = _SCRIPT.with_name("checkpoint_runtime.py")
-_RUNTIME_SPEC = spec_from_file_location("checkpoint_runtime", _RUNTIME_SCRIPT)
-checkpoint_runtime = module_from_spec(_RUNTIME_SPEC)
-sys.modules[_RUNTIME_SPEC.name] = checkpoint_runtime
-_RUNTIME_SPEC.loader.exec_module(checkpoint_runtime)
+from example.checkpoint import checkpoint_runtime
+from example.checkpoint import train_session as example
+from example.checkpoint.bounded import run as bounded
+from example.checkpoint.comparison import compare_checkpoints as comparison
+from example.checkpoint.comparison import compare_scenarios
+from example.checkpoint.complete_checkpoint import run as runner
+from example.checkpoint.model_only_restart import run as model_only_runner
+from example.checkpoint.model_only_restart import train_session as model_only_session
+from example.checkpoint import run_comparisons
 
-_SPEC = spec_from_file_location("checkpoint_example_main", _SCRIPT)
-example = module_from_spec(_SPEC)
-_SPEC.loader.exec_module(example)
 
-_RUNNER_SCRIPT = _SCRIPT.with_name("run_sequential.py")
-_RUNNER_SPEC = spec_from_file_location("checkpoint_example_runner", _RUNNER_SCRIPT)
-runner = module_from_spec(_RUNNER_SPEC)
-_RUNNER_SPEC.loader.exec_module(runner)
-
-_COMPARE_SCRIPT = _SCRIPT.with_name("compare_checkpoints.py")
-_COMPARE_SPEC = spec_from_file_location("checkpoint_example_compare", _COMPARE_SCRIPT)
-comparison = module_from_spec(_COMPARE_SPEC)
-_COMPARE_SPEC.loader.exec_module(comparison)
+_SCRIPT = Path(example.__file__)
+_CHECKPOINT_EXAMPLE = _SCRIPT.parent
 
 
 def config(tmp_path, *, num_trials=100, resume_from=None):
@@ -63,6 +59,24 @@ def write_config(tmp_path, value):
     path = tmp_path / "config.yaml"
     path.write_text(yaml.safe_dump(value, sort_keys=False))
     return path
+
+
+def _training_config(path):
+    """Return comparison-relevant settings without scenario output/session fields."""
+    value = yaml.safe_load(path.read_text())
+    value.pop("checkpoint")
+    value["agent"].pop("save_dir")
+    value["agent"].pop("num_trials")
+    return value
+
+
+def test_comparison_scenarios_share_training_configuration():
+    continuous = _training_config(_CHECKPOINT_EXAMPLE / "continuous" / "config.yaml")
+    bounded_config = _training_config(_CHECKPOINT_EXAMPLE / "bounded" / "config.yaml")
+    complete = _training_config(_CHECKPOINT_EXAMPLE / "complete_checkpoint" / "config.yaml")
+    model_only = _training_config(_CHECKPOINT_EXAMPLE / "model_only_restart" / "config.yaml")
+
+    assert continuous == bounded_config == complete == model_only
 
 
 def test_configuration_uses_num_trials_as_current_session_length(tmp_path):
@@ -195,6 +209,152 @@ def test_runner_follows_generated_config_for_open_ended_progress(tmp_path):
     assert runner._next_config(resumed).name == "resume-from-trial-00000050.yaml"
 
 
+def test_bounded_runner_retains_one_agent_and_saves_only_final_snapshot(tmp_path):
+    class Agent:
+        num_trials = 25
+        completed_trials = 0
+
+        def __init__(self):
+            self.train_calls = []
+            self.saved = []
+
+        def train(self, *, additional_trials=None):
+            self.train_calls.append(additional_trials)
+            if additional_trials != 0:
+                self.completed_trials += self.num_trials
+
+        def save_checkpoint(self, destination):
+            self.saved.append(destination)
+
+    agent = Agent()
+    destination = bounded.run_retained_sessions(agent, 3, tmp_path / "checkpoints")
+
+    assert agent.train_calls == [0, None, None, None]
+    assert agent.completed_trials == 75
+    assert destination == tmp_path / "checkpoints" / "trial-00000075"
+    assert agent.saved == [destination]
+
+
+def test_model_only_session_loads_no_complete_checkpoint(tmp_path):
+    class Agent:
+        model_name = tmp_path / "session" / "dqn_model.keras"
+
+        def __init__(self):
+            self.calls = []
+
+        def load_model(self, path):
+            self.calls.append(("load_model", path))
+
+        def train(self):
+            self.calls.append(("train",))
+
+        def save_checkpoint(self, path):
+            self.calls.append(("save_checkpoint", path))
+
+    previous = tmp_path / "previous.keras"
+    snapshot = tmp_path / "inspection"
+    agent = Agent()
+
+    model_path = model_only_session.train_model_only_session(agent, previous, snapshot)
+
+    assert model_path == agent.model_name
+    assert agent.calls == [
+        ("load_model", previous),
+        ("train",),
+        ("save_checkpoint", snapshot),
+    ]
+
+
+def test_model_only_fresh_process_command_carries_only_model_path(tmp_path):
+    command = model_only_runner.session_command(
+        tmp_path / "config.yaml",
+        tmp_path / "session-2",
+        tmp_path / "session-1" / "dqn_model.keras",
+        tmp_path / "final-snapshot",
+    )
+
+    assert "--model" in command
+    assert "--final-snapshot" in command
+    assert "--resume" not in command
+    assert "from_checkpoint" not in command
+
+
+def test_scenario_report_requires_known_model_only_state_loss(capsys):
+    checks = [
+        {"name": name, "passed": True, "detail": "Exact match."}
+        for name in compare_scenarios.MODEL_ONLY_REQUIRED_MATCHES
+    ]
+    checks.extend(
+        {"name": name, "passed": False, "detail": "values differ"}
+        for name in compare_scenarios.MODEL_ONLY_REQUIRED_DIFFERENCES
+    )
+    raw = {"overall_passed": False, "checks": checks}
+
+    assessed = compare_scenarios.assess_checkpoint_state(
+        "model_only_restart", raw, expect_exact=False
+    )
+
+    assert assessed["passed"] is True
+    assert assessed["observed_exact_match"] is False
+    assert assessed["missing_required_matches"] == []
+    assert assessed["missing_required_differences"] == []
+
+    checks[-1]["passed"] = True
+    assessed = compare_scenarios.assess_checkpoint_state(
+        "model_only_restart", raw, expect_exact=False
+    )
+    assert assessed["passed"] is False
+    assert assessed["missing_required_differences"] == [checks[-1]["name"]]
+    assessed["evaluation"] = {
+        "passed": False,
+        "error": "RuntimeError: evaluation failed",
+    }
+
+    exact_failure = compare_scenarios.assess_checkpoint_state(
+        "bounded",
+        {
+            "overall_passed": False,
+            "checks": [
+                {
+                    "name": "Replay contents",
+                    "passed": False,
+                    "detail": "replay.npy: bytes differ",
+                }
+            ],
+        },
+        expect_exact=True,
+    )
+    compare_scenarios._print_report(
+        {
+            "scenarios": [exact_failure, assessed],
+            "checkpoint_files_unchanged_by_evaluation": False,
+            "overall_passed": False,
+        }
+    )
+    output = capsys.readouterr().out
+    assert "Replay contents: replay.npy: bytes differ" in output
+    assert "Evaluation: RuntimeError: evaluation failed" in output
+    assert "Evaluation modified at least one checkpoint file" in output
+    assert "OVERALL VERDICT: FAIL" in output
+
+
+def test_scenario_orchestrator_runs_all_candidates_before_comparison():
+    commands = run_comparisons.scenario_commands(10, with_evaluation=True)
+
+    modules = [command[command.index("-m") + 1] for command in commands]
+    assert modules == [
+        "example.checkpoint.continuous.run",
+        "example.checkpoint.bounded.run",
+        "example.checkpoint.complete_checkpoint.run",
+        "example.checkpoint.model_only_restart.run",
+        "example.checkpoint.comparison.compare_scenarios",
+    ]
+    assert commands[-1][-1] == "--with-evaluation"
+    run_comparisons._validate_trial_horizons(10)
+    with pytest.raises(ValueError, match="trial horizons"):
+        run_comparisons._validate_trial_horizons(9)
+
+
 def test_checkpoint_comparison_excludes_only_session_and_output_configuration(tmp_path):
     first = {
         "agent": {"num_trials": 1000, "start_jump": 400, "beta_anneal_trials": 595},
@@ -225,3 +385,5 @@ def test_checkpoint_comparison_excludes_only_session_and_output_configuration(tm
     destination = tmp_path / "reports" / "comparison.json"
     comparison._write_report(report, destination)
     assert yaml.safe_load(destination.read_text()) == report
+    assert report["reference_checkpoint"] == "continuous"
+    assert report["candidate_checkpoint"] == "sequential"

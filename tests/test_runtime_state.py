@@ -26,9 +26,16 @@ class CheckpointEnvironment(EIS_ECM_Env):
     CHECKPOINT_FIELDS = frozenset({"reward_scale"})
     CHECKPOINT_SOURCE_MODULES = ("autorec.parser",)
 
+    def __init__(self, *args, **kwargs):
+        raise AssertionError("Checkpoint restoration must not call environment constructors.")
+
 
 class UndeclaredCheckpointEnvironment(EIS_ECM_Env):
     pass
+
+
+class MissingSourceDeclarationEnvironment(EIS_ECM_Env):
+    CHECKPOINT_FIELDS = frozenset()
 
 
 @pytest.fixture(autouse=True)
@@ -148,3 +155,9 @@ def test_environment_subclass_requires_declared_complete_state(environment_facto
     env.undeclared = True
     with pytest.raises(ValueError, match="incomplete or undeclared"):
         environment_state_dict(env, env, env)
+
+    del env.undeclared
+    env.__class__ = MissingSourceDeclarationEnvironment
+    del env.reward_scale
+    with pytest.raises(ValueError, match="declare CHECKPOINT_SOURCE_MODULES"):
+        environment_source_modules(env)
