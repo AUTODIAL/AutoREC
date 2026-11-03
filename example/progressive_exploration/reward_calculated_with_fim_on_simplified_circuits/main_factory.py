@@ -1,6 +1,6 @@
 # %%
 """
-Train AutoREC with a FIM complexity penalty evaluated on simplified circuits.
+Train progressive-spectrum AutoREC with a simplified-circuit FIM penalty.
 
 This script follows ``example/main_factory.py``, but injects the experimental
 environment from this directory into the standard configuration-driven pipeline.
@@ -38,11 +38,13 @@ from autorec.utils import save_evaluation_results, set_global_seed
 set_global_seed(42, True)
 
 import autorec.factory.environment as environment_factory
-from autorec.factory import AUTOREC_ROOT, config_reader, pipeline_builder
+from autorec.factory import config_reader, pipeline_builder
 
 from environment import EIS_ECM_Env
 
 
+EXAMPLE_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_CONFIG = EXAMPLE_ROOT / "configs" / "demo_pipeline_config.yaml"
 EVALUATION_DATA_DIR = Path(__file__).resolve().parents[2] / "reward_exploration" / "data"
 EVALUATION_DATASETS = {
     # Use the environment already constructed from the configured training data.
@@ -88,13 +90,13 @@ def build_experimental_pipeline(config):
 # ============================================================================
 # All environment and agent hyperparameters come from this YAML file.
 parser = argparse.ArgumentParser(
-    description="Train AutoREC with a simplified-circuit FIM complexity penalty"
+    description="Train progressive AutoREC with a simplified-circuit FIM penalty"
 )
 parser.add_argument(
     "--config",
     "-c",
     type=str,
-    default=str(AUTOREC_ROOT / "configs_yaml" / "examples" / "demo_pipeline_config.yaml"),
+    default=str(DEFAULT_CONFIG),
     help="Path to the YAML configuration file for the environment and agent.",
 )
 parser.add_argument(

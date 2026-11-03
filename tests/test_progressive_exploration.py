@@ -126,6 +126,24 @@ def test_progressive_cases_reuse_canonical_reward_environments_and_data():
         assert (REWARD_ROOT / "data" / name).is_file()
 
 
+def test_full_run_entrypoints_select_local_progressive_configs():
+    long_config = (
+        "~/modules/AutoREC/example/progressive_exploration/configs/pipeline_config.yaml"
+    )
+    for case in CASES:
+        case_dir = EXAMPLE_ROOT / case
+        runner = (case_dir / "main_factory.py").read_text()
+        assert (
+            'DEFAULT_CONFIG = EXAMPLE_ROOT / "configs" / "demo_pipeline_config.yaml"' in runner
+        )
+        assert "default=str(DEFAULT_CONFIG)" in runner
+        assert "configs_yaml/examples/demo_pipeline_config.yaml" not in runner
+
+        submit_job = (case_dir / "submit_job.sh").read_text()
+        assert long_config in submit_job
+        assert "#SBATCH --job-name=progressive_" in submit_job
+
+
 def test_progressive_config_resolves_registered_runtime_components():
     dataprep = object.__new__(EISDataPrep)
     dataprep.frequency_npoints = 79
