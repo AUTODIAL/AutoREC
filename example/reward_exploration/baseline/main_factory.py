@@ -41,7 +41,7 @@ set_global_seed(42, True)
 from autorec.factory import AUTOREC_ROOT, config_reader, pipeline_builder
 
 
-EVALUATION_DATA_DIR = Path(__file__).resolve().parents[1] / "data"
+EVALUATION_DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 EVALUATION_DATASETS = {
     # Use the environment already constructed from the configured training data.
     "training": None,

@@ -44,8 +44,8 @@ from environment import EIS_ECM_Env
 
 
 EXAMPLE_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_CONFIG = EXAMPLE_ROOT / "configs" / "demo_pipeline_config.yaml"
-EVALUATION_DATA_DIR = Path(__file__).resolve().parents[2] / "reward_exploration" / "data"
+DEFAULT_CONFIG = EXAMPLE_ROOT / "configs" / "pipeline_config.yaml"
+EVALUATION_DATA_DIR = EXAMPLE_ROOT.parent / "data"
 EVALUATION_DATASETS = {
     # Use the environment already constructed from the configured training data.
     "training": None,

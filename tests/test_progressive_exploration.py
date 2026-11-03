@@ -1,19 +1,20 @@
 """Workflow contracts for the progressive reward-comparison examples.
 
-These tests intentionally avoid training or circuit fitting. They verify that the new
-examples differ from their full-spectrum counterparts only by one explicit, consistently
-resolved progressive-spectrum configuration and that their executable documentation points
-to the corresponding progressive entry points.
+These tests intentionally avoid training or circuit fitting. They verify the explicit
+progressive-spectrum configuration, shared exploration data paths, local reward modules,
+and executable entry points.
 """
 
 from copy import deepcopy
 import importlib
 from pathlib import Path
+import shutil
 
 import pandas as pd
 import yaml
 
 from autorec.data_preparation import EISDataPrep
+from autorec.environment import EIS_ECM_Env as BaseEISECMEnv
 from autorec.factory.progressive_spectrum import progressive_spectrum_builder
 from autorec.progressive_spectrum import (
     CarryBestStatePolicy,
@@ -25,6 +26,7 @@ from autorec.progressive_spectrum import (
 REPOSITORY_ROOT = Path(__file__).parents[1]
 EXAMPLE_ROOT = REPOSITORY_ROOT / "example" / "progressive_exploration"
 REWARD_ROOT = REPOSITORY_ROOT / "example" / "reward_exploration"
+DATA_ROOT = REPOSITORY_ROOT / "example" / "data"
 CASES = (
     "baseline",
     "reward_calculated_on_simplified_circuits",
@@ -44,25 +46,22 @@ def _without_progressive(config: dict) -> dict:
     return config
 
 
-def test_full_run_configs_only_add_three_window_progression():
-    config_pairs = (
-        ("demo_pipeline_config.yaml", "demo_pipeline_config.yaml"),
-        ("pipeline_config.yaml", "pipeline_config.yaml"),
+def test_full_run_configs_match_standard_settings_with_shared_exploration_data():
+    progressive = _read_yaml(EXAMPLE_ROOT / "configs" / "pipeline_config.yaml")
+    standard = _read_yaml(
+        REPOSITORY_ROOT / "configs_yaml" / "examples" / "pipeline_config.yaml"
     )
-    for progressive_name, standard_name in config_pairs:
-        progressive = _read_yaml(EXAMPLE_ROOT / "configs" / progressive_name)
-        standard = _read_yaml(REPOSITORY_ROOT / "configs_yaml" / "examples" / standard_name)
-        assert progressive["dataprep"]["frequency_npoints"] == 79
-        comparable = _without_progressive(progressive)
-        comparable["dataprep"]["frequency_npoints"] = standard["dataprep"]["frequency_npoints"]
-        assert comparable == standard
+    assert progressive["dataprep"]["frequency_npoints"] == 79
+    assert progressive["dataprep"]["path"] == "../../data/training_dataset.pkl"
+    assert progressive["agent"]["num_trials"] == 10_000
+    comparable = _without_progressive(progressive)
+    comparable["dataprep"]["path"] = standard["dataprep"]["path"]
+    comparable["dataprep"]["frequency_npoints"] = standard["dataprep"]["frequency_npoints"]
+    assert comparable == standard
 
 
 def test_every_progressive_exploration_config_uses_same_components():
-    configs = [
-        _read_yaml(EXAMPLE_ROOT / "configs" / "demo_pipeline_config.yaml"),
-        _read_yaml(EXAMPLE_ROOT / "configs" / "pipeline_config.yaml"),
-    ]
+    configs = [_read_yaml(EXAMPLE_ROOT / "configs" / "pipeline_config.yaml")]
     configs.extend(
         _read_yaml(EXAMPLE_ROOT / case / "tuning_base_config.yaml") for case in CASES
     )
@@ -97,18 +96,12 @@ def test_tuning_configs_only_add_progressive_section():
         progressive = _read_yaml(EXAMPLE_ROOT / case / "tuning_base_config.yaml")
         full_spectrum = _read_yaml(REWARD_ROOT / case / "tuning_base_config.yaml")
         assert progressive["dataprep"]["training"]["path"] == (
-            "../../reward_exploration/data/training_dataset.pkl"
+            "../../data/training_dataset.pkl"
         )
-        assert progressive["dataprep"]["eval"]["path"] == (
-            "../../reward_exploration/data/validation_dataset.pkl"
-        )
+        assert progressive["dataprep"]["eval"]["path"] == ("../../data/validation_dataset.pkl")
         assert progressive["dataprep"]["training"]["frequency_npoints"] == 79
         assert progressive["dataprep"]["eval"]["frequency_npoints"] == 79
         comparable = _without_progressive(progressive)
-        comparable["dataprep"]["training"]["path"] = full_spectrum["dataprep"]["training"][
-            "path"
-        ]
-        comparable["dataprep"]["eval"]["path"] = full_spectrum["dataprep"]["eval"]["path"]
         comparable["dataprep"]["training"]["frequency_npoints"] = full_spectrum["dataprep"][
             "training"
         ]["frequency_npoints"]
@@ -118,17 +111,24 @@ def test_tuning_configs_only_add_progressive_section():
         assert comparable == full_spectrum
 
 
-def test_progressive_cases_reuse_canonical_reward_environments_and_data():
+def test_progressive_cases_bundle_matching_reward_environments_and_use_shared_data():
     for case in CUSTOM_CASES:
         progressive_module = importlib.import_module(
             f"example.progressive_exploration.{case}.environment"
         )
-        canonical_module = importlib.import_module(
-            f"example.reward_exploration.{case}.environment"
+        assert issubclass(progressive_module.EIS_ECM_Env, BaseEISECMEnv)
+        assert progressive_module.EIS_ECM_Env.__module__.startswith(
+            "example.progressive_exploration."
         )
-        assert progressive_module.EIS_ECM_Env is canonical_module.EIS_ECM_Env
+        assert (EXAMPLE_ROOT / case / "environment.py").read_text() == (
+            REWARD_ROOT / case / "environment.py"
+        ).read_text()
 
-    assert not (EXAMPLE_ROOT / "data").exists()
+    for case in CUSTOM_CASES[1:]:
+        assert (EXAMPLE_ROOT / case / "fim_utils.py").read_text() == (
+            REWARD_ROOT / case / "fim_utils.py"
+        ).read_text()
+
     for name in (
         "training_dataset.pkl",
         "validation_dataset.pkl",
@@ -136,29 +136,51 @@ def test_progressive_cases_reuse_canonical_reward_environments_and_data():
         "battery_dataset.pkl",
         "experimental_dataset.pkl",
     ):
-        assert (REWARD_ROOT / "data" / name).is_file()
+        assert (DATA_ROOT / name).is_file()
 
-    training_data = pd.read_pickle(REWARD_ROOT / "data" / "training_dataset.pkl")
+    training_data = pd.read_pickle(DATA_ROOT / "training_dataset.pkl")
     assert len(training_data.iloc[0]["freq"]) == 79
     assert len(training_data.iloc[0]["flatten_Z"]) == 79 * 4
 
 
-def test_full_run_entrypoints_select_local_progressive_configs():
-    long_config = (
-        "~/modules/AutoREC/example/progressive_exploration/configs/pipeline_config.yaml"
+def test_local_reward_environment_imports_from_scratch_copy(tmp_path):
+    case = "reward_calculated_on_simplified_circuits"
+    copied_wrapper = tmp_path / "scratch" / "progressive_exploration" / case / "environment.py"
+    copied_wrapper.parent.mkdir(parents=True)
+    shutil.copyfile(EXAMPLE_ROOT / case / "environment.py", copied_wrapper)
+
+    spec = importlib.util.spec_from_file_location(
+        "scratch_progressive_environment", copied_wrapper
     )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert issubclass(module.EIS_ECM_Env, BaseEISECMEnv)
+    assert "example.reward_exploration" not in copied_wrapper.read_text()
+
+
+def test_full_run_entrypoints_select_local_progressive_configs():
+    default_config = "../configs/pipeline_config.yaml"
     for case in CASES:
         case_dir = EXAMPLE_ROOT / case
         runner = (case_dir / "main_factory.py").read_text()
-        assert (
-            'DEFAULT_CONFIG = EXAMPLE_ROOT / "configs" / "demo_pipeline_config.yaml"' in runner
-        )
+        assert 'DEFAULT_CONFIG = EXAMPLE_ROOT / "configs" / "pipeline_config.yaml"' in runner
         assert "default=str(DEFAULT_CONFIG)" in runner
-        assert "configs_yaml/examples/demo_pipeline_config.yaml" not in runner
+        assert 'EVALUATION_DATA_DIR = EXAMPLE_ROOT.parent / "data"' in runner
 
         submit_job = (case_dir / "submit_job.sh").read_text()
-        assert long_config in submit_job
+        assert default_config in submit_job
         assert "#SBATCH --job-name=progressive_" in submit_job
+        assert "set -euo pipefail" in submit_job
+        for variable in (
+            "OMP_NUM_THREADS",
+            "MKL_NUM_THREADS",
+            "OPENBLAS_NUM_THREADS",
+            "NUMEXPR_NUM_THREADS",
+        ):
+            assert f"export {variable}=1" in submit_job
+        assert "export CUDA_VISIBLE_DEVICES=-1" in submit_job
+        assert "export TF_CPP_MIN_LOG_LEVEL=3" in submit_job
 
 
 def test_tuning_entrypoints_reuse_checkpointed_reward_workflow():
@@ -209,7 +231,7 @@ def test_progressive_config_resolves_registered_runtime_components():
     dataprep = object.__new__(EISDataPrep)
     dataprep.frequency_npoints = 79
     dataprep.eis_features = ["ImZ", "phi", "mag", "nphi"]
-    config = _read_yaml(EXAMPLE_ROOT / "configs" / "demo_pipeline_config.yaml")
+    config = _read_yaml(EXAMPLE_ROOT / "configs" / "pipeline_config.yaml")
 
     runtime = progressive_spectrum_builder(
         config["progressive_spectrum"],

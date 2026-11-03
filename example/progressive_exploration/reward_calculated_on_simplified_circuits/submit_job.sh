@@ -11,6 +11,8 @@
 #SBATCH --account=rrg-j3goals
 #SBATCH --output=%x_slurm-%j.out
 
+set -euo pipefail
+
 echo "------------------------------------------------------------"
 echo "Running job ${SLURM_JOB_NAME}"
 echo "Allocated node: $(hostname)"
@@ -24,13 +26,21 @@ echo "------------------------------------------------------------"
 module restore basic
 source "$HOME/eis_env/bin/activate"
 export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1
+export CUDA_VISIBLE_DEVICES=-1
+export TF_CPP_MIN_LOG_LEVEL=3
+
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+cd "$SCRIPT_DIR"
 
 echo "Running script: main_factory.py"
-echo "Configuration: ~/modules/AutoREC/example/progressive_exploration/configs/pipeline_config.yaml"
+echo "Configuration: ../configs/pipeline_config.yaml"
 echo "Output directory: calculation_output"
 
 time python main_factory.py \
-    --config ~/modules/AutoREC/example/progressive_exploration/configs/pipeline_config.yaml \
+    --config ../configs/pipeline_config.yaml \
     --output-dir calculation_output
 
 echo "Archiving model and fit-plot outputs..."

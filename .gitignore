@@ -62,6 +62,8 @@ mlruns/
 # Large binary artifacts
 *.pkl
 !data/examples/training_dataset.pkl
+!example/data/
+!example/data/*.pkl
 *.pickle
 *.h5
 *.keras

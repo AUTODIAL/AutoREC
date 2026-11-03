@@ -1,5 +1,5 @@
 dataprep:
-  path: ${AUTOREC_ROOT}/data/examples/training_dataset.pkl
+  path: ../../data/training_dataset.pkl
   mode: load
   evaluation: false
   perform_linKK_validation: false

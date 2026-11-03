@@ -18,13 +18,13 @@ CASES = (
 
 REPOSITORY_ROOT = Path(__file__).parents[1]
 REWARD_ROOT = REPOSITORY_ROOT / "example" / "reward_exploration"
+DATA_ROOT = REPOSITORY_ROOT / "example" / "data"
 REFERENCE_DATA = REPOSITORY_ROOT / "example" / "hyperparameter_tuning" / "data"
 
 
 def test_reward_tuning_datasets_match_reference_splits():
-    reward_data = REWARD_ROOT / "data"
     for name in ("training_dataset.pkl", "validation_dataset.pkl", "test_dataset.pkl"):
-        assert (reward_data / name).read_bytes() == (REFERENCE_DATA / name).read_bytes()
+        assert (DATA_ROOT / name).read_bytes() == (REFERENCE_DATA / name).read_bytes()
 
 
 def test_shared_reward_tuning_targets_scoring_and_slurm_script(tmp_path):
@@ -74,8 +74,8 @@ def test_case_tuning_configurations_and_entrypoints_are_isolated():
     for case_name, fixed_reward_settings in reward_settings.items():
         case_dir = REWARD_ROOT / case_name
         config = yaml.safe_load((case_dir / "tuning_base_config.yaml").read_text())
-        assert config["dataprep"]["training"]["path"] == "../data/training_dataset.pkl"
-        assert config["dataprep"]["eval"]["path"] == "../data/validation_dataset.pkl"
+        assert config["dataprep"]["training"]["path"] == "../../data/training_dataset.pkl"
+        assert config["dataprep"]["eval"]["path"] == "../../data/validation_dataset.pkl"
         assert config["agent"]["num_trials"] == 1_000
         assert config["agent"]["start_jump"] == 4_000
         assert config["agent"]["beta_anneal_trials"] == 5_950
