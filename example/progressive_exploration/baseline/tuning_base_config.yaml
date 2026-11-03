@@ -1,0 +1,137 @@
+dataprep:
+  training:
+    path: ../data/training_dataset.pkl
+    mode: load
+    evaluation: true
+    perform_linKK_validation: false
+    tol_linKK: 5.0E-2
+    frequency_bounds:
+      - null
+      - null
+    frequency_npoints: null
+    eis_features:
+      - ImZ
+      - phi
+      - mag
+      - nphi
+
+  eval:
+    path: ../data/validation_dataset.pkl
+    mode: load
+    evaluation: true
+    perform_linKK_validation: false
+    tol_linKK: 5.0E-2
+    frequency_bounds:
+      - null
+      - null
+    frequency_npoints: null
+    eis_features:
+      - ImZ
+      - phi
+      - mag
+      - nphi
+
+environment:
+  training:
+    elements:
+      - "+"
+      - "/"
+      - R
+      - L
+      - P
+    initial_state:
+      - +RRRRRR
+      - ++RRRRRR
+      - +++RRRRRR
+    seed: 42
+    chromosome_HEAD_len: 10
+    cache_enabled: true
+    cache_capacity: 20000
+    cache_type: lru  # lru or clock
+
+  eval:
+    elements:
+      - "+"
+      - "/"
+      - R
+      - L
+      - P
+    initial_state:
+      - +RRRRRR
+      - ++RRRRRR
+      - +++RRRRRR
+    seed: 42
+    chromosome_HEAD_len: 10
+    cache_enabled: true
+    cache_capacity: 20000
+    cache_type: lru  # lru or clock
+
+agent:
+  # Saving the results
+  save_dir: ./
+  save_start: 0
+  save_frequency: 100
+
+  # Simulation parameters
+  action_cap: null  # After action_cap actions, start_state is seen again.
+  random_seed: 42
+
+  # RL parameters
+  num_trials: 1000
+  episodes_trial: 1  # The initial state is visited num_episodes times
+  gamma: 0.99  # Discount factor: close to 1 values future states highly, close to 0 values immediate states in path more
+  continuous_deadloop: 2  # Performes n repetitive actions. Note that the deadloop is detected only after NN_sleep.
+  latent_deadloop: 4  # Performes n invalid actions for the same state (should be more than continuous_deadloop+1 to make sense)
+  invalid_terminals: false  # if True, the invalid actions will be considered as terminal states
+
+  # Dynamic variable
+  initial_epsilon: 1.0  # Larger epsilon means more random selection (exploration)
+  epsilon_min: 0.1  # Smallest epsilon value
+  epsilon_decay: 0.99968  # Decay rate for epsilon
+  start_decay: 10  # the start trial to decay the epsilon
+  # Option to add Bayesian inference in reward calculation
+  bayesian: false  # If True, the analysis of the posterior distribution added as a bonus to the reward formulation
+
+  # NN hyperparameters
+  hidden_layers:  # Sequential Keras layer configurations
+    - type: Dense
+      units: 40
+      activation: relu
+    - type: Dense
+      units: 40
+      activation: relu
+  optimizer:  # Built-in Keras optimizer configuration
+    type: Adam
+    learning_rate: 0.0005
+  batch_size: 150  # training size for the main network
+  train_frequency: 5  # train the main model every `train_frequency` steps
+  gradient_steps: 1  # replay mini-batches sampled and updated per training event
+  update_target_frequency: 1000  # Frequency to update target network
+  NN_sleep: 1000  # The number of initial data that should be gathered before the first training (should be larger than batch_size)
+  buffer_capacity: 15000
+
+  # Prioritized replay parameters
+  prioritized_replay_alpha: 0.6
+  prioritized_replay_eps: 1.0E-6
+  initial_beta: 0.4  # The larger the beta, the lower weights we multiply to the loss
+  beta_jump: 1.06
+  start_jump: 4000  # Equivalent to the legacy 2/5 schedule for a 10000-trial run
+  anneal_fraction: null  # Legacy option; mutually exclusive with beta_anneal_trials
+  beta_anneal_trials: 5950  # Equivalent to the legacy schedule for a 10000-trial run
+  final_beta: 0.7
+
+progressive_spectrum:
+  enabled: true
+  num_windows: 3
+  window_selector:
+    type: EqualPointWindowSelector
+    parameters: {}
+  observation_encoder:
+    type: InterpolatingSpectrumEncoder
+    parameters: {}
+  spectrum_source:
+    type: PreparedSpectrumSource
+    parameters: {}
+  stage_transition_policy:
+    type: CarryBestStatePolicy
+    parameters: {}

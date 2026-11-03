@@ -1,0 +1,131 @@
+dataprep:
+  training:
+    path: ../data/training_dataset.pkl
+    mode: load
+    evaluation: true
+    perform_linKK_validation: false
+    tol_linKK: 5.0E-2
+    frequency_bounds:
+      - null
+      - null
+    frequency_npoints: null
+    eis_features:
+      - ImZ
+      - phi
+      - mag
+      - nphi
+
+  eval:
+    path: ../data/validation_dataset.pkl
+    mode: load
+    evaluation: true
+    perform_linKK_validation: false
+    tol_linKK: 5.0E-2
+    frequency_bounds:
+      - null
+      - null
+    frequency_npoints: null
+    eis_features:
+      - ImZ
+      - phi
+      - mag
+      - nphi
+
+environment:
+  training:
+    elements:
+      - "+"
+      - "/"
+      - R
+      - L
+      - P
+    initial_state:
+      - +RRRRRR
+      - ++RRRRRR
+      - +++RRRRRR
+    seed: 42
+    chromosome_HEAD_len: 10
+    cache_enabled: true
+    cache_capacity: 20000
+    cache_type: lru
+    identifiability_thresh: 1.0E-6
+    penalty_sharpness: 2.0
+    penalty_scale: 2.0
+
+  eval:
+    elements:
+      - "+"
+      - "/"
+      - R
+      - L
+      - P
+    initial_state:
+      - +RRRRRR
+      - ++RRRRRR
+      - +++RRRRRR
+    seed: 42
+    chromosome_HEAD_len: 10
+    cache_enabled: true
+    cache_capacity: 20000
+    cache_type: lru
+    identifiability_thresh: 1.0E-6
+    penalty_sharpness: 2.0
+    penalty_scale: 2.0
+
+agent:
+  save_dir: ./
+  save_start: 0
+  save_frequency: 100
+  action_cap: null
+  random_seed: 42
+  num_trials: 1000
+  episodes_trial: 1
+  gamma: 0.99
+  continuous_deadloop: 2
+  latent_deadloop: 4
+  invalid_terminals: false
+  initial_epsilon: 1.0
+  epsilon_min: 0.1
+  epsilon_decay: 0.99968
+  start_decay: 10
+  bayesian: false
+  hidden_layers:
+    - type: Dense
+      units: 40
+      activation: relu
+    - type: Dense
+      units: 40
+      activation: relu
+  optimizer:
+    type: Adam
+    learning_rate: 0.0005
+  batch_size: 150
+  train_frequency: 5
+  gradient_steps: 1
+  update_target_frequency: 1000
+  NN_sleep: 1000
+  buffer_capacity: 15000
+  prioritized_replay_alpha: 0.6
+  prioritized_replay_eps: 1.0E-6
+  initial_beta: 0.4
+  beta_jump: 1.06
+  start_jump: 4000
+  anneal_fraction: null
+  beta_anneal_trials: 5950
+  final_beta: 0.7
+
+progressive_spectrum:
+  enabled: true
+  num_windows: 3
+  window_selector:
+    type: EqualPointWindowSelector
+    parameters: {}
+  observation_encoder:
+    type: InterpolatingSpectrumEncoder
+    parameters: {}
+  spectrum_source:
+    type: PreparedSpectrumSource
+    parameters: {}
+  stage_transition_policy:
+    type: CarryBestStatePolicy
+    parameters: {}
