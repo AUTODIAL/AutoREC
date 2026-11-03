@@ -161,6 +161,10 @@ def test_recovery_fingerprint_allows_target_and_output_changes_only():
         **base,
         "agent": {**base["agent"], "gamma": 0.8},
     }
+    changed_progressive = {
+        **base,
+        "progressive_spectrum": {"enabled": True, "num_windows": 3},
+    }
 
     fingerprint = cli._recovery_config_fingerprint(base, seed=42, deterministic_ops=True)
     assert (
@@ -169,6 +173,10 @@ def test_recovery_fingerprint_allows_target_and_output_changes_only():
     )
     assert (
         cli._recovery_config_fingerprint(changed_training, seed=42, deterministic_ops=True)
+        != fingerprint
+    )
+    assert (
+        cli._recovery_config_fingerprint(changed_progressive, seed=42, deterministic_ops=True)
         != fingerprint
     )
     assert (
