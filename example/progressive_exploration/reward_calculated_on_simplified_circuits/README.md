@@ -1,17 +1,14 @@
 # Progressive simplified-circuit reward
 
-This case reuses the reward environment from
-[`../../reward_exploration/reward_calculated_on_simplified_circuits/`](../../reward_exploration/reward_calculated_on_simplified_circuits/).
-After a successful fit, it structurally simplifies the proposed circuit and calculates
-component-count and nesting-depth penalties from that simplified circuit. Spectrum
-selection and fixed-size observation encoding are independent of this reward override.
+This case includes a local simplified-circuit reward environment. After a successful fit,
+it structurally simplifies the proposed circuit and calculates component-count and
+nesting-depth penalties from that simplified circuit. Spectrum selection and fixed-size
+observation encoding are independent of this reward override.
 
-Run the 50-trial demo from the repository root:
+Run the 10,000-trial exploration from this directory:
 
 ```bash
-source ./autorec_env/bin/activate
-python \
-  example/progressive_exploration/reward_calculated_on_simplified_circuits/main_factory.py
+python main_factory.py
 ```
 
 The runner accepts `--config` and `--output-dir`. For HPC execution, submit

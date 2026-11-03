@@ -48,11 +48,11 @@ one.
 Every runner performs four complete evaluations after training or loading its model:
 
 1. `training`: the training dataset selected by the YAML configuration;
-2. `test`: `data/test_dataset.pkl`;
-3. `battery`: `data/battery_dataset.pkl`; and
-4. `experimental`: `data/experimental_dataset.pkl`.
+2. `test`: `../data/test_dataset.pkl`;
+3. `battery`: `../data/battery_dataset.pkl`; and
+4. `experimental`: `../data/experimental_dataset.pkl`.
 
-The three external datasets must be available in `example/reward_exploration/data/` on the
+The three external datasets must be available in `example/data/` on the
 machine running the example. Each external dataset is loaded into a fresh environment with
 the same environment settings as the configured evaluation or training environment. This
 prevents circuit-cache entries from being shared between datasets.
@@ -107,10 +107,10 @@ and resume promoted candidates from their latest complete checkpoint.
 
 The tuning datasets have deliberately separate roles:
 
-- `data/training_dataset.pkl` supplies RL training interactions and learning-curve rewards;
-- `data/validation_dataset.pkl` supplies the evaluation success rate used in the tuning
+- `../data/training_dataset.pkl` supplies RL training interactions and learning-curve rewards;
+- `../data/validation_dataset.pkl` supplies the evaluation success rate used in the tuning
   score; and
-- `data/test_dataset.pkl` is held back for assessment after hyperparameter selection.
+- `../data/test_dataset.pkl` is held back for assessment after hyperparameter selection.
 
 Tuning does not evaluate the test, battery, or experimental datasets. Those evaluations
 remain part of the separate full-run workflow so that model selection does not use held-out
@@ -153,8 +153,7 @@ summary files are `rung_scores.csv`, `optuna_trials.csv`, `optimization_history.
 rung-specific validation results. The baseline hyperparameter configuration is never
 pruned.
 
-The tuning wrappers depend on the shared `tuning/` package and `data/` directory beside the
-case directories. When moving this workflow to shared HPC storage, preserve the complete
-`reward_exploration/` directory layout rather than copying a case directory by itself.
+The tuning wrappers depend on the shared `tuning/` package and the sibling `example/data/`
+directory. When moving this workflow to shared HPC storage, preserve their relative layout.
 Relative dataset paths are resolved from the case directory because generated training jobs
 change to that directory before starting Python.

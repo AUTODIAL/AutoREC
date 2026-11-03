@@ -1,9 +1,7 @@
 # Progressive reward exploration
 
-This collection applies the four reward definitions from
-[`../reward_exploration/`](../reward_exploration/) to the same three-stage
-progressive-spectrum workflow. It is intended for controlled reward experiments; the
-example code does not change AutoREC's package defaults.
+This collection applies four reward definitions to the same three-stage
+progressive-spectrum workflow. The example code does not change AutoREC's package defaults.
 
 ## Experiments
 
@@ -14,9 +12,9 @@ example code does not change AutoREC's package defaults.
 | [`reward_calculated_with_fim_on_simplified_circuits/`](reward_calculated_with_fim_on_simplified_circuits/) | Number of weak normalized Fisher information matrix (FIM) directions after simplification. |
 | [`reward_calculated_with_continuous_fim_on_simplified_circuits/`](reward_calculated_with_continuous_fim_on_simplified_circuits/) | Bounded continuous penalty for weak normalized FIM directions after simplification. |
 
-The reward implementations and EIS pickle files are shared with
-`reward_exploration`; the wrappers in this directory add progressive configuration and
-keep their outputs separate. See each case README for the exact reward definition.
+The reward implementations and configurations are included in this directory. EIS pickle
+files are shared through the sibling `example/data/` directory. See each case README for
+the exact reward definition.
 
 ## Common progressive workflow
 
@@ -39,20 +37,21 @@ not replace or resample the physical fitting arrays.
 
 ## Single-run training and evaluation
 
-Run commands from the repository root. With no `--config`, each case uses the local
-50-trial demo configuration:
+Run commands from the selected case directory so the shared `../../data/` paths have the
+same meaning in every exploration case. With no `--config`, the runner uses the local
+10,000-trial exploration configuration:
 
 ```bash
-source ./autorec_env/bin/activate
-python example/progressive_exploration/baseline/main_factory.py
+cd example/progressive_exploration/baseline
+python main_factory.py
 ```
 
-Use the local long-running configuration explicitly for a full calculation:
+To choose the configuration and output directory explicitly, run:
 
 ```bash
-python example/progressive_exploration/baseline/main_factory.py \
-  --config example/progressive_exploration/configs/pipeline_config.yaml \
-  --output-dir example/progressive_exploration/baseline/calculation_output
+python main_factory.py \
+  --config ../configs/pipeline_config.yaml \
+  --output-dir calculation_output
 ```
 
 Replace `baseline` with another case directory to change the reward. Each runner trains or
@@ -69,9 +68,9 @@ dimension is unchanged.
 
 ## Slurm execution
 
-Each case contains `submit_job.sh`, which selects the local long-running progressive
-configuration. Review its account, constraint, environment path, resources, and repository
-location before submission:
+Each case contains `submit_job.sh`, which selects the same progressive configuration.
+Review its account, constraint, environment path, resources, and repository location before
+submission:
 
 ```bash
 cd example/progressive_exploration/baseline
@@ -81,12 +80,18 @@ sbatch submit_job.sh
 The scripts write to `calculation_output/` and archive model and fit-plot directories after
 a successful run to reduce HPC file counts.
 
+For scratch execution, preserve the relative layout between `progressive_exploration/` and
+its sibling `data/` directory. The single-run reward modules are local to the exploration
+folder and do not import `example.reward_exploration`. The job scripts explicitly limit
+NumExpr and the other native thread pools to one thread and exit immediately if Python
+fails.
+
 ## Checkpointed multi-fidelity tuning
 
-The tuning entry points reuse the checkpoint-safe orchestrator from
-`example/reward_exploration/tuning/`. Candidates train in successive cumulative trial
-rungs, and promoted candidates resume their complete agent, optimizer, replay, RNG,
-environment, and progressive runtime state.
+The existing checkpoint-safe orchestrator from `example/reward_exploration/tuning/` is
+reused by the tuning entry points. Candidates train in successive cumulative trial rungs,
+and promoted candidates resume their complete agent, optimizer, replay, RNG, environment,
+and progressive runtime state.
 
 Install the optional orchestration dependencies once:
 
@@ -103,8 +108,8 @@ python tuning_runner.py
 sbatch tuning_runner_job.sh
 ```
 
-`tuning_base_config.yaml` uses the shared training data for RL interactions and the shared
-validation data for promotion scores. Test, battery, and experimental data remain held out
+`tuning_base_config.yaml` uses the shared training data for RL interactions and validation
+data for promotion scores. Test, battery, and experimental data remain held out
 from tuning. `tuning_search_space.yaml` matches the corresponding full-spectrum reward
 case. Outputs are written under the case's `hyperparameter_tuning/` directory, including
 immutable checkpoints and rung-specific validation results.

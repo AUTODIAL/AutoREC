@@ -35,7 +35,7 @@ script.
 From this directory, run `python tuning_runner.py` directly or submit
 `tuning_runner_job.sh`. Every candidate uses this directory's simplified-circuit reward
 environment; only the common RL hyperparameters in `tuning_search_space.yaml` are varied.
-Training uses `../data/training_dataset.pkl`, while promotion scores use
-`../data/validation_dataset.pkl`. See the parent [reward exploration
+Training uses `../../data/training_dataset.pkl`, while promotion scores use
+`../../data/validation_dataset.pkl`. See the parent [reward exploration
 README](../README.md#hyperparameter-tuning) for requirements, budgets, outputs, and the
 separate role of `submit_job.sh`.

@@ -206,8 +206,8 @@ def test_tuning_entrypoints_reuse_checkpointed_reward_workflow():
 def test_progressive_documentation_uses_local_workflows_and_shared_requirements():
     parent_readme = (EXAMPLE_ROOT / "README.md").read_text()
     normalized_parent = " ".join(parent_readme.split())
-    assert "example/progressive_exploration/baseline/main_factory.py" in parent_readme
-    assert "example/progressive_exploration/configs/pipeline_config.yaml" in parent_readme
+    assert "cd example/progressive_exploration/baseline" in parent_readme
+    assert "--config ../configs/pipeline_config.yaml" in parent_readme
     assert "example/reward_exploration/tuning/requirements.txt" in parent_readme
     assert (
         "Circuit fitting, reward calculation, and FIM calculation use all original"
@@ -218,10 +218,8 @@ def test_progressive_documentation_uses_local_workflows_and_shared_requirements(
 
     for case in CASES:
         case_readme = (EXAMPLE_ROOT / case / "README.md").read_text()
-        assert f"example/progressive_exploration/{case}/main_factory.py" in case_readme
-        assert (
-            "example/reward_exploration/" not in case_readme.split("```bash", maxsplit=1)[-1]
-        )
+        assert "python main_factory.py" in case_readme
+        assert "../../reward_exploration/" not in case_readme
 
     example_index = (REPOSITORY_ROOT / "example" / "README.md").read_text()
     assert "[`progressive_exploration/`](progressive_exploration/)" in example_index

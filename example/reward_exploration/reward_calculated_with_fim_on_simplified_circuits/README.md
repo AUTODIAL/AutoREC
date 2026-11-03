@@ -43,7 +43,7 @@ all four evaluations, and writes outputs to `calculation_output/`.
 From this directory, run `python tuning_runner.py` directly or submit
 `tuning_runner_job.sh`. Every candidate uses the discrete-FIM reward environment. The
 identifiability threshold remains fixed at `1e-6` in both training and validation and is not
-part of the search space. Training uses `../data/training_dataset.pkl`, while promotion
-scores use `../data/validation_dataset.pkl`. See the parent [reward exploration
+part of the search space. Training uses `../../data/training_dataset.pkl`, while promotion
+scores use `../../data/validation_dataset.pkl`. See the parent [reward exploration
 README](../README.md#hyperparameter-tuning) for requirements, budgets, outputs, and the
 separate role of `submit_job.sh`.
