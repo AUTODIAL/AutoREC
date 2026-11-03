@@ -1,8 +1,9 @@
-"""Configuration contracts for the progressive reward-comparison examples.
+"""Workflow contracts for the progressive reward-comparison examples.
 
 These tests intentionally avoid training or circuit fitting. They verify that the new
 examples differ from their full-spectrum counterparts only by one explicit, consistently
-resolved progressive-spectrum configuration.
+resolved progressive-spectrum configuration and that their executable documentation points
+to the corresponding progressive entry points.
 """
 
 from copy import deepcopy
@@ -178,6 +179,30 @@ def test_tuning_entrypoints_reuse_checkpointed_reward_workflow():
     copied_tuning = EXAMPLE_ROOT / "tuning"
     assert not list(copied_tuning.glob("*.py"))
     assert not (copied_tuning / "requirements.txt").exists()
+
+
+def test_progressive_documentation_uses_local_workflows_and_shared_requirements():
+    parent_readme = (EXAMPLE_ROOT / "README.md").read_text()
+    normalized_parent = " ".join(parent_readme.split())
+    assert "example/progressive_exploration/baseline/main_factory.py" in parent_readme
+    assert "example/progressive_exploration/configs/pipeline_config.yaml" in parent_readme
+    assert "example/reward_exploration/tuning/requirements.txt" in parent_readme
+    assert (
+        "Circuit fitting, reward calculation, and FIM calculation use all original"
+        in normalized_parent
+    )
+    assert "example/reward_exploration/baseline/main_factory.py" not in parent_readme
+    assert "configs_yaml/examples/pipeline_config.yaml" not in parent_readme
+
+    for case in CASES:
+        case_readme = (EXAMPLE_ROOT / case / "README.md").read_text()
+        assert f"example/progressive_exploration/{case}/main_factory.py" in case_readme
+        assert (
+            "example/reward_exploration/" not in case_readme.split("```bash", maxsplit=1)[-1]
+        )
+
+    example_index = (REPOSITORY_ROOT / "example" / "README.md").read_text()
+    assert "[`progressive_exploration/`](progressive_exploration/)" in example_index
 
 
 def test_progressive_config_resolves_registered_runtime_components():

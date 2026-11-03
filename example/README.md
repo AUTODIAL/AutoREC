@@ -16,6 +16,7 @@ for top-level scripts below assume the current directory is `example/`.
 | [`checkpoint/`](checkpoint/) | Compare continuous, bounded, complete-checkpoint, and model-only continuation | Four controlled 1,000-trial scenarios; intentionally expensive |
 | [`hyperparameter_tuning/`](hyperparameter_tuning/) | Run checkpointed multi-fidelity Optuna tuning on Slurm | Potentially expensive HPC workflow |
 | [`reward_exploration/`](reward_exploration/) | Compare the standard reward with simplified-circuit and FIM-based complexity penalties | Experimental workflows range from a 50-trial demo to 10,000-trial HPC runs |
+| [`progressive_exploration/`](progressive_exploration/) | Compare the same reward variants with three cumulative spectrum windows | Experimental workflows range from a 50-trial demo to 10,000-trial HPC runs |
 
 ## Direct Python construction
 
@@ -100,6 +101,20 @@ comparing these methods. The included tests validate the reward calculations and
 mechanics, but they do not demonstrate that one reward produces better circuits or training
 performance. See [`reward_exploration/README.md`](reward_exploration/README.md) for the
 formulas, local commands, HPC workflow, and scientific validation caveats.
+
+## Progressive reward exploration
+
+The [`progressive_exploration/`](progressive_exploration/) collection repeats the four
+reward cases with three cumulative high-to-low-frequency windows. All cases share the same
+window selector, fixed-size observation encoder, stage-transition policy, data, and
+checkpointed tuning infrastructure. Physical circuit fitting still uses every original
+measurement selected for the active window; interpolation is limited to the neural-network
+observation.
+
+This workflow changes both the reward experiment and the spectrum-presentation schedule,
+so equal trial counts do not guarantee equal compute relative to the full-spectrum cases.
+See [`progressive_exploration/README.md`](progressive_exploration/README.md) for commands,
+configuration, checkpoint behavior, and comparison limitations.
 
 ## Runtime expectations
 
