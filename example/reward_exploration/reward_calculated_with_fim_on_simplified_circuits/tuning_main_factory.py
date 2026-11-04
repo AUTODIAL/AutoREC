@@ -5,9 +5,10 @@ import sys
 
 
 CASE_DIR = Path(__file__).resolve().parent
-sys.path.insert(0, str(CASE_DIR.parent))
+EXPLORATION_ROOT = CASE_DIR.parent
+sys.path.insert(0, str(EXPLORATION_ROOT.parent))
 
-from tuning.stage import main
+from reward_exploration.tuning.stage import main
 
 
 def prepare_experimental_runtime():

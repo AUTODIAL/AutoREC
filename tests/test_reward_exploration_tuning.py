@@ -1,6 +1,9 @@
 """Focused checks for reward-exploration hyperparameter-tuning workflows."""
 
 from pathlib import Path
+import shutil
+import subprocess
+import sys
 
 import pandas as pd
 import yaml
@@ -97,9 +100,37 @@ def test_case_tuning_configurations_and_entrypoints_are_isolated():
         assert (case_dir / "submit_job.sh").is_file()
         assert (case_dir / "tuning_runner_job.sh").is_file()
 
+        worker = (case_dir / "tuning_main_factory.py").read_text()
+        runner = (case_dir / "tuning_runner.py").read_text()
+        assert "from reward_exploration.tuning.stage import main" in worker
+        assert "from reward_exploration.tuning.runner import main" in runner
+        assert "EXPLORATION_ROOT = CASE_DIR.parent" in worker
+        assert "EXPLORATION_ROOT = CASE_DIR.parent" in runner
+        assert "from tuning." not in worker
+        assert "from tuning." not in runner
+
         if case_name != "baseline":
-            worker = (case_dir / "tuning_main_factory.py").read_text()
             assert "def prepare_experimental_runtime" in worker
             assert "from environment import EIS_ECM_Env" in worker
             assert "pipeline_builder_function=build_experimental_pipeline" in worker
             assert "prepare_runtime_function=prepare_experimental_runtime" in worker
+
+
+def test_reward_tuning_worker_imports_from_standalone_copy(tmp_path):
+    copied_root = tmp_path / "reward_exploration"
+    shutil.copytree(REWARD_ROOT, copied_root)
+    case_dir = copied_root / "baseline"
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import tuning_main_factory; print(tuning_main_factory.main.__module__)",
+        ],
+        cwd=case_dir,
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout.strip() == "reward_exploration.tuning.stage"
