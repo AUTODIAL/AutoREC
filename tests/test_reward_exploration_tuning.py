@@ -54,6 +54,9 @@ def test_fixed_run_entrypoints_use_local_pipeline_config():
         assert "AUTOREC_ROOT" not in runner
         assert "../pipeline_config.yaml" in submit_job
         assert "~/modules/AutoREC/configs_yaml" not in submit_job
+        assert "set -euo pipefail" in submit_job
+        assert 'RUN_DIR=${SLURM_SUBMIT_DIR:-"$SCRIPT_DIR"}' in submit_job
+        assert 'cd "$RUN_DIR"' in submit_job
 
 
 def test_reward_tuning_datasets_match_reference_splits():

@@ -11,6 +11,11 @@
 #SBATCH --account=rrg-j3goals
 #SBATCH --output=%x_slurm-%j.out
 
+set -euo pipefail
+
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+RUN_DIR=${SLURM_SUBMIT_DIR:-"$SCRIPT_DIR"}
+
 echo "------------------------------------------------------------"
 echo "Running job ${SLURM_JOB_NAME}"
 echo "Allocated node: $(hostname)"
@@ -24,6 +29,8 @@ echo "------------------------------------------------------------"
 module restore basic
 source "$HOME/eis_env/bin/activate"
 export OMP_NUM_THREADS=1
+
+cd "$RUN_DIR"
 
 echo "Running script: main_factory.py"
 echo "Configuration: ../pipeline_config.yaml"

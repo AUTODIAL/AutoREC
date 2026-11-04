@@ -183,6 +183,9 @@ def test_full_run_entrypoints_select_local_progressive_configs():
             assert f"export {variable}=1" in submit_job
         assert "export CUDA_VISIBLE_DEVICES=-1" in submit_job
         assert "export TF_CPP_MIN_LOG_LEVEL=3" in submit_job
+        assert 'RUN_DIR=${SLURM_SUBMIT_DIR:-"$SCRIPT_DIR"}' in submit_job
+        assert 'cd "$RUN_DIR"' in submit_job
+        assert 'cd "$SCRIPT_DIR"' not in submit_job
 
 
 def test_tuning_entrypoints_use_local_progressive_package():

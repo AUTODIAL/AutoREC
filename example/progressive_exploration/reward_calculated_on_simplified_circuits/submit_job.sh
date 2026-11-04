@@ -13,6 +13,9 @@
 
 set -euo pipefail
 
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+RUN_DIR=${SLURM_SUBMIT_DIR:-"$SCRIPT_DIR"}
+
 echo "------------------------------------------------------------"
 echo "Running job ${SLURM_JOB_NAME}"
 echo "Allocated node: $(hostname)"
@@ -32,8 +35,7 @@ export NUMEXPR_NUM_THREADS=1
 export CUDA_VISIBLE_DEVICES=-1
 export TF_CPP_MIN_LOG_LEVEL=3
 
-SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-cd "$SCRIPT_DIR"
+cd "$RUN_DIR"
 
 echo "Running script: main_factory.py"
 echo "Configuration: ../pipeline_config.yaml"

@@ -80,6 +80,10 @@ sbatch submit_job.sh
 The scripts write to `calculation_output/` and archive model and fit-plot directories after
 a successful run to reduce HPC file counts.
 
+The job changes to `SLURM_SUBMIT_DIR` before invoking Python. Submit from the selected case
+directory as shown above; this remains reliable on clusters that execute the copied batch
+script from a Slurm spool directory.
+
 For scratch execution, preserve the relative layout between `progressive_exploration/` and
 its sibling `data/` directory. The reward modules and tuning infrastructure are local to
 the exploration folder and do not import `example.reward_exploration`. The job scripts

@@ -92,10 +92,13 @@ Before submission, review the cluster-specific account, constraint, environment 
 resources, and repository location in the script. The scripts use the full pipeline
 configuration from `../pipeline_config.yaml`, evaluate all four datasets, and write to
 `calculation_output/`. At the end of a successful job, `models/` is archived as
-`models.tar.gz`. Each
-`results/fit_plots_<dataset>/` directory is archived beside itself as
+`models.tar.gz`. Each `results/fit_plots_<dataset>/` directory is archived beside itself as
 `fit_plots_<dataset>.tar.gz`. The original directories are then removed to reduce HPC file
 counts.
+
+The job changes to `SLURM_SUBMIT_DIR` before invoking Python. Submit from the selected case
+directory as shown above; this remains reliable on clusters that execute the copied batch
+script from a Slurm spool directory.
 
 ## Hyperparameter tuning
 
