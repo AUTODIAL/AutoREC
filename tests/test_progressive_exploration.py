@@ -9,6 +9,8 @@ from copy import deepcopy
 import importlib
 from pathlib import Path
 import shutil
+import subprocess
+import sys
 
 import pandas as pd
 import yaml
@@ -183,24 +185,53 @@ def test_full_run_entrypoints_select_local_progressive_configs():
         assert "export TF_CPP_MIN_LOG_LEVEL=3" in submit_job
 
 
-def test_tuning_entrypoints_reuse_checkpointed_reward_workflow():
+def test_tuning_entrypoints_use_local_progressive_package():
     for case in CASES:
         case_dir = EXAMPLE_ROOT / case
         worker = (case_dir / "tuning_main_factory.py").read_text()
         runner = (case_dir / "tuning_runner.py").read_text()
         job = (case_dir / "tuning_runner_job.sh").read_text()
-        assert "from example.reward_exploration.tuning.stage import main" in worker
-        assert "from example.reward_exploration.tuning.runner import main" in runner
-        assert "REPOSITORY_ROOT = CASE_DIR.parents[2]" in worker
-        assert "REPOSITORY_ROOT = CASE_DIR.parents[2]" in runner
+        assert "from progressive_exploration.tuning.stage import main" in worker
+        assert "from progressive_exploration.tuning.runner import main" in runner
+        assert "EXPLORATION_ROOT = CASE_DIR.parent" in worker
+        assert "EXPLORATION_ROOT = CASE_DIR.parent" in runner
+        assert "example.reward_exploration" not in worker
+        assert "example.reward_exploration" not in runner
         assert "#SBATCH --job-name='progressive_" in job
         assert _read_yaml(case_dir / "tuning_search_space.yaml") == _read_yaml(
             REWARD_ROOT / case / "tuning_search_space.yaml"
         )
 
-    copied_tuning = EXAMPLE_ROOT / "tuning"
-    assert not list(copied_tuning.glob("*.py"))
-    assert not (copied_tuning / "requirements.txt").exists()
+    for name in (
+        "__init__.py",
+        "requirements.txt",
+        "runner.py",
+        "stage.py",
+        "tuning_utils.py",
+    ):
+        assert (EXAMPLE_ROOT / "tuning" / name).read_bytes() == (
+            REWARD_ROOT / "tuning" / name
+        ).read_bytes()
+
+
+def test_progressive_tuning_worker_imports_from_standalone_copy(tmp_path):
+    copied_root = tmp_path / "progressive_exploration"
+    shutil.copytree(EXAMPLE_ROOT, copied_root)
+    case_dir = copied_root / "baseline"
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import tuning_main_factory; print(tuning_main_factory.main.__module__)",
+        ],
+        cwd=case_dir,
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout.strip() == "progressive_exploration.tuning.stage"
 
 
 def test_progressive_documentation_uses_local_workflows_and_shared_requirements():

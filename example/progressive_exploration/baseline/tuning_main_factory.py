@@ -5,10 +5,10 @@ import sys
 
 
 CASE_DIR = Path(__file__).resolve().parent
-REPOSITORY_ROOT = CASE_DIR.parents[2]
-sys.path.insert(0, str(REPOSITORY_ROOT))
+EXPLORATION_ROOT = CASE_DIR.parent
+sys.path.insert(0, str(EXPLORATION_ROOT.parent))
 
-from example.reward_exploration.tuning.stage import main
+from progressive_exploration.tuning.stage import main
 
 
 if __name__ == "__main__":
