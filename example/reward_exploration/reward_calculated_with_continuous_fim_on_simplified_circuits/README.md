@@ -28,15 +28,10 @@ depth terms remain separate parts of the reward.
 After training, the runner evaluates every spectrum in the training, test, battery, and
 experimental datasets described in the parent README.
 
-From the AutoREC repository root, run locally with:
+From this directory, run the 10,000-trial exploration with:
 
 ```bash
-source ~/modules/AutoREC/autorec_env/bin/activate
-python \
-  example/reward_exploration/reward_calculated_with_continuous_fim_on_simplified_circuits/main_factory.py \
-  --config configs_yaml/examples/pipeline_config.yaml \
-  --output-dir \
-  example/reward_exploration/reward_calculated_with_continuous_fim_on_simplified_circuits/calculation_output
+python main_factory.py
 ```
 
 To submit on SLURM, enter this directory and run:
@@ -45,9 +40,8 @@ To submit on SLURM, enter this directory and run:
 sbatch submit_job.sh
 ```
 
-The submission script retains the corrected configuration location
-`~/modules/AutoREC/configs_yaml/examples/pipeline_config.yaml`, performs all four
-evaluations, and writes outputs to `calculation_output/`.
+The runner and submission script use `../pipeline_config.yaml`, perform all four evaluations,
+and write outputs to `calculation_output/`.
 
 ## Hyperparameter tuning
 

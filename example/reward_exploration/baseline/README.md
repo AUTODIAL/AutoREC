@@ -9,13 +9,10 @@ The baseline and simplified-reward calculations use the same configuration, rand
 training workflow, and evaluation behavior. Evaluation runs on every spectrum in the
 training, test, battery, and experimental datasets described in the parent README.
 
-From the AutoREC repository root, run locally with:
+From this directory, run the 10,000-trial exploration with:
 
 ```bash
-source ./autorec_env/bin/activate
-python example/reward_exploration/baseline/main_factory.py \
-  --config configs_yaml/examples/pipeline_config.yaml \
-  --output-dir example/reward_exploration/baseline/calculation_output
+python main_factory.py
 ```
 
 To submit on SLURM, enter this directory and run:
@@ -24,9 +21,8 @@ To submit on SLURM, enter this directory and run:
 sbatch submit_job.sh
 ```
 
-The SLURM job activates `$HOME/eis_env`, uses the repository's
-`configs_yaml/examples/pipeline_config.yaml` (currently 10,000 training trials), performs
-all four evaluations, and writes outputs to `calculation_output/`.
+The runner and SLURM job use `../pipeline_config.yaml`, activate the configured Python
+environment, perform all four evaluations, and write outputs to `calculation_output/`.
 
 ## Hyperparameter tuning
 

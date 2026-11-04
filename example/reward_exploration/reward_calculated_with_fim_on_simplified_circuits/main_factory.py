@@ -38,12 +38,14 @@ from autorec.utils import save_evaluation_results, set_global_seed
 set_global_seed(42, True)
 
 import autorec.factory.environment as environment_factory
-from autorec.factory import AUTOREC_ROOT, config_reader, pipeline_builder
+from autorec.factory import config_reader, pipeline_builder
 
 from environment import EIS_ECM_Env
 
 
-EVALUATION_DATA_DIR = Path(__file__).resolve().parents[2] / "data"
+EXPLORATION_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_CONFIG = EXPLORATION_ROOT / "pipeline_config.yaml"
+EVALUATION_DATA_DIR = EXPLORATION_ROOT.parent / "data"
 EVALUATION_DATASETS = {
     # Use the environment already constructed from the configured training data.
     "training": None,
@@ -94,7 +96,7 @@ parser.add_argument(
     "--config",
     "-c",
     type=str,
-    default=str(AUTOREC_ROOT / "configs_yaml" / "examples" / "demo_pipeline_config.yaml"),
+    default=str(DEFAULT_CONFIG),
     help="Path to the YAML configuration file for the environment and agent.",
 )
 parser.add_argument(

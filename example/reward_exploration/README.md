@@ -20,28 +20,26 @@ defaults, and assumptions.
 
 ## Running an example
 
-Run commands from the AutoREC repository root. For a short workflow check, omit
-`--config`; each runner then uses `demo_pipeline_config.yaml`, which currently trains for
-50 trials. For example:
+Run commands from the selected case directory so the shared `../../data/` paths have the
+same meaning in every exploration case. With no `--config`, the runner uses the local
+10,000-trial full-spectrum configuration:
 
 ```bash
-source ./autorec_env/bin/activate
-python example/reward_exploration/baseline/main_factory.py
+cd example/reward_exploration/baseline
+python main_factory.py
 ```
 
-For the full 10,000-trial configuration, provide the full pipeline configuration and a
-dedicated output directory:
+To choose the configuration and output directory explicitly, run:
 
 ```bash
-python example/reward_exploration/baseline/main_factory.py \
-  --config configs_yaml/examples/pipeline_config.yaml \
-  --output-dir example/reward_exploration/baseline/calculation_output
+python main_factory.py \
+  --config ../pipeline_config.yaml \
+  --output-dir calculation_output
 ```
 
-Replace `baseline` in both paths with another experiment directory to run that method.
-Use a different output directory for every experiment; an existing `dqn_model.keras` in
-the selected directory causes the runner to load that model instead of training a new
-one.
+Replace `baseline` with another experiment directory to run that method. Use a different
+output directory for every experiment; an existing `dqn_model.keras` in the selected
+directory causes the runner to load that model instead of training a new one.
 
 ## Evaluation datasets and outputs
 
@@ -92,8 +90,9 @@ sbatch submit_job.sh
 
 Before submission, review the cluster-specific account, constraint, environment path,
 resources, and repository location in the script. The scripts use the full pipeline
-configuration, evaluate all four datasets, and write to `calculation_output/`. At the end of
-a successful job, `models/` is archived as `models.tar.gz`. Each
+configuration from `../pipeline_config.yaml`, evaluate all four datasets, and write to
+`calculation_output/`. At the end of a successful job, `models/` is archived as
+`models.tar.gz`. Each
 `results/fit_plots_<dataset>/` directory is archived beside itself as
 `fit_plots_<dataset>.tar.gz`. The original directories are then removed to reduce HPC file
 counts.

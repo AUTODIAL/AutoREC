@@ -1,5 +1,6 @@
 """Focused checks for reward-exploration hyperparameter-tuning workflows."""
 
+from copy import deepcopy
 from pathlib import Path
 import shutil
 import subprocess
@@ -23,6 +24,36 @@ REPOSITORY_ROOT = Path(__file__).parents[1]
 REWARD_ROOT = REPOSITORY_ROOT / "example" / "reward_exploration"
 DATA_ROOT = REPOSITORY_ROOT / "example" / "data"
 REFERENCE_DATA = REPOSITORY_ROOT / "example" / "hyperparameter_tuning" / "data"
+
+
+def test_fixed_run_uses_local_full_spectrum_pipeline_config():
+    local = yaml.safe_load((REWARD_ROOT / "pipeline_config.yaml").read_text())
+    standard = yaml.safe_load(
+        (REPOSITORY_ROOT / "configs_yaml" / "examples" / "pipeline_config.yaml").read_text()
+    )
+
+    assert local["dataprep"]["path"] == "../../data/training_dataset.pkl"
+    assert local["agent"]["num_trials"] == 10_000
+    assert "progressive_spectrum" not in local
+    for case_name in CASES:
+        assert (REWARD_ROOT / case_name / local["dataprep"]["path"]).resolve().is_file()
+
+    comparable = deepcopy(local)
+    comparable["dataprep"]["path"] = standard["dataprep"]["path"]
+    assert comparable == standard
+
+
+def test_fixed_run_entrypoints_use_local_pipeline_config():
+    for case_name in CASES:
+        case_dir = REWARD_ROOT / case_name
+        runner = (case_dir / "main_factory.py").read_text()
+        submit_job = (case_dir / "submit_job.sh").read_text()
+
+        assert 'DEFAULT_CONFIG = EXPLORATION_ROOT / "pipeline_config.yaml"' in runner
+        assert "default=str(DEFAULT_CONFIG)" in runner
+        assert "AUTOREC_ROOT" not in runner
+        assert "../pipeline_config.yaml" in submit_job
+        assert "~/modules/AutoREC/configs_yaml" not in submit_job
 
 
 def test_reward_tuning_datasets_match_reference_splits():
@@ -139,5 +170,6 @@ def test_reward_tuning_worker_imports_from_standalone_copy(tmp_path):
 def test_reward_tuning_documentation_uses_local_requirements():
     readme = (REWARD_ROOT / "README.md").read_text()
 
+    assert "--config ../pipeline_config.yaml" in readme
     assert "example/reward_exploration/tuning/requirements.txt" in readme
     assert "local `tuning/` package" in readme

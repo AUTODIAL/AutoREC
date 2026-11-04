@@ -6,11 +6,10 @@ reported circuits remain unchanged. For a successful fit, the override first app
 `autorec.parser.simplify(circuit)` and uses that structurally simplified circuit to
 calculate both the component-count penalty and the nesting-depth penalty.
 
-From the AutoREC repository root, run:
+From this directory, run the 10,000-trial exploration with:
 
 ```bash
-source ./autorec_env/bin/activate
-python example/reward_exploration/reward_calculated_on_simplified_circuits/main_factory.py
+python main_factory.py
 ```
 
 The runner accepts `--config` and `--output-dir`. It evaluates every spectrum in the
@@ -25,10 +24,9 @@ this directory:
 sbatch submit_job.sh
 ```
 
-The job uses the repository's `configs_yaml/examples/pipeline_config.yaml` (currently 10,000
-training trials), activates `$HOME/eis_env`, performs all four evaluations, and writes
-calculation artifacts to `calculation_output/`. The SLURM log is written beside the submission
-script.
+The runner and job use `../pipeline_config.yaml` (10,000 training trials), activate the
+configured Python environment, perform all four evaluations, and write calculation artifacts
+to `calculation_output/`. The SLURM log is written beside the submission script.
 
 ## Hyperparameter tuning
 

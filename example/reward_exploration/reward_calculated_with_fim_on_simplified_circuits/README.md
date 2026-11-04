@@ -17,15 +17,10 @@ The default identifiability threshold is `1e-6`.
 After training, the runner evaluates every spectrum in the training, test, battery, and
 experimental datasets described in the parent README.
 
-From the AutoREC repository root, run locally with:
+From this directory, run the 10,000-trial exploration with:
 
 ```bash
-source ./autorec_env/bin/activate
-python \
-  example/reward_exploration/reward_calculated_with_fim_on_simplified_circuits/main_factory.py \
-  --config configs_yaml/examples/pipeline_config.yaml \
-  --output-dir \
-  example/reward_exploration/reward_calculated_with_fim_on_simplified_circuits/calculation_output
+python main_factory.py
 ```
 
 To submit on SLURM, enter this directory and run:

@@ -26,11 +26,11 @@ source "$HOME/eis_env/bin/activate"
 export OMP_NUM_THREADS=1
 
 echo "Running script: main_factory.py"
-echo "Configuration: ~/modules/AutoREC/configs_yaml/examples/pipeline_config.yaml"
+echo "Configuration: ../pipeline_config.yaml"
 echo "Output directory: calculation_output"
 
 time python main_factory.py \
-    --config ~/modules/AutoREC/configs_yaml/examples/pipeline_config.yaml \
+    --config ../pipeline_config.yaml \
     --output-dir calculation_output
 
 echo "Archiving model and fit-plot outputs..."
