@@ -103,7 +103,9 @@ counts.
 Each experiment directory also contains a checkpointed multi-fidelity tuning workflow. It
 uses the same successive-halving policy as `example/hyperparameter_tuning`: candidates train
 in 1,000-trial stages up to 10,000 trials, are first eligible for pruning at 2,000 trials,
-and resume promoted candidates from their latest complete checkpoint.
+and resume promoted candidates from their latest complete checkpoint. The shared
+orchestrator is included in this folder's local `tuning/` package, so a copied
+`reward_exploration/` directory does not import tuning code from the repository layout.
 
 The tuning datasets have deliberately separate roles:
 

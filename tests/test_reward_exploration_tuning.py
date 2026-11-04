@@ -134,3 +134,10 @@ def test_reward_tuning_worker_imports_from_standalone_copy(tmp_path):
 
     assert completed.returncode == 0, completed.stderr
     assert completed.stdout.strip() == "reward_exploration.tuning.stage"
+
+
+def test_reward_tuning_documentation_uses_local_requirements():
+    readme = (REWARD_ROOT / "README.md").read_text()
+
+    assert "example/reward_exploration/tuning/requirements.txt" in readme
+    assert "local `tuning/` package" in readme

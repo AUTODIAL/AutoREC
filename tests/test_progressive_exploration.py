@@ -239,7 +239,8 @@ def test_progressive_documentation_uses_local_workflows_and_shared_requirements(
     normalized_parent = " ".join(parent_readme.split())
     assert "cd example/progressive_exploration/baseline" in parent_readme
     assert "--config ../configs/pipeline_config.yaml" in parent_readme
-    assert "example/reward_exploration/tuning/requirements.txt" in parent_readme
+    assert "example/progressive_exploration/tuning/requirements.txt" in parent_readme
+    assert "example/reward_exploration/tuning" not in parent_readme
     assert (
         "Circuit fitting, reward calculation, and FIM calculation use all original"
         in normalized_parent

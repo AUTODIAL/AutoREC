@@ -81,22 +81,21 @@ The scripts write to `calculation_output/` and archive model and fit-plot direct
 a successful run to reduce HPC file counts.
 
 For scratch execution, preserve the relative layout between `progressive_exploration/` and
-its sibling `data/` directory. The single-run reward modules are local to the exploration
-folder and do not import `example.reward_exploration`. The job scripts explicitly limit
-NumExpr and the other native thread pools to one thread and exit immediately if Python
-fails.
+its sibling `data/` directory. The reward modules and tuning infrastructure are local to
+the exploration folder and do not import `example.reward_exploration`. The job scripts
+explicitly limit NumExpr and the other native thread pools to one thread and exit
+immediately if Python fails.
 
 ## Checkpointed multi-fidelity tuning
 
-The existing checkpoint-safe orchestrator from `example/reward_exploration/tuning/` is
-reused by the tuning entry points. Candidates train in successive cumulative trial rungs,
-and promoted candidates resume their complete agent, optimizer, replay, RNG, environment,
-and progressive runtime state.
+The local `tuning/` package provides the checkpoint-safe orchestrator used by every case.
+Candidates train in successive cumulative trial rungs, and promoted candidates resume their
+complete agent, optimizer, replay, RNG, environment, and progressive runtime state.
 
 Install the optional orchestration dependencies once:
 
 ```bash
-pip install -r example/reward_exploration/tuning/requirements.txt
+pip install -r example/progressive_exploration/tuning/requirements.txt
 ```
 
 Then run or submit a case-local orchestrator:
