@@ -10,7 +10,7 @@ Run the 10,000-trial exploration from this directory:
 python main_factory.py
 ```
 
-This uses `../configs/pipeline_config.yaml` by default. Alternatively, submit
+This uses `../pipeline_config.yaml` by default. Alternatively, submit
 `submit_job.sh` from this directory. Use `python tuning_runner.py` (or
 `sbatch tuning_runner_job.sh`) for checkpointed multi-fidelity tuning. Training and
 validation use the corresponding pickles in the shared `../../data/` directory.

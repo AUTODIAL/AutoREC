@@ -50,7 +50,7 @@ To choose the configuration and output directory explicitly, run:
 
 ```bash
 python main_factory.py \
-  --config ../configs/pipeline_config.yaml \
+  --config ../pipeline_config.yaml \
   --output-dir calculation_output
 ```
 

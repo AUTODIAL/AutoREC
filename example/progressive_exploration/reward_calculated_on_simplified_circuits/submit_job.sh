@@ -36,11 +36,11 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 cd "$SCRIPT_DIR"
 
 echo "Running script: main_factory.py"
-echo "Configuration: ../configs/pipeline_config.yaml"
+echo "Configuration: ../pipeline_config.yaml"
 echo "Output directory: calculation_output"
 
 time python main_factory.py \
-    --config ../configs/pipeline_config.yaml \
+    --config ../pipeline_config.yaml \
     --output-dir calculation_output
 
 echo "Archiving model and fit-plot outputs..."

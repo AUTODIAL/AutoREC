@@ -49,7 +49,7 @@ def _without_progressive(config: dict) -> dict:
 
 
 def test_full_run_configs_match_standard_settings_with_shared_exploration_data():
-    progressive = _read_yaml(EXAMPLE_ROOT / "configs" / "pipeline_config.yaml")
+    progressive = _read_yaml(EXAMPLE_ROOT / "pipeline_config.yaml")
     standard = _read_yaml(
         REPOSITORY_ROOT / "configs_yaml" / "examples" / "pipeline_config.yaml"
     )
@@ -63,7 +63,7 @@ def test_full_run_configs_match_standard_settings_with_shared_exploration_data()
 
 
 def test_every_progressive_exploration_config_uses_same_components():
-    configs = [_read_yaml(EXAMPLE_ROOT / "configs" / "pipeline_config.yaml")]
+    configs = [_read_yaml(EXAMPLE_ROOT / "pipeline_config.yaml")]
     configs.extend(
         _read_yaml(EXAMPLE_ROOT / case / "tuning_base_config.yaml") for case in CASES
     )
@@ -162,11 +162,11 @@ def test_local_reward_environment_imports_from_scratch_copy(tmp_path):
 
 
 def test_full_run_entrypoints_select_local_progressive_configs():
-    default_config = "../configs/pipeline_config.yaml"
+    default_config = "../pipeline_config.yaml"
     for case in CASES:
         case_dir = EXAMPLE_ROOT / case
         runner = (case_dir / "main_factory.py").read_text()
-        assert 'DEFAULT_CONFIG = EXAMPLE_ROOT / "configs" / "pipeline_config.yaml"' in runner
+        assert 'DEFAULT_CONFIG = EXAMPLE_ROOT / "pipeline_config.yaml"' in runner
         assert "default=str(DEFAULT_CONFIG)" in runner
         assert 'EVALUATION_DATA_DIR = EXAMPLE_ROOT.parent / "data"' in runner
 
@@ -238,7 +238,7 @@ def test_progressive_documentation_uses_local_workflows_and_shared_requirements(
     parent_readme = (EXAMPLE_ROOT / "README.md").read_text()
     normalized_parent = " ".join(parent_readme.split())
     assert "cd example/progressive_exploration/baseline" in parent_readme
-    assert "--config ../configs/pipeline_config.yaml" in parent_readme
+    assert "--config ../pipeline_config.yaml" in parent_readme
     assert "example/progressive_exploration/tuning/requirements.txt" in parent_readme
     assert "example/reward_exploration/tuning" not in parent_readme
     assert (
@@ -261,7 +261,7 @@ def test_progressive_config_resolves_registered_runtime_components():
     dataprep = object.__new__(EISDataPrep)
     dataprep.frequency_npoints = 79
     dataprep.eis_features = ["ImZ", "phi", "mag", "nphi"]
-    config = _read_yaml(EXAMPLE_ROOT / "configs" / "pipeline_config.yaml")
+    config = _read_yaml(EXAMPLE_ROOT / "pipeline_config.yaml")
 
     runtime = progressive_spectrum_builder(
         config["progressive_spectrum"],

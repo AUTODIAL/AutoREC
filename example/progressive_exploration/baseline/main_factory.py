@@ -42,7 +42,7 @@ from autorec.factory import config_reader, pipeline_builder
 
 
 EXAMPLE_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_CONFIG = EXAMPLE_ROOT / "configs" / "pipeline_config.yaml"
+DEFAULT_CONFIG = EXAMPLE_ROOT / "pipeline_config.yaml"
 EVALUATION_DATA_DIR = EXAMPLE_ROOT.parent / "data"
 EVALUATION_DATASETS = {
     # Use the environment already constructed from the configured training data.
