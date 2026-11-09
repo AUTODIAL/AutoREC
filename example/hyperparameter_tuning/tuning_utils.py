@@ -12,7 +12,9 @@ from pathlib import Path
 from glob import glob
 from typing import Optional, Sequence, Tuple, Union
 import copy
+import json
 import math
+import os
 import yaml
 import re
 import shlex
@@ -30,6 +32,100 @@ from autorec.parser import _simplify_P, simplify
 # Variables to specify the presetup environments
 MODULE_SAVELIST_NAME = "default"
 PYTHON_ENV_PATH = "$HOME/autorec_env"
+
+
+class SlurmJobsFailed(RuntimeError):
+    """Report terminal Slurm failures while retaining every observed final result."""
+
+    def __init__(self, message: str, results: dict[str, tuple[str, str]]):
+        super().__init__(message)
+        self.results = results
+
+
+class SlurmJobRegistry:
+    """Atomically persist submitted jobs so a restart cannot duplicate them."""
+
+    VERSION = 1
+
+    def __init__(self, path: Union[str, Path]):
+        self.path = Path(path)
+        if self.path.is_file():
+            try:
+                payload = json.loads(self.path.read_text())
+            except (OSError, json.JSONDecodeError) as error:
+                raise ValueError(f"Slurm job registry is unreadable: {self.path}") from error
+            if (
+                type(payload) is not dict
+                or set(payload) != {"version", "jobs"}
+                or payload["version"] != self.VERSION
+                or type(payload["jobs"]) is not dict
+            ):
+                raise ValueError(f"Slurm job registry has an unsupported schema: {self.path}")
+            self.jobs = payload["jobs"]
+        elif self.path.exists():
+            raise ValueError(f"Slurm job registry is not a regular file: {self.path}")
+        else:
+            self.jobs = {}
+
+    @staticmethod
+    def key(kind: str, config_id: int, target_trials: int) -> str:
+        return f"{kind}:{config_id:04d}:{target_trials:08d}"
+
+    def current(self, kind: str, config_id: int, target_trials: int) -> dict | None:
+        record = self.jobs.get(self.key(kind, config_id, target_trials))
+        return None if record is None else record["attempts"][-1]
+
+    def record_submission(
+        self,
+        *,
+        kind: str,
+        config_id: int,
+        target_trials: int,
+        job_id: str,
+        save_dir: Union[str, Path],
+        script: Union[str, Path],
+        log: Union[str, Path],
+    ) -> None:
+        key = self.key(kind, config_id, target_trials)
+        metadata = {
+            "kind": kind,
+            "config_id": config_id,
+            "target_trials": target_trials,
+            "save_dir": str(Path(save_dir)),
+        }
+        record = self.jobs.setdefault(key, {**metadata, "attempts": []})
+        if {name: record.get(name) for name in metadata} != metadata:
+            raise ValueError(f"Slurm job registry metadata conflicts for {key}.")
+        record["attempts"].append(
+            {
+                "job_id": str(job_id),
+                "state": "SUBMITTED",
+                "exit_code": None,
+                "script": str(Path(script)),
+                "log": str(Path(log)),
+            }
+        )
+        self._write()
+
+    def record_results(self, results: dict[str, tuple[str, str]]) -> None:
+        pending = dict(results)
+        for record in self.jobs.values():
+            for attempt in record["attempts"]:
+                result = pending.pop(attempt["job_id"], None)
+                if result is not None:
+                    attempt["state"], attempt["exit_code"] = result
+        if pending:
+            raise ValueError(f"Slurm results contain unregistered jobs: {sorted(pending)}")
+        self._write()
+
+    def _write(self) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = self.path.with_name(f".{self.path.name}.tmp")
+        with temporary.open("w") as stream:
+            json.dump({"version": self.VERSION, "jobs": self.jobs}, stream, indent=2)
+            stream.flush()
+            os.fsync(stream.fileno())
+        temporary.replace(self.path)
 
 
 def cumulative_trial_targets(max_trials: int, session_trials: int) -> list[int]:
@@ -638,6 +734,7 @@ def block_until_completed(
 
     terminal_results = {}
     accounting_failure_started = None
+    missing_since = {}
 
     # These are a list of terminal states in Slurm
     terminal_states = {
@@ -708,6 +805,7 @@ def block_until_completed(
         accounting_failure_started = None
 
         # Track the *best* (final) state per job
+        observed = set()
         for line in result.stdout.splitlines():
             columns = line.split("|")
             if len(columns) < 3:
@@ -716,10 +814,29 @@ def block_until_completed(
             # Ignore job steps (e.g. 12345.batch)
             if "." in jobid_raw or jobid_raw not in jobid_list:
                 continue
+            observed.add(jobid_raw)
             state = state.split()[0].rstrip("+")
             if state in terminal_states and jobid_raw not in terminal_results:
                 terminal_results[jobid_raw] = (state, exit_code)
                 print(f"Job {jobid_raw} finished with state: {state}, exit code: {exit_code}")
+
+        now = time.monotonic()
+        remaining = [jobid for jobid in jobid_list if jobid not in terminal_results]
+        for jobid in remaining:
+            if jobid in observed:
+                missing_since.pop(jobid, None)
+            else:
+                missing_since.setdefault(jobid, now)
+        expired = [
+            jobid
+            for jobid, started in missing_since.items()
+            if now - started >= accounting_timeout
+        ]
+        if expired:
+            raise RuntimeError(
+                "Slurm accounting returned no record within the status timeout for: "
+                + ", ".join(expired)
+            )
 
         if len(terminal_results) == len(jobid_list):
             print("All jobs have completed.")
@@ -733,7 +850,9 @@ def block_until_completed(
                     f"{jobid}={state}/{exit_code}"
                     for jobid, (state, exit_code) in failed.items()
                 )
-                raise RuntimeError(f"One or more Slurm jobs failed: {details}")
+                raise SlurmJobsFailed(
+                    f"One or more Slurm jobs failed: {details}", terminal_results
+                )
             return terminal_results
 
         time.sleep(poll_interval)

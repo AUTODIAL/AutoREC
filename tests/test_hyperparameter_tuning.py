@@ -22,6 +22,23 @@ def _load_module(name: str, filename: str):
     return module
 
 
+def _load_runner_module(tuning_utils, monkeypatch):
+    optuna = types.ModuleType("optuna")
+    optuna.__path__ = []
+    visualization = types.ModuleType("optuna.visualization")
+    visualization.__path__ = []
+    visualization_matplotlib = types.ModuleType("optuna.visualization.matplotlib")
+    optuna.visualization = visualization
+    visualization.matplotlib = visualization_matplotlib
+    monkeypatch.setitem(sys.modules, "optuna", optuna)
+    monkeypatch.setitem(sys.modules, "optuna.visualization", visualization)
+    monkeypatch.setitem(
+        sys.modules, "optuna.visualization.matplotlib", visualization_matplotlib
+    )
+    monkeypatch.setitem(sys.modules, "tuning_utils", tuning_utils)
+    return _load_module("hyperparameter_runner", "runner.py")
+
+
 @pytest.fixture(scope="module")
 def tuning_utils():
     return _load_module("hyperparameter_tuning_utils", "tuning_utils.py")
@@ -256,6 +273,72 @@ def test_slurm_monitor_rejects_exit_failure_and_accounting_timeout(tuning_utils,
     with pytest.raises(RuntimeError, match="status is unknown for: 12345"):
         tuning_utils.block_until_completed(["12345"], poll_interval=1, accounting_timeout=10)
     assert calls["sacct"] == 2
+
+    no_record = types.SimpleNamespace(returncode=0, stdout="", stderr="")
+    clock = iter([0.0, 11.0])
+    monkeypatch.setattr(tuning_utils.subprocess, "run", lambda *args, **kwargs: no_record)
+    monkeypatch.setattr(tuning_utils.time, "monotonic", lambda: next(clock))
+    with pytest.raises(RuntimeError, match="no record.*12345"):
+        tuning_utils.block_until_completed(["12345"], poll_interval=1, accounting_timeout=10)
+
+
+def test_slurm_job_registry_survives_restart_without_duplicate_submission(
+    tmp_path, tuning_utils, monkeypatch
+):
+    runner = _load_runner_module(tuning_utils, monkeypatch)
+    save_dir = tmp_path / "run"
+    candidate = {
+        "config_id": 3,
+        "config_file": tmp_path / "config.yaml",
+        "save_dir": save_dir,
+    }
+    registry_path = tmp_path / "slurm_jobs.json"
+    submissions = []
+
+    monkeypatch.setattr(
+        runner,
+        "write_job_script",
+        lambda *args, **kwargs: submissions.append("12345") or "12345",
+    )
+    monkeypatch.setattr(
+        runner,
+        "block_until_completed",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("orchestrator stopped")),
+    )
+    with pytest.raises(RuntimeError, match="orchestrator stopped"):
+        runner._submit_stage(
+            [candidate],
+            1_000,
+            EXAMPLE_DIR / "main_factory.py",
+            "test",
+            {},
+            {},
+            tuning_utils.SlurmJobRegistry(registry_path),
+            False,
+        )
+    assert submissions == ["12345"]
+
+    def finish(job_ids, **kwargs):
+        for path in tuning_utils.stage_output_paths(save_dir, 1_000).values():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.touch()
+        return {"12345": ("COMPLETED", "0:0")}
+
+    monkeypatch.setattr(runner, "block_until_completed", finish)
+    runner._submit_stage(
+        [candidate],
+        1_000,
+        EXAMPLE_DIR / "main_factory.py",
+        "test",
+        {},
+        {},
+        tuning_utils.SlurmJobRegistry(registry_path),
+        False,
+    )
+    assert submissions == ["12345"]
+    registry = tuning_utils.SlurmJobRegistry(registry_path)
+    assert registry.current("training", 3, 1_000)["state"] == "COMPLETED"
+    assert not list(tmp_path.glob(".slurm_jobs.json.tmp"))
 
 
 def test_score_can_use_rung_specific_evaluation_file(tmp_path, tuning_utils):

@@ -18,6 +18,8 @@ import yaml
 
 from tuning_utils import (
     ConfigurationHandler,
+    SlurmJobRegistry,
+    SlurmJobsFailed,
     block_until_completed,
     compute_score,
     cumulative_trial_targets,
@@ -98,6 +100,11 @@ def _parse_args() -> argparse.Namespace:
         default=3_600,
         help="Maximum continuous sacct outage tolerated in seconds.",
     )
+    parser.add_argument(
+        "--retry-failed-jobs",
+        action="store_true",
+        help="Explicitly resubmit stages whose registered Slurm job failed.",
+    )
     return parser.parse_args()
 
 
@@ -170,6 +177,8 @@ def _submit_stage(
     job_name_prefix: str,
     sbatch_options: dict,
     monitor_options: dict,
+    job_registry: SlurmJobRegistry,
+    retry_failed_jobs: bool,
 ) -> None:
     job_ids = []
     job_ids_by_config = {}
@@ -182,19 +191,62 @@ def _submit_stage(
         submitted_config_ids.add(config_id)
         options = dict(sbatch_options)
         options["job_name"] = f"{job_name_prefix}_{config_id}_{target_trials}"
-        job_id = write_job_script(
-            save_dir,
-            python_file,
-            candidate["config_file"],
-            options,
-            script_args=("--target-trials", target_trials),
-            submit=True,
-        )
+        current = job_registry.current("training", config_id, target_trials)
+        if current is not None and current["state"] == "SUBMITTED":
+            job_id = current["job_id"]
+            print(
+                f"Reusing registered training job {job_id} for config {config_id}, "
+                f"target {target_trials}."
+            )
+        elif current is not None and current["state"] != "COMPLETED":
+            if not retry_failed_jobs:
+                raise RuntimeError(
+                    f"Registered training job {current['job_id']} failed with "
+                    f"{current['state']}/{current['exit_code']} for config {config_id}, "
+                    f"target {target_trials}. Use --retry-failed-jobs to resubmit it."
+                )
+            job_id = None
+        elif current is not None:
+            missing = ", ".join(
+                str(path) for path in missing_stage_outputs(save_dir, target_trials)
+            )
+            raise RuntimeError(
+                f"Registered training job {current['job_id']} completed but required "
+                f"outputs are missing for config {config_id}, target {target_trials}: "
+                f"{missing}"
+            )
+        else:
+            job_id = None
+
         if job_id is None:
-            raise RuntimeError(f"Slurm did not return a job ID for config {config_id}.")
+            job_id = write_job_script(
+                save_dir,
+                python_file,
+                candidate["config_file"],
+                options,
+                script_args=("--target-trials", target_trials),
+                submit=True,
+            )
+            if job_id is None:
+                raise RuntimeError(f"Slurm did not return a job ID for config {config_id}.")
+            job_registry.record_submission(
+                kind="training",
+                config_id=config_id,
+                target_trials=target_trials,
+                job_id=job_id,
+                save_dir=save_dir,
+                script=save_dir / "submit.sh",
+                log=save_dir / f"{options['job_name']}_slurm-{job_id}.out",
+            )
         job_ids.append(job_id)
         job_ids_by_config[config_id] = job_id
-    block_until_completed(job_ids, **monitor_options)
+    try:
+        results = block_until_completed(job_ids, **monitor_options)
+    except SlurmJobsFailed as error:
+        job_registry.record_results(error.results)
+        raise
+    else:
+        job_registry.record_results(results)
 
     checked_config_ids = set()
     for candidate in candidates:
@@ -234,6 +286,8 @@ def _run_baseline(
     reward_sample_size: int,
     rung_rows: list[dict],
     monitor_options: dict,
+    job_registry: SlurmJobRegistry,
+    retry_failed_jobs: bool,
 ) -> None:
     config_id, config_file, config = handler.write_config(
         copy.deepcopy(handler.base_config), results_dir
@@ -253,6 +307,8 @@ def _run_baseline(
             job_name_prefix,
             sbatch_options,
             monitor_options,
+            job_registry,
+            retry_failed_jobs,
         )
         final_score, components = _score_candidate(candidate, target, reward_sample_size)
         intermediate_values[target] = float(final_score)
@@ -296,6 +352,8 @@ def _run_candidate_group(
     reward_sample_size: int,
     rung_rows: list[dict],
     monitor_options: dict,
+    job_registry: SlurmJobRegistry,
+    retry_failed_jobs: bool,
 ) -> None:
     candidates = []
     for trial in trials:
@@ -320,6 +378,8 @@ def _run_candidate_group(
             job_name_prefix,
             sbatch_options,
             monitor_options,
+            job_registry,
+            retry_failed_jobs,
         )
         scores = {}
         components_by_trial = {}
@@ -399,6 +459,7 @@ def main() -> None:
         "poll_interval": args.slurm_poll_seconds,
         "accounting_timeout": args.slurm_accounting_timeout,
     }
+    job_registry = SlurmJobRegistry(results_dir / "slurm_jobs.json")
 
     print("============================================")
     print("# MULTI-FIDELITY HYPERPARAMETER TUNING #")
@@ -422,6 +483,8 @@ def main() -> None:
         reward_sample_size,
         rung_rows,
         monitor_options,
+        job_registry,
+        args.retry_failed_jobs,
     )
     _export_study(study, results_dir)
 
@@ -449,6 +512,8 @@ def main() -> None:
             reward_sample_size,
             rung_rows,
             monitor_options,
+            job_registry,
+            args.retry_failed_jobs,
         )
         _export_study(study, results_dir)
 

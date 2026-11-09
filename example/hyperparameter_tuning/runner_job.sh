@@ -33,6 +33,7 @@ GRACE_TRIALS=2000
 REDUCTION_FACTOR=2
 SLURM_POLL_SECONDS=60
 SLURM_ACCOUNTING_TIMEOUT=3600
+RETRY_FAILED_JOBS=false
 
 # ENVIRONMENT CONFIGURATION
 MODULE_SAVELIST_NAME="default"
@@ -52,6 +53,9 @@ RUNNER_ARGUMENTS=(
     --slurm-poll-seconds "$SLURM_POLL_SECONDS"
     --slurm-accounting-timeout "$SLURM_ACCOUNTING_TIMEOUT"
 )
+if [[ "$RETRY_FAILED_JOBS" == true ]]; then
+    RUNNER_ARGUMENTS+=(--retry-failed-jobs)
+fi
 
 echo '------------------------------------------------------------'
 echo "Running job $SLURM_JOB_NAME"
