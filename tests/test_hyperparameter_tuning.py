@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+import subprocess
 import sys
+import tarfile
 import types
 
 import pandas as pd
@@ -217,6 +219,43 @@ def test_training_slurm_script_is_strict_and_does_not_archive(
     assert '--slurm-accounting-timeout "$SLURM_ACCOUNTING_TIMEOUT"' in wrapper
 
 
+def test_archive_job_is_restart_safe_and_preserves_ambiguous_inputs(tmp_path, tuning_utils):
+    save_dir = tmp_path / "run"
+    (save_dir / "models").mkdir(parents=True)
+    (save_dir / "models" / "weights.bin").write_bytes(b"model")
+    (save_dir / "fit_plots").mkdir()
+    (save_dir / "fit_plots" / "fit.png").write_bytes(b"plot")
+    tuning_utils.write_archive_job_script(save_dir, 2_000, {"job_name": "archive"})
+
+    script = save_dir / "archive.sh"
+    assert "set -euo pipefail" in script.read_text()
+    subprocess.run(["bash", str(script)], check=True, capture_output=True, text=True)
+    assert (save_dir / ".archive_complete").read_text().strip() == "2000"
+    assert not (save_dir / "models").exists()
+    assert not (save_dir / "fit_plots").exists()
+    with tarfile.open(save_dir / "models.tar.gz") as archive:
+        assert "models/weights.bin" in archive.getnames()
+    with tarfile.open(save_dir / "fit_plots.tar.gz") as archive:
+        assert "fit_plots/fit.png" in archive.getnames()
+
+    subprocess.run(["bash", str(script)], check=True, capture_output=True, text=True)
+
+    ambiguous = tmp_path / "ambiguous"
+    (ambiguous / "models").mkdir(parents=True)
+    (ambiguous / "models" / "new.bin").write_bytes(b"new")
+    (ambiguous / "models.tar.gz").write_bytes(b"old")
+    tuning_utils.write_archive_job_script(ambiguous, 1_000, {})
+    result = subprocess.run(
+        ["bash", str(ambiguous / "archive.sh")],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert (ambiguous / "models" / "new.bin").read_bytes() == b"new"
+    assert not (ambiguous / ".archive_complete").exists()
+
+
 def test_slurm_monitor_recovers_from_accounting_outage(tuning_utils, monkeypatch):
     responses = iter(
         [
@@ -339,6 +378,29 @@ def test_slurm_job_registry_survives_restart_without_duplicate_submission(
     registry = tuning_utils.SlurmJobRegistry(registry_path)
     assert registry.current("training", 3, 1_000)["state"] == "COMPLETED"
     assert not list(tmp_path.glob(".slurm_jobs.json.tmp"))
+
+    archive_submissions = []
+    monkeypatch.setattr(
+        runner,
+        "write_archive_job_script",
+        lambda *args, **kwargs: archive_submissions.append("54321") or "54321",
+    )
+
+    def finish_archive(job_ids, **kwargs):
+        (save_dir / ".archive_complete").write_text("1000\n")
+        return {"54321": ("COMPLETED", "0:0")}
+
+    monkeypatch.setattr(runner, "block_until_completed", finish_archive)
+    runner._submit_archives(
+        [candidate],
+        1_000,
+        "test",
+        {},
+        registry,
+        False,
+    )
+    assert archive_submissions == ["54321"]
+    assert registry.current("archive", 3, 1_000)["state"] == "COMPLETED"
 
 
 def test_score_can_use_rung_specific_evaluation_file(tmp_path, tuning_utils):

@@ -27,12 +27,14 @@ from tuning_utils import (
     promotion_trial_targets,
     select_promoted_config_ids,
     stage_output_paths,
+    write_archive_job_script,
     write_job_script,
 )
 
 
 SEED = 42
 WORK_DIR = Path(__file__).resolve().parent
+ARCHIVE_SBATCH_OPTIONS = {"time": "2:00:00", "cpus_per_task": 1, "mem_per_cpu": "1G"}
 
 
 def _positive_integer(value: str) -> int:
@@ -240,13 +242,7 @@ def _submit_stage(
             )
         job_ids.append(job_id)
         job_ids_by_config[config_id] = job_id
-    try:
-        results = block_until_completed(job_ids, **monitor_options)
-    except SlurmJobsFailed as error:
-        job_registry.record_results(error.results)
-        raise
-    else:
-        job_registry.record_results(results)
+    _monitor_registered_jobs(job_ids, monitor_options, job_registry)
 
     checked_config_ids = set()
     for candidate in candidates:
@@ -263,6 +259,103 @@ def _submit_stage(
                 f"target_trials={target_trials}, job_id={job_id}, "
                 f"save_dir={candidate['save_dir']}, missing=[{missing_text}]"
             )
+
+
+def _monitor_registered_jobs(
+    job_ids: list[str], monitor_options: dict, job_registry: SlurmJobRegistry
+) -> None:
+    if not job_ids:
+        return
+    try:
+        results = block_until_completed(job_ids, **monitor_options)
+    except SlurmJobsFailed as error:
+        job_registry.record_results(error.results)
+        raise
+    else:
+        job_registry.record_results(results)
+
+
+def _archive_complete(save_dir: Path, target_trials: int) -> bool:
+    marker = save_dir / ".archive_complete"
+    if not marker.is_file():
+        return False
+    try:
+        archived_target = int(marker.read_text().strip())
+    except (OSError, ValueError) as error:
+        raise RuntimeError(f"Archive completion marker is invalid: {marker}") from error
+    if archived_target != target_trials:
+        raise RuntimeError(
+            f"Archive marker target {archived_target} does not match terminal target "
+            f"{target_trials}: {marker}"
+        )
+    return True
+
+
+def _submit_archives(
+    candidates: list[dict],
+    target_trials: int,
+    job_name_prefix: str,
+    monitor_options: dict,
+    job_registry: SlurmJobRegistry,
+    retry_failed_jobs: bool,
+) -> None:
+    job_ids = []
+    checked_candidates = []
+    for candidate in candidates:
+        config_id = candidate["config_id"]
+        save_dir = candidate["save_dir"]
+        marker = save_dir / ".archive_complete"
+        if _archive_complete(save_dir, target_trials):
+            continue
+
+        current = job_registry.current("archive", config_id, target_trials)
+        if current is not None and current["state"] == "SUBMITTED":
+            job_id = current["job_id"]
+            print(
+                f"Reusing registered archive job {job_id} for config {config_id}, "
+                f"target {target_trials}."
+            )
+        elif current is not None and current["state"] != "COMPLETED":
+            if not retry_failed_jobs:
+                raise RuntimeError(
+                    f"Registered archive job {current['job_id']} failed with "
+                    f"{current['state']}/{current['exit_code']} for config {config_id}, "
+                    f"target {target_trials}. Use --retry-failed-jobs to resubmit it."
+                )
+            job_id = None
+        elif current is not None:
+            raise RuntimeError(
+                f"Registered archive job {current['job_id']} completed but did not "
+                f"create {marker}."
+            )
+        else:
+            job_id = None
+
+        if job_id is None:
+            options = dict(ARCHIVE_SBATCH_OPTIONS)
+            options["job_name"] = f"{job_name_prefix}_archive_{config_id}_{target_trials}"
+            job_id = write_archive_job_script(save_dir, target_trials, options, submit=True)
+            if job_id is None:
+                raise RuntimeError(
+                    f"Slurm did not return an archive job ID for config {config_id}."
+                )
+            job_registry.record_submission(
+                kind="archive",
+                config_id=config_id,
+                target_trials=target_trials,
+                job_id=job_id,
+                save_dir=save_dir,
+                script=save_dir / "archive.sh",
+                log=save_dir / f"{options['job_name']}_slurm-{job_id}.out",
+            )
+        job_ids.append(job_id)
+        checked_candidates.append(candidate)
+
+    _monitor_registered_jobs(job_ids, monitor_options, job_registry)
+    for candidate in checked_candidates:
+        marker = candidate["save_dir"] / ".archive_complete"
+        if not _archive_complete(candidate["save_dir"], target_trials):
+            raise RuntimeError(f"Archive job did not create its completion marker: {marker}")
 
 
 def _score_candidate(candidate: dict, target_trials: int, reward_sample_size: int):
@@ -335,6 +428,14 @@ def _run_baseline(
             intermediate_values=intermediate_values,
         )
     )
+    _submit_archives(
+        [candidate],
+        targets[-1],
+        job_name_prefix,
+        monitor_options,
+        job_registry,
+        retry_failed_jobs,
+    )
 
 
 def _run_candidate_group(
@@ -395,6 +496,7 @@ def _run_candidate_group(
             promoted = select_promoted_config_ids(scores, reduction_factor)
 
         next_active = []
+        terminal_candidates = []
         for candidate in active:
             trial = candidate["trial"]
             components = components_by_trial[trial.number]
@@ -407,6 +509,8 @@ def _run_candidate_group(
             else:
                 status = "pruned"
                 study.tell(trial, state=optuna.trial.TrialState.PRUNED)
+            if status in {"complete", "pruned"}:
+                terminal_candidates.append(candidate)
             rung_rows.append(
                 {
                     "group": group_name,
@@ -421,6 +525,14 @@ def _run_candidate_group(
                 }
             )
         _write_csv_atomic(rung_rows, results_dir / "rung_scores.csv")
+        _submit_archives(
+            terminal_candidates,
+            target,
+            job_name_prefix,
+            monitor_options,
+            job_registry,
+            retry_failed_jobs,
+        )
         active = next_active
 
 

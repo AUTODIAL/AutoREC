@@ -681,23 +681,126 @@ def write_job_script(
         f.write(submit_script)
 
     if submit:
-        # Submit the job
-        submit_command = ["sbatch", str((save_dir / "submit.sh").resolve())]
-        submit_process = subprocess.run(
-            submit_command, capture_output=True, text=True, check=False
-        )
-        output = submit_process.stdout.strip()
-        print(f"Submitted job with command: {shlex.join(submit_command)}")
-        print(f"Output: {output}")
-        if submit_process.returncode:
-            raise RuntimeError(f"Slurm submission failed: {submit_process.stderr.strip()}")
-        # Get the job ID from the output
-        match = re.search(r"Submitted batch job (\d+)", output)
-        if match:
-            job_id = match.group(1)
-            print(f"Job ID: {job_id}")
-            return job_id
-        raise RuntimeError(f"Could not parse a Slurm job ID from: {output!r}")
+        return _submit_script(save_dir / "submit.sh")
+
+
+def write_archive_job_script(
+    save_dir: Union[str, Path],
+    target_trials: int,
+    sbatch_options: dict,
+    submit: bool = False,
+) -> Optional[str]:
+    """Write a restart-safe Slurm job that archives terminal run outputs."""
+    save_dir = Path(save_dir).resolve()
+    time_limit = sbatch_options.get("time", "2:00:00")
+    cpus_per_task = sbatch_options.get("cpus_per_task", 1)
+    nodes = sbatch_options.get("nodes", 1)
+    mem_per_cpu = sbatch_options.get("mem_per_cpu", "1G")
+    job_name = sbatch_options.get("job_name", "archive_hyperparameter_tuning")
+    quoted_save_dir = shlex.quote(str(save_dir))
+
+    archive_script = "\n".join(
+        [
+            "#!/bin/bash",
+            "",
+            f"#SBATCH --time={time_limit}   # walltime",
+            f"#SBATCH --cpus-per-task={cpus_per_task}   # number of processor cores",
+            f"#SBATCH --nodes={nodes}   # number of nodes",
+            f"#SBATCH --mem-per-cpu={mem_per_cpu}   # memory per CPU core",
+            f"#SBATCH --job-name='{job_name}'   # job name",
+            "#SBATCH --account=rrg-j3goals",
+            "#SBATCH --constraint='turin'",
+            f"#SBATCH --output={save_dir}/%x_slurm-%A.out   # output and error log",
+            "",
+            "set -euo pipefail",
+            f"SAVE_DIR={quoted_save_dir}",
+            f"TARGET_TRIALS={target_trials}",
+            'COMPLETE_MARKER="$SAVE_DIR/.archive_complete"',
+            'IN_PROGRESS_MARKER="$SAVE_DIR/.archive_in_progress"',
+            'MARKER_TEMP="$SAVE_DIR/.archive_complete.tmp"',
+            "",
+            'if [[ -f "$COMPLETE_MARKER" ]]; then',
+            '    if [[ "$(cat "$COMPLETE_MARKER")" != "$TARGET_TRIALS" ]]; then',
+            '        echo "Archive marker target does not match $TARGET_TRIALS." >&2',
+            "        exit 1",
+            "    fi",
+            '    echo "Run outputs are already archived."',
+            "    exit 0",
+            "fi",
+            "",
+            'if [[ ! -f "$IN_PROGRESS_MARKER" ]]; then',
+            "    for name in models fit_plots; do",
+            '        if [[ -d "$SAVE_DIR/$name" && -e "$SAVE_DIR/$name.tar.gz" ]]; then',
+            '            echo "Refusing ambiguous archive state for $name." >&2',
+            "            exit 1",
+            "        fi",
+            "    done",
+            '    printf "%s\\n" "$TARGET_TRIALS" > "$IN_PROGRESS_MARKER.tmp"',
+            '    mv "$IN_PROGRESS_MARKER.tmp" "$IN_PROGRESS_MARKER"',
+            "fi",
+            "",
+            "cleanup() {",
+            '    rm -f "$SAVE_DIR/.models.tar.gz.tmp"',
+            '    rm -f "$SAVE_DIR/.fit_plots.tar.gz.tmp" "$MARKER_TEMP"',
+            "}",
+            "trap cleanup EXIT",
+            "",
+            "archive_directory() {",
+            '    local name="$1"',
+            '    local source="$SAVE_DIR/$name"',
+            '    local archive="$SAVE_DIR/$name.tar.gz"',
+            '    local temporary="$SAVE_DIR/.$name.tar.gz.tmp"',
+            "",
+            '    if [[ -f "$archive" ]]; then',
+            '        tar -tzf "$archive" >/dev/null',
+            '        if [[ -d "$source" ]]; then',
+            '            rm -rf "$source"',
+            "        fi",
+            '    elif [[ -d "$source" ]]; then',
+            '        tar -czf "$temporary" -C "$SAVE_DIR" "$name"',
+            '        tar -tzf "$temporary" >/dev/null',
+            '        mv "$temporary" "$archive"',
+            '        rm -rf "$source"',
+            '    elif [[ -e "$source" || -e "$archive" ]]; then',
+            '        echo "Unsupported archive input type for $name." >&2',
+            "        exit 1",
+            "    else",
+            '        echo "No $name directory to archive."',
+            "    fi",
+            "}",
+            "",
+            "archive_directory models",
+            "archive_directory fit_plots",
+            'printf "%s\\n" "$TARGET_TRIALS" > "$MARKER_TEMP"',
+            'mv "$MARKER_TEMP" "$COMPLETE_MARKER"',
+            'rm -f "$IN_PROGRESS_MARKER"',
+            'echo "Archived terminal outputs for trial $TARGET_TRIALS."',
+        ]
+    )
+    save_dir.mkdir(parents=True, exist_ok=True)
+    script_path = save_dir / "archive.sh"
+    script_path.write_text(archive_script)
+    if submit:
+        return _submit_script(script_path)
+
+
+def _submit_script(script_path: Path) -> str:
+    """Submit one generated Slurm script and return its numeric job ID."""
+    submit_command = ["sbatch", str(script_path.resolve())]
+    submit_process = subprocess.run(
+        submit_command, capture_output=True, text=True, check=False
+    )
+    output = submit_process.stdout.strip()
+    print(f"Submitted job with command: {shlex.join(submit_command)}")
+    print(f"Output: {output}")
+    if submit_process.returncode:
+        raise RuntimeError(f"Slurm submission failed: {submit_process.stderr.strip()}")
+    match = re.search(r"Submitted batch job (\d+)", output)
+    if match:
+        job_id = match.group(1)
+        print(f"Job ID: {job_id}")
+        return job_id
+    raise RuntimeError(f"Could not parse a Slurm job ID from: {output!r}")
 
 
 def block_until_completed(
