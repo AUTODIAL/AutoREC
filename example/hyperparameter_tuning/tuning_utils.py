@@ -63,6 +63,28 @@ def promotion_trial_targets(
     return targets
 
 
+def stage_output_paths(save_dir: Union[str, Path], target_trials: int) -> dict[str, Path]:
+    """Return the required checkpoint and evaluation artifacts for one fidelity stage."""
+    save_dir = Path(save_dir)
+    stem = f"eval_results_trial-{target_trials:08d}"
+    return {
+        "checkpoint manifest": (
+            save_dir / "checkpoints" / f"trial-{target_trials:08d}" / "manifest.json"
+        ),
+        "evaluation pickle": save_dir / f"{stem}.pkl",
+        "evaluation CSV": save_dir / f"{stem}.csv",
+    }
+
+
+def missing_stage_outputs(save_dir: Union[str, Path], target_trials: int) -> list[Path]:
+    """Return required stage artifacts that have not been published."""
+    return [
+        path
+        for path in stage_output_paths(save_dir, target_trials).values()
+        if not path.is_file()
+    ]
+
+
 def select_promoted_config_ids(scores: dict[int, float], reduction_factor: int) -> set[int]:
     """Select the highest-scoring fraction with deterministic config-ID tie breaking."""
     if not scores:
@@ -460,7 +482,6 @@ def write_job_script(
     config_file: Union[str, Path],
     sbatch_options: dict,
     script_args: Optional[Sequence[Union[str, int, Path]]] = None,
-    archive_models: bool = True,
     submit: bool = False,
 ) -> Optional[str]:
     """Write a Slurm job submission script with the specified options and parameters.
@@ -479,9 +500,6 @@ def write_job_script(
         mem_per_cpu, and job_name.
     script_args : sequence, optional
         Additional command-line arguments passed to the training script after ``--config``.
-    archive_models : bool, optional
-        Archive and remove intermediate model exports and fit plots after the job. Disable
-        this for non-final multi-fidelity sessions.
     submit : bool, optional
         Whether to submit the job immediately after writing the script, by default False.
 
@@ -500,21 +518,6 @@ def write_job_script(
     arguments = ["--config", str(config_file), *(script_args or ())]
     argument_array = " ".join(shlex.quote(str(value)) for value in arguments)
 
-    archive_lines = []
-    if archive_models:
-        archive_lines = [
-            "# ARCHIVE INTERMEDIATE OUTPUTS",
-            "echo 'Archiving intermediate models and fit plots...'",
-            f"cd {shlex.quote(str(save_dir))}",
-            "if [ -d models ]; then tar -czf models.tar.gz models && rm -rf models; fi",
-            (
-                "if [ -d fit_plots ]; then tar -czf fit_plots.tar.gz fit_plots "
-                "&& rm -rf fit_plots; fi"
-            ),
-            "cd - >/dev/null",
-            "",
-        ]
-
     submit_script = "\n".join(
         [
             "#!/bin/bash",
@@ -527,6 +530,8 @@ def write_job_script(
             "#SBATCH --account=rrg-j3goals",
             "#SBATCH --constraint='turin'",
             f"#SBATCH --output={save_dir}/%x_slurm-%A.out   # output and error log",
+            "",
+            "set -euo pipefail",
             "",
             "echo '------------------------------------------------------------'",
             "echo 'Running job $SLURM_JOB_NAME'",
@@ -569,7 +574,6 @@ def write_job_script(
             "",
             'time python "$SCRIPTS" "${ARGS[@]}"',
             "",
-            *archive_lines,
             "echo 'All done!'",
             "echo 'Job ended at: `date`'",
             "echo '------------------------------------------------------------'",

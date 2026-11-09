@@ -21,8 +21,10 @@ from tuning_utils import (
     block_until_completed,
     compute_score,
     cumulative_trial_targets,
+    missing_stage_outputs,
     promotion_trial_targets,
     select_promoted_config_ids,
+    stage_output_paths,
     write_job_script,
 )
 
@@ -121,19 +123,8 @@ def _optuna_distributions(handler: ConfigurationHandler) -> dict:
     }
 
 
-def _stage_paths(save_dir: Path, target_trials: int) -> tuple[Path, Path]:
-    checkpoint = save_dir / "checkpoints" / f"trial-{target_trials:08d}"
-    evaluation = save_dir / f"eval_results_trial-{target_trials:08d}.pkl"
-    return checkpoint, evaluation
-
-
 def _stage_complete(save_dir: Path, target_trials: int) -> bool:
-    checkpoint, evaluation = _stage_paths(save_dir, target_trials)
-    return (
-        (checkpoint / "manifest.json").is_file()
-        and evaluation.is_file()
-        and evaluation.with_suffix(".csv").is_file()
-    )
+    return not missing_stage_outputs(save_dir, target_trials)
 
 
 def _write_csv_atomic(rows: list[dict], destination: Path) -> None:
@@ -163,12 +154,12 @@ def _export_study(study: optuna.Study, results_dir: Path) -> None:
 def _submit_stage(
     candidates: list[dict],
     target_trials: int,
-    max_trials: int,
     python_file: Path,
     job_name_prefix: str,
     sbatch_options: dict,
 ) -> None:
     job_ids = []
+    job_ids_by_config = {}
     submitted_config_ids = set()
     for candidate in candidates:
         config_id = candidate["config_id"]
@@ -184,17 +175,33 @@ def _submit_stage(
             candidate["config_file"],
             options,
             script_args=("--target-trials", target_trials),
-            archive_models=target_trials == max_trials,
             submit=True,
         )
         if job_id is None:
             raise RuntimeError(f"Slurm did not return a job ID for config {config_id}.")
         job_ids.append(job_id)
+        job_ids_by_config[config_id] = job_id
     block_until_completed(job_ids)
+
+    checked_config_ids = set()
+    for candidate in candidates:
+        config_id = candidate["config_id"]
+        if config_id in checked_config_ids:
+            continue
+        checked_config_ids.add(config_id)
+        missing = missing_stage_outputs(candidate["save_dir"], target_trials)
+        if missing:
+            job_id = job_ids_by_config.get(config_id, "not submitted")
+            missing_text = ", ".join(str(path) for path in missing)
+            raise RuntimeError(
+                f"Training stage produced incomplete outputs: config={config_id}, "
+                f"target_trials={target_trials}, job_id={job_id}, "
+                f"save_dir={candidate['save_dir']}, missing=[{missing_text}]"
+            )
 
 
 def _score_candidate(candidate: dict, target_trials: int, reward_sample_size: int):
-    _, evaluation = _stage_paths(candidate["save_dir"], target_trials)
+    evaluation = stage_output_paths(candidate["save_dir"], target_trials)["evaluation pickle"]
     return compute_score(
         candidate["save_dir"],
         reward_sample_size,
@@ -228,7 +235,6 @@ def _run_baseline(
         _submit_stage(
             [candidate],
             target,
-            targets[-1],
             python_file,
             job_name_prefix,
             sbatch_options,
@@ -294,7 +300,6 @@ def _run_candidate_group(
         _submit_stage(
             active,
             target,
-            targets[-1],
             python_file,
             job_name_prefix,
             sbatch_options,

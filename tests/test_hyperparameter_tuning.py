@@ -43,6 +43,16 @@ def test_fidelity_targets_and_promotions(tuning_utils):
         tuning_utils.promotion_trial_targets(10_000, 10_000, 2)
 
 
+def test_stage_output_contract_reports_missing_artifacts(tmp_path, tuning_utils):
+    paths = tuning_utils.stage_output_paths(tmp_path, 1_000)
+    assert tuning_utils.missing_stage_outputs(tmp_path, 1_000) == list(paths.values())
+
+    for path in paths.values():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch()
+    assert tuning_utils.missing_stage_outputs(tmp_path, 1_000) == []
+
+
 def test_promotion_is_deterministic_and_keeps_the_best_half(tuning_utils):
     scores = {7: 0.5, 2: 0.9, 5: 0.5, 9: 0.1, 3: 0.8}
     assert tuning_utils.select_promoted_config_ids(scores, 2) == {2, 3, 5}
@@ -135,7 +145,7 @@ def test_worker_checkpoints_before_validation(tmp_path, stage_worker, monkeypatc
     ]
 
 
-def test_slurm_script_passes_stage_target_and_preserves_intermediate_models(
+def test_training_slurm_script_is_strict_and_does_not_archive(
     tmp_path, tuning_utils, monkeypatch
 ):
     save_dir = tmp_path / "run"
@@ -145,7 +155,6 @@ def test_slurm_script_passes_stage_target_and_preserves_intermediate_models(
         tmp_path / "config.yaml",
         {"job_name": "test"},
         script_args=("--target-trials", 1_000),
-        archive_models=False,
     )
     script = (save_dir / "submit.sh").read_text()
     assert "--target-trials 1000" in script
@@ -153,6 +162,7 @@ def test_slurm_script_passes_stage_target_and_preserves_intermediate_models(
     assert "TF_NUM_INTRAOP_THREADS=1" in script
     assert f"WORK_DIR={EXAMPLE_DIR}" in script
     assert 'cd "$WORK_DIR"' in script
+    assert script.index("set -euo pipefail") < script.index('time python "$SCRIPTS"')
     assert "tar -czf" not in script
 
     commands = []
@@ -174,12 +184,9 @@ def test_slurm_script_passes_stage_target_and_preserves_intermediate_models(
         {"job_name": "test"},
         submit=True,
     )
-    final_stage_script = (save_dir / "submit.sh").read_text()
     tuning_utils.block_until_completed([job_id])
 
     assert job_id == "12345"
-    assert "tar -czf models.tar.gz models && rm -rf models" in final_stage_script
-    assert "tar -czf fit_plots.tar.gz fit_plots && rm -rf fit_plots" in final_stage_script
     assert commands[0][0] == "sbatch"
     assert commands[1][0] == "sacct"
 
