@@ -78,6 +78,9 @@ where = ["src"]
 
 [tool.setuptools_scm]
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
 [project.urls]
 Homepage = "https://github.com/AUTODIAL/AutoREC"
 Repository = "https://github.com/AUTODIAL/AutoREC"

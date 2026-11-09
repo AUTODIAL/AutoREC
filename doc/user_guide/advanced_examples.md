@@ -31,8 +31,10 @@ the deterministic CPU requirements in the
 
 [`example/hyperparameter_tuning/`](https://github.com/AUTODIAL/AutoREC/tree/main/example/hyperparameter_tuning)
 contains an Optuna workflow that generates configurations, submits Slurm jobs,
-waits for batches, and scores their outputs. It has extra requirements in its
-own `requirements.txt` and cluster-specific job-script assumptions in
+waits for batches, and scores their outputs. Submitted jobs are recorded so the
+orchestrator can recover after interruption, and terminal candidates are
+archived in separate jobs. It has extra requirements in its own
+`requirements.txt` and cluster-specific job-script assumptions in
 `tuning_utils.py`.
 
 Treat this workflow as a template requiring review for your scheduler,

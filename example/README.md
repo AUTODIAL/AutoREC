@@ -73,14 +73,15 @@ budgets. It supports:
 
 - direct orchestration from a login node;
 - a low-resource Slurm job that runs the orchestrator on a compute node;
-- SSH-routed child-job submission and monitoring;
+- direct child-job submission with restart-safe job tracking;
+- separate terminal-candidate jobs that archive model and fit-plot directories;
 - separate training, validation, and held-out test datasets;
 - rung-level objective and promotion reports.
 
 See [`hyperparameter_tuning/readme.md`](hyperparameter_tuning/readme.md) for configuration,
-cluster requirements, and submission commands. Its dedicated dataset pickle files are local
-and currently ignored by Git, so they must be provided separately in
-`hyperparameter_tuning/data/`.
+recovery behavior, cluster requirements, and submission commands. Its training, validation,
+and held-out test datasets are tracked in `hyperparameter_tuning/data/`, so the complete
+directory can be copied to shared HPC storage.
 
 ## Runtime expectations
 

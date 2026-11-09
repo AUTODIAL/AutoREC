@@ -83,6 +83,10 @@ python runner.py \
 supports both direct login-node execution and clusters that permit job submission from an
 allocated compute node.
 
+By default, a temporary `sacct` failure is retried for one hour. Adjust that behavior with
+`--slurm-poll-seconds` and `--slurm-accounting-timeout`. The monitor accepts a job only when
+Slurm reports both `COMPLETED` and exit code `0:0`.
+
 ## Running the orchestrator as a Slurm job
 
 `runner_job.sh` requests one core, 16 GB of memory, and seven days for the mostly idle
@@ -113,13 +117,43 @@ Before starting a long run, verify these cluster-specific requirements:
    currently set to `default` and `$HOME/autorec_env`.
 
 Cancelling the orchestrator job does not automatically cancel child jobs that it already
-submitted; inspect and cancel those Slurm jobs separately if needed.
+submitted. Their IDs and statuses are retained in `slurm_jobs.json`, and restarting the
+orchestrator reattaches to jobs still recorded as submitted instead of duplicating them.
 
 Run `python runner.py --help` for the complete argument reference. `max-trials` must be
 divisible by `session-trials`. Every geometric promotion budget
 (`grace-trials`, then repeated multiplication by `reduction-factor`) must coincide with a
 session boundary. `agent.num_trials` in the base configuration must equal
 `--session-trials`.
+
+## Restarting an interrupted tuning run
+
+Restart `runner.py` or resubmit `runner_job.sh` with the same target directory, base
+configuration, search space, and budget settings. The workflow then:
+
+1. skips stages whose checkpoint and both rung-specific evaluation files are complete;
+2. reuses registered child jobs whose final Slurm result has not yet been observed;
+3. resumes an incomplete stage from its newest eligible checkpoint; and
+4. resubmits no job that Slurm has confirmed failed unless you explicitly pass
+   `--retry-failed-jobs` (or set `RETRY_FAILED_JOBS=true` in `runner_job.sh`).
+
+Inspect the failed job log and correct its cause before enabling a retry. The registry keeps
+the prior attempt as well as the replacement job ID.
+
+For a run started with an older copy of this example that did not create `slurm_jobs.json`,
+first confirm that all previously submitted child jobs are terminal. The updated runner can
+reuse their completed artifacts, but it cannot discover unregistered jobs that are still
+running. For example:
+
+```bash
+squeue -j 12345,12346,12347 -o "%.18i %.20T %.10M %R"
+sacct -X -j 12345,12346,12347 --format=JobIDRaw,State,ExitCode
+```
+
+Replace those illustrative IDs with the IDs from the earlier runner output. Do not run old
+and updated orchestrators against the same target directory concurrently. These
+orchestration changes do not alter AutoREC checkpoint contents or source hashes, so valid
+checkpoints produced by the same AutoREC source/runtime remain usable.
 
 ## How continuation is kept reproducible
 
@@ -157,7 +191,11 @@ hyperparameter_tuning/
 │   ├── eval_results_trial-00001000.csv
 │   ├── eval_results.pkl
 │   ├── eval_results.csv
-│   └── statistical_analysis.pkl
+│   ├── statistical_analysis.pkl
+│   ├── models.tar.gz
+│   ├── fit_plots.tar.gz
+│   └── .archive_complete
+├── slurm_jobs.json
 ├── optuna_trials.csv
 ├── rung_scores.csv
 ├── optimization_history.png
@@ -171,6 +209,17 @@ pruning status, Optuna trial number, configuration ID, and cumulative budget.
 
 The worker is idempotent for a completed stage. If a checkpoint exists without evaluation
 output, it performs validation without retraining. Slurm failures are reported as errors.
+
+After a candidate is pruned or reaches 10,000 trials, the runner submits a separate,
+low-resource archive job. Promoted candidates are not archived because the next training
+stage may still need their ordinary output directories. The archive job validates temporary
+`models.tar.gz` and `fit_plots.tar.gz` files before removing the corresponding directories,
+and then writes `.archive_complete`. It is safe to rerun after interruption; ambiguous
+pre-existing source/archive combinations fail rather than overwrite data. Checkpoints are
+left unarchived so continuation and inspection remain direct.
+
+`slurm_jobs.json` is written atomically and records training and archive attempts, job IDs,
+script/log paths, terminal states, and exit codes. Keep this file with the result directory.
 
 Early scores can be noisy, and successive halving can discard a configuration that would
 have improved late in training. The grace budget and reduction factor therefore represent a
