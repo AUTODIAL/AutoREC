@@ -86,6 +86,18 @@ def _parse_args() -> argparse.Namespace:
         default=2,
         help="Keep the best ceil(1 / factor) candidates at each promotion rung.",
     )
+    parser.add_argument(
+        "--slurm-poll-seconds",
+        type=_positive_integer,
+        default=60,
+        help="Seconds between Slurm status queries.",
+    )
+    parser.add_argument(
+        "--slurm-accounting-timeout",
+        type=_positive_integer,
+        default=3_600,
+        help="Maximum continuous sacct outage tolerated in seconds.",
+    )
     return parser.parse_args()
 
 
@@ -157,6 +169,7 @@ def _submit_stage(
     python_file: Path,
     job_name_prefix: str,
     sbatch_options: dict,
+    monitor_options: dict,
 ) -> None:
     job_ids = []
     job_ids_by_config = {}
@@ -181,7 +194,7 @@ def _submit_stage(
             raise RuntimeError(f"Slurm did not return a job ID for config {config_id}.")
         job_ids.append(job_id)
         job_ids_by_config[config_id] = job_id
-    block_until_completed(job_ids)
+    block_until_completed(job_ids, **monitor_options)
 
     checked_config_ids = set()
     for candidate in candidates:
@@ -220,6 +233,7 @@ def _run_baseline(
     sbatch_options: dict,
     reward_sample_size: int,
     rung_rows: list[dict],
+    monitor_options: dict,
 ) -> None:
     config_id, config_file, config = handler.write_config(
         copy.deepcopy(handler.base_config), results_dir
@@ -238,6 +252,7 @@ def _run_baseline(
             python_file,
             job_name_prefix,
             sbatch_options,
+            monitor_options,
         )
         final_score, components = _score_candidate(candidate, target, reward_sample_size)
         intermediate_values[target] = float(final_score)
@@ -280,6 +295,7 @@ def _run_candidate_group(
     sbatch_options: dict,
     reward_sample_size: int,
     rung_rows: list[dict],
+    monitor_options: dict,
 ) -> None:
     candidates = []
     for trial in trials:
@@ -303,6 +319,7 @@ def _run_candidate_group(
             python_file,
             job_name_prefix,
             sbatch_options,
+            monitor_options,
         )
         scores = {}
         components_by_trial = {}
@@ -378,6 +395,10 @@ def main() -> None:
     sbatch_options = {"time": "72:00:00", "mem_per_cpu": "12G"}
     reward_sample_size = args.session_trials
     rung_rows = []
+    monitor_options = {
+        "poll_interval": args.slurm_poll_seconds,
+        "accounting_timeout": args.slurm_accounting_timeout,
+    }
 
     print("============================================")
     print("# MULTI-FIDELITY HYPERPARAMETER TUNING #")
@@ -400,6 +421,7 @@ def main() -> None:
         sbatch_options,
         reward_sample_size,
         rung_rows,
+        monitor_options,
     )
     _export_study(study, results_dir)
 
@@ -426,6 +448,7 @@ def main() -> None:
             sbatch_options,
             reward_sample_size,
             rung_rows,
+            monitor_options,
         )
         _export_study(study, results_dir)
 

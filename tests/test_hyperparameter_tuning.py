@@ -173,7 +173,7 @@ def test_training_slurm_script_is_strict_and_does_not_archive(
             return types.SimpleNamespace(
                 returncode=0, stdout="Submitted batch job 12345\n", stderr=""
             )
-        return types.SimpleNamespace(returncode=0, stdout="12345|COMPLETED\n", stderr="")
+        return types.SimpleNamespace(returncode=0, stdout="12345|COMPLETED|0:0\n", stderr="")
 
     monkeypatch.setattr(tuning_utils.subprocess, "run", fake_run)
     monkeypatch.setattr(tuning_utils.time, "sleep", lambda seconds: None)
@@ -196,6 +196,66 @@ def test_training_slurm_script_is_strict_and_does_not_archive(
     assert 'MODULE_SAVELIST_NAME="default"' in wrapper
     assert 'PYTHON_ENV_PATH="$HOME/autorec_env"' in wrapper
     assert 'python runner.py "${RUNNER_ARGUMENTS[@]}"' in wrapper
+    assert '--slurm-poll-seconds "$SLURM_POLL_SECONDS"' in wrapper
+    assert '--slurm-accounting-timeout "$SLURM_ACCOUNTING_TIMEOUT"' in wrapper
+
+
+def test_slurm_monitor_recovers_from_accounting_outage(tuning_utils, monkeypatch):
+    responses = iter(
+        [
+            types.SimpleNamespace(
+                returncode=1,
+                stdout="",
+                stderr="Connection refused",
+            ),
+            types.SimpleNamespace(
+                returncode=0,
+                stdout="12345|RUNNING\n",
+                stderr="",
+            ),
+            types.SimpleNamespace(
+                returncode=0,
+                stdout="12345|COMPLETED|0:0\n",
+                stderr="",
+            ),
+        ]
+    )
+    monkeypatch.setattr(
+        tuning_utils.subprocess, "run", lambda *args, **kwargs: next(responses)
+    )
+    monkeypatch.setattr(tuning_utils.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(tuning_utils.time, "monotonic", lambda: 0.0)
+
+    assert tuning_utils.block_until_completed(
+        ["12345"], poll_interval=1, accounting_timeout=10
+    ) == {"12345": ("COMPLETED", "0:0")}
+
+
+def test_slurm_monitor_rejects_exit_failure_and_accounting_timeout(tuning_utils, monkeypatch):
+    failed_job = types.SimpleNamespace(
+        returncode=0,
+        stdout="12345|COMPLETED|1:0\n",
+        stderr="",
+    )
+    monkeypatch.setattr(tuning_utils.subprocess, "run", lambda *args, **kwargs: failed_job)
+    with pytest.raises(RuntimeError, match="12345=COMPLETED/1:0"):
+        tuning_utils.block_until_completed(["12345"], poll_interval=1)
+
+    calls = {"sacct": 0}
+
+    def unavailable(command, **kwargs):
+        if command[0] == "sacct":
+            calls["sacct"] += 1
+            return types.SimpleNamespace(returncode=1, stdout="", stderr="Connection refused")
+        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    clock = iter([0.0, 11.0])
+    monkeypatch.setattr(tuning_utils.subprocess, "run", unavailable)
+    monkeypatch.setattr(tuning_utils.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(tuning_utils.time, "monotonic", lambda: next(clock))
+    with pytest.raises(RuntimeError, match="status is unknown for: 12345"):
+        tuning_utils.block_until_completed(["12345"], poll_interval=1, accounting_timeout=10)
+    assert calls["sacct"] == 2
 
 
 def test_score_can_use_rung_specific_evaluation_file(tmp_path, tuning_utils):

@@ -31,6 +31,8 @@ MAX_TRIALS=10000
 SESSION_TRIALS=1000
 GRACE_TRIALS=2000
 REDUCTION_FACTOR=2
+SLURM_POLL_SECONDS=60
+SLURM_ACCOUNTING_TIMEOUT=3600
 
 # ENVIRONMENT CONFIGURATION
 MODULE_SAVELIST_NAME="default"
@@ -47,6 +49,8 @@ RUNNER_ARGUMENTS=(
     --session-trials "$SESSION_TRIALS"
     --grace-trials "$GRACE_TRIALS"
     --reduction-factor "$REDUCTION_FACTOR"
+    --slurm-poll-seconds "$SLURM_POLL_SECONDS"
+    --slurm-accounting-timeout "$SLURM_ACCOUNTING_TIMEOUT"
 )
 
 echo '------------------------------------------------------------'

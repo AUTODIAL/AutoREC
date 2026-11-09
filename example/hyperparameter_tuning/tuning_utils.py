@@ -607,7 +607,8 @@ def write_job_script(
 def block_until_completed(
     jobid_list: list,
     poll_interval: int = 60,
-) -> None:
+    accounting_timeout: int = 3_600,
+) -> dict[str, tuple[str, str]]:
     """Block until all jobs reach a terminal Slurm state.
 
     Parameters
@@ -616,26 +617,41 @@ def block_until_completed(
         A list of Slurm job IDs to monitor.
     poll_interval : int, optional
         The interval (in seconds) at which to poll the job status, by default 60 seconds.
+    accounting_timeout : int, optional
+        Maximum continuous ``sacct`` outage tolerated before failing, by default one hour.
+
+    Returns
+    -------
+    dict
+        Final ``(state, exit_code)`` pair for every requested job ID.
     """
     if not jobid_list:
-        return
+        return {}
+    if type(poll_interval) is not int or poll_interval < 1:
+        raise ValueError("poll_interval must be a positive integer.")
+    if type(accounting_timeout) is not int or accounting_timeout < 1:
+        raise ValueError("accounting_timeout must be a positive integer.")
 
     # Convert all job IDs to strings
     jobid_list = list(map(str, jobid_list))
     jobid_str = ",".join(jobid_list)  # This is so that we can check all at once
 
-    # Track completion status of each job
-    completed = {jobid: False for jobid in jobid_list}
+    terminal_results = {}
+    accounting_failure_started = None
 
     # These are a list of terminal states in Slurm
     terminal_states = {
         "COMPLETED",
         "FAILED",
         "CANCELLED",
+        "DEADLINE",
         "TIMEOUT",
         "OUT_OF_MEMORY",
         "NODE_FAIL",
         "PREEMPTED",
+        "REVOKED",
+        "SPECIAL_EXIT",
+        "BOOT_FAIL",
     }
 
     while True:
@@ -643,7 +659,7 @@ def block_until_completed(
             "sacct",
             "-j",
             jobid_str,
-            "--format=JobIDRaw,State",
+            "--format=JobIDRaw,State,ExitCode",
             "--parsable2",
             "--noheader",
         ]
@@ -654,40 +670,71 @@ def block_until_completed(
             check=False,
         )
         if result.returncode:
-            raise RuntimeError(f"Could not query Slurm jobs: {result.stderr.strip()}")
+            now = time.monotonic()
+            if accounting_failure_started is None:
+                accounting_failure_started = now
+            elapsed = now - accounting_failure_started
+            remaining = [jobid for jobid in jobid_list if jobid not in terminal_results]
+            queue_result = subprocess.run(
+                [
+                    "squeue",
+                    "--jobs",
+                    ",".join(remaining),
+                    "--noheader",
+                    "--format=%A|%T",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            active_text = (
+                queue_result.stdout.strip()
+                if queue_result.returncode == 0 and queue_result.stdout.strip()
+                else "active state unavailable"
+            )
+            error = result.stderr.strip() or result.stdout.strip() or "unknown sacct error"
+            print(
+                f"Slurm accounting is unavailable ({elapsed:.0f}s): {error}. "
+                f"squeue: {active_text}"
+            )
+            if elapsed >= accounting_timeout:
+                ids = ", ".join(remaining)
+                raise RuntimeError(
+                    f"Slurm accounting remained unavailable for {elapsed:.0f}s; "
+                    f"job status is unknown for: {ids}. Last sacct error: {error}"
+                )
+            time.sleep(poll_interval)
+            continue
+        accounting_failure_started = None
 
         # Track the *best* (final) state per job
-        job_states = {}
         for line in result.stdout.splitlines():
-            jobid_raw, state = line.split("|")[:2]
-            # Ignore job steps (e.g. 12345.batch)
-            if "." in jobid_raw:
+            columns = line.split("|")
+            if len(columns) < 3:
                 continue
-            job_states[jobid_raw] = state.split()[0].rstrip("+")
+            jobid_raw, state, exit_code = columns[:3]
+            # Ignore job steps (e.g. 12345.batch)
+            if "." in jobid_raw or jobid_raw not in jobid_list:
+                continue
+            state = state.split()[0].rstrip("+")
+            if state in terminal_states and jobid_raw not in terminal_results:
+                terminal_results[jobid_raw] = (state, exit_code)
+                print(f"Job {jobid_raw} finished with state: {state}, exit code: {exit_code}")
 
-        for jobid in completed:
-            if not completed[jobid]:
-                state = job_states.get(jobid)
-                # sacct can lag briefly right after submission
-                if state is None:
-                    continue
-
-                if state in terminal_states:
-                    completed[jobid] = True
-                    print(f"Job {jobid} finished with state: {state}")
-
-        if all(completed.values()):
+        if len(terminal_results) == len(jobid_list):
             print("All jobs have completed.")
-            time.sleep(60)  # ensure files are flushed
             failed = {
-                jobid: state
-                for jobid, state in job_states.items()
-                if jobid in completed and state != "COMPLETED"
+                jobid: result
+                for jobid, result in terminal_results.items()
+                if result != ("COMPLETED", "0:0")
             }
             if failed:
-                details = ", ".join(f"{jobid}={state}" for jobid, state in failed.items())
+                details = ", ".join(
+                    f"{jobid}={state}/{exit_code}"
+                    for jobid, (state, exit_code) in failed.items()
+                )
                 raise RuntimeError(f"One or more Slurm jobs failed: {details}")
-            return
+            return terminal_results
 
         time.sleep(poll_interval)
 
