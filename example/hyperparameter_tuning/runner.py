@@ -5,7 +5,7 @@ Usage:
 ```bash
     $ python runner.py \
         --target-dir ./hyperparameter_tuning \
-        --base-config ${AUTOREC_ROOT}/configs_yaml/examples/environment_agent_config.yaml \
+        --base-config ./base_config.yaml \
         --search-space ./search_space.yaml \
         --num-initial 5 \
         --num-iterations 10 \
@@ -35,7 +35,6 @@ from tuning_utils import (
     block_until_completed,
     compute_score,
 )
-from autorec.factory import AUTOREC_ROOT
 
 # For result visualization analysis
 import matplotlib
@@ -63,7 +62,7 @@ parser.add_argument(
 parser.add_argument(
     "--base-config",
     type=str,
-    default=AUTOREC_ROOT / "configs_yaml" / "examples" / "environment_agent_config.yaml",
+    default="./base_config.yaml",
     help="Base configuration file to use for generating new configs",
 )
 parser.add_argument(
