@@ -238,6 +238,10 @@ def pipeline_builder(
             section_configs["dataprep_training"] = config["dataprep"]
         if "eval" in config["dataprep"]:
             section_configs["dataprep_eval"] = config["dataprep"]["eval"]
+        # Validate that settings in training and evaluation dataprep are consistent
+        _validate_dataprep_config(
+            section_configs["dataprep_training"], section_configs["dataprep_eval"]
+        )
     if "environment" in config:
         if "training" in config["environment"]:
             section_configs["environment_training"] = config["environment"]["training"]
@@ -337,3 +341,49 @@ def _validate_pipeline_config(config):
     # agent section
     if "agent" not in config:
         raise KeyError("The configuration must include an 'agent' section.")
+
+
+def _validate_dataprep_config(training_dataprep_config, eval_dataprep_config):
+    """Perform some validation checks on the dataprep configuration dictionaries.
+
+    The 2 information to check are: frequency_npoints and eis_features
+    If frequency_npoints is not None, then the values need to be the same in both configs.
+    For eis_features, the lists need to be the same in values and order.
+
+    If either case is not satisfied, a ValueError will be raised.
+    """
+    if training_dataprep_config is None or eval_dataprep_config is None:
+        return
+
+    # Check frequency_npoints
+    if "frequency_npoints" in training_dataprep_config:
+        f_npoints_training = training_dataprep_config["frequency_npoints"]
+    else:
+        f_npoints_training = None
+    if "frequency_npoints" in eval_dataprep_config:
+        f_npoints_eval = eval_dataprep_config["frequency_npoints"]
+    else:
+        f_npoints_eval = None
+    if f_npoints_training is not None and f_npoints_eval is not None:
+        if f_npoints_training != f_npoints_eval:
+            raise ValueError(
+                "The 'frequency_npoints' setting in training and evaluation dataprep must be "
+                "consistent."
+            )
+    # Check the eis_features
+    msg = "The 'eis_features' setting in training and evaluation dataprep must be consistent."
+    if "eis_features" in training_dataprep_config:
+        eis_features_training = training_dataprep_config["eis_features"]
+    else:
+        eis_features_training = None
+    if "eis_features" in eval_dataprep_config:
+        eis_features_eval = eval_dataprep_config["eis_features"]
+    else:
+        eis_features_eval = None
+    if eis_features_training is not None and eis_features_eval is not None:
+        if eis_features_training != eis_features_eval:
+            raise ValueError(msg)
+    elif eis_features_training is None and eis_features_eval is not None:
+        raise ValueError(msg)
+    elif eis_features_training is not None and eis_features_eval is None:
+        raise ValueError(msg)
