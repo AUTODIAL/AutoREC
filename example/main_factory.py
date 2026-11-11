@@ -34,7 +34,7 @@ from autorec.utils import save_evaluation_results, set_global_seed
 # This ensures reproducibility across numpy, tensorflow, and python random.
 set_global_seed(42, True)
 
-from autorec.factory import AUTOREC_ROOT, config_reader, environment_and_agent_builder
+from autorec.factory import AUTOREC_ROOT, config_reader, pipeline_builder
 
 
 # THREADING CONFIGURATION
@@ -51,9 +51,7 @@ parser.add_argument(
     "--config",
     "-c",
     type=str,
-    default=str(
-        AUTOREC_ROOT / "configs_yaml" / "examples" / "demo_environment_agent_config.yaml"
-    ),
+    default=str(AUTOREC_ROOT / "configs_yaml" / "examples" / "demo_pipeline_config.yaml"),
     help="Path to the YAML configuration file for the environment and agent.",
 )
 parser.add_argument(
@@ -86,7 +84,7 @@ else:
 # 2. ENVIRONMENT AND AGENT SETUP
 # ============================================================================
 # Build the RL-EIS environment and DDQN agent from YAML configuration.
-env, eval_env, agent = environment_and_agent_builder(CONFIG_FILE)
+dataprep, _, env, eval_env, agent = pipeline_builder(CONFIG_FILE)
 dataset = env.dataset
 
 # action_cap and num_trials are either read from YAML so we can access them here.

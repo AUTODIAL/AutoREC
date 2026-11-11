@@ -1,0 +1,20 @@
+path: ${AUTOREC_ROOT}/data/examples/training_dataset.pkl  # Path to dataset file or folder
+mode: load  # Use "process" to preprocess data, e.g. a folder containing .csv files
+evaluation: false
+
+# For lin-KK preprocessing
+perform_linKK_validation: false
+tol_linKK: 5.0E-2
+
+# For frequency-based interpolation
+frequency_bounds:
+  - null
+  - null
+frequency_npoints: null
+
+# EIS features to include in the flatten_Z representation
+eis_features:
+  - ImZ
+  - phi
+  - mag
+  - nphi
