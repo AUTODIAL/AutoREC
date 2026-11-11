@@ -1,5 +1,6 @@
 from typing import Optional, Dict, Union, Any, Sequence
 from pathlib import Path
+import yaml
 
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -443,7 +444,12 @@ class DDQN_ECM:
 
     def save_model(self, filepath: str | Path, save_format: str = "keras") -> None:
         """
-        Save the trained neural network model to disk for later use.
+        Save the trained neural network model and metadata to disk for later use.
+
+        Notes
+        -----
+        This metadata dictionary is not directly compatible with the factory, but it contains
+        the relevant information for reproducibility and reconstructing the YAML configuration.
 
         Parameters
         ----------
@@ -490,6 +496,11 @@ class DDQN_ECM:
 
         self.model.save(filepath)
         print(f"Model saved to: {filepath}")
+
+        # Save metadata as a yaml file
+        metadata_file = filepath.parent / (filepath.stem + "_metadata.yaml")
+        with open(metadata_file, "w") as f:
+            yaml.dump(self.metadata, f)
 
     def load_model(self, filepath: str | Path) -> None:
         """
@@ -973,7 +984,7 @@ class DDQN_ECM:
         final_time = time.time()
         print(f"Training took {(final_time - initial_time) / 60:.2f} minutes")
 
-        self.model.save(self.model_name)
+        self.save(self.model_name)
         success_rate.to_csv(self.save_dir / "success_rate.csv")
         NN_loss.to_csv(self.save_dir / "NN_loss.csv")
         terminal_states.to_csv(self.save_dir / "terminal_states.csv")
@@ -1841,7 +1852,13 @@ class DDQN_ECM:
 
     @property
     def metadata(self) -> dict:
-        """Return metadata about the agent and its training configuration."""
+        """Return metadata about the agent and its training configuration.
+
+        Notes
+        -----
+        This metadata dictionary is not directly compatible with the factory, but it contains
+        the relevant information for reproducibility and reconstructing the YAML configuration.
+        """
         return {
             "training_env": self.training_env.metadata,
             "eval_env": self.eval_env.metadata,
