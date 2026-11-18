@@ -94,8 +94,8 @@ def test_environment_uses_configured_elements_for_actions(patched_environment):
 
 
 def test_environment_rejects_invalid_elements_and_initial_state(patched_environment):
-    with pytest.raises(ValueError, match="Invalid element 'C'"):
-        patched_environment.EIS_ECM_Env(dataset=make_dataset(), elements=["+", "R", "C"])
+    with pytest.raises(ValueError, match="Invalid element 'B'"):
+        patched_environment.EIS_ECM_Env(dataset=make_dataset(), elements=["+", "R", "B"])
 
     with pytest.raises(ValueError, match="initial_state"):
         patched_environment.EIS_ECM_Env(
