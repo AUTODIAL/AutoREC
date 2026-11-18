@@ -75,12 +75,13 @@ Continue with:
 
 ## Citation
 
-If AutoREC contributes to published work, cite the current preprint:
+If AutoREC contributes to published work, cite the published journal article:
 
-> Ali Jaberi, Yonatan Kurniawan, et al. *AutoREC: A reinforcement learning
-> platform for equivalent circuit model generation*. arXiv:2604.27266 (2026).
+> A. Jaberi, Y. Kurniawan, et al. *AutoREC: A reinforcement learning platform
+> for equivalent circuit model generation*. **Computational Materials Science**
+> 277, 115242 (2027). https://doi.org/10.1016/j.commatsci.2026.115242
 
-See the [paper](https://doi.org/10.48550/arXiv.2604.27266) and
+See the [paper](https://doi.org/10.1016/j.commatsci.2026.115242) and
 [citation guide](https://autodiallab.ca/AutoREC/project/citation.html) for the
 current metadata and BibTeX entry.
 
