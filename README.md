@@ -306,13 +306,14 @@ hidden_layers:
   - type: Dense
     units: 40
     activation: relu
-learning_rate: 0.0005
+optimizer:
+  type: Adam
+  learning_rate: 0.0005
 batch_size: 150
 train_frequency: 5
 update_target_frequency: 1000
 NN_sleep: 1000
 buffer_capacity: 15000
-optimizer_type: adam
 prioritized_replay_alpha: 0.6
 prioritized_replay_eps: 1.0E-6
 initial_beta: 0.4
@@ -334,6 +335,22 @@ hidden_layers:
   - type: Dropout
     rate: 0.2
   - type: LayerNormalization
+```
+
+`optimizer` accepts a configuration for a built-in Keras optimizer, with `learning_rate` set
+to either a number or a nested built-in Keras schedule configuration. Optimizer and schedule
+types are case-sensitive and must match their Keras class names. A pre-initialized optimizer
+object can also be supplied when constructing `DDQN_ECM` directly. For example:
+
+```yaml
+optimizer:
+  type: Adam
+  learning_rate:
+    type: ExponentialDecay
+    initial_learning_rate: 0.0005
+    decay_steps: 1000
+    decay_rate: 0.96
+    staircase: true
 ```
 
 Training recommendations:
@@ -400,8 +417,13 @@ AutoREC/
 |       |-- environment.py          # RL environment for ECM generation
 |       |-- factory/                # Config-driven builders and model construction
 |       |   |-- __init__.py
-|       |   |-- factory.py          # Environment and agent factory
-|       |   `-- model.py            # Keras model construction from config
+|       |   |-- agent.py            # Agent builder
+|       |   |-- dataprep.py         # Data-preparation builder
+|       |   |-- environment.py      # Environment builder
+|       |   |-- model.py            # Keras model construction from config
+|       |   |-- optimizer.py        # Keras optimizer construction from config
+|       |   |-- pipeline.py         # Complete pipeline builder
+|       |   `-- utils.py            # Configuration loading helpers
 |       |-- utils.py                # Shared utilities
 |       |-- runtime.py              # Runtime setup helpers
 |       `-- optimized_data_structures/
