@@ -234,11 +234,7 @@ class EISDataPrep:
             for bound in (lower_bound, upper_bound)
         ):
             raise ValueError("frequency_bounds values must be finite and positive.")
-        if (
-            lower_bound is not None
-            and upper_bound is not None
-            and lower_bound >= upper_bound
-        ):
+        if lower_bound is not None and upper_bound is not None and lower_bound >= upper_bound:
             raise ValueError("frequency_bounds lower bound must be less than the upper bound.")
 
     def _validate_frequency_npoints(self, frequency_npoints):
