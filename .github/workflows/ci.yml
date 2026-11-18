@@ -32,10 +32,6 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      XDG_CACHE_HOME: ${{ runner.temp }}/cache
-      MPLCONFIGDIR: ${{ runner.temp }}/cache/matplotlib
-      PYTHON_JULIAPKG_PROJECT: ${{ runner.temp }}/cache/julia_env
-      JULIA_DEPOT_PATH: ${{ runner.temp }}/cache/julia_depot
       PYTHON_JULIACALL_AUTOLOAD_IPYTHON_EXTENSION: "no"
       TF_CPP_MIN_LOG_LEVEL: "3"
 
@@ -47,6 +43,13 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.10"
+
+      - name: Configure temporary directories
+        run: |
+          echo "XDG_CACHE_HOME=$RUNNER_TEMP/cache" >> "$GITHUB_ENV"
+          echo "MPLCONFIGDIR=$RUNNER_TEMP/cache/matplotlib" >> "$GITHUB_ENV"
+          echo "PYTHON_JULIAPKG_PROJECT=$RUNNER_TEMP/cache/julia_env" >> "$GITHUB_ENV"
+          echo "JULIA_DEPOT_PATH=$RUNNER_TEMP/cache/julia_depot" >> "$GITHUB_ENV"
 
       - name: Install package and test dependencies
         run: |

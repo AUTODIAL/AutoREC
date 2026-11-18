@@ -228,6 +228,18 @@ class EISDataPrep:
                 "frequency_bounds must be a tuple/list of two elements: "
                 "(lower_bound, upper_bound)"
             )
+        lower_bound, upper_bound = frequency_bounds
+        if any(
+            bound is not None and (not np.isfinite(bound) or bound <= 0)
+            for bound in (lower_bound, upper_bound)
+        ):
+            raise ValueError("frequency_bounds values must be finite and positive.")
+        if (
+            lower_bound is not None
+            and upper_bound is not None
+            and lower_bound >= upper_bound
+        ):
+            raise ValueError("frequency_bounds lower bound must be less than the upper bound.")
 
     def _validate_frequency_npoints(self, frequency_npoints):
         """

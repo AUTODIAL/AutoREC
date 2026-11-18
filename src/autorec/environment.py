@@ -147,10 +147,10 @@ class EIS_ECM_Env:
 
         # Available circuit elements for GEP chromosome representation
         for el in elements:
-            if el not in ["+", "/", "R", "L", "P"]:
+            if el not in ["+", "/", "R", "L", "P", "C"]:
                 raise ValueError(
                     f"Invalid element '{el}' in elements list. "
-                    "Allowed elements are: '+', '/', 'R', 'L', 'P'"
+                    "Allowed elements are: '+', '/', 'R', 'L', 'P', 'C'"
                 )
         if "R" not in elements:
             # Ensure that R is always included for valid circuits, because latter methods
@@ -166,7 +166,9 @@ class EIS_ECM_Env:
         self.ELEMENTS = elements
         self.ELEMENTS_EXTENDED = self.ELEMENTS + ["X"]
         self._operator = [element for element in self.ELEMENTS if element in ["+", "/"]]
-        self._terminal = [element for element in self.ELEMENTS if element in ["R", "L", "P"]]
+        self._terminal = [
+            element for element in self.ELEMENTS if element in ["R", "L", "P", "C"]
+        ]
 
         # Random seed for reproducibility
         self.seed = seed
