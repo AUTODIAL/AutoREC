@@ -22,6 +22,28 @@
     border-radius: 0.3rem;
 }
 
+.content a.reference.download {
+    display: inline-block;
+    padding: 0.45rem 0.8rem;
+    border: 1px solid var(--color-brand-primary);
+    border-radius: 0.3rem;
+    color: var(--color-brand-content);
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.content a.reference.download:hover {
+    color: var(--color-background-primary);
+    background: var(--color-brand-primary);
+}
+
+.content a.reference.download code {
+    padding: 0;
+    color: inherit;
+    font: inherit;
+    background: transparent;
+}
+
 a:focus-visible,
 button:focus-visible,
 input:focus-visible {

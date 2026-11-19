@@ -5,8 +5,30 @@ AutoREC's factory accepts a YAML file or Python dictionary with `dataprep`,
 arguments to the corresponding AutoREC class, with a few factory-specific rules
 described below.
 
-Start from `configs_yaml/examples/demo_pipeline_config.yaml` in the repository
-and keep experiment-specific copies outside the tracked example.
+For a short, runnable example, start from
+`configs_yaml/examples/demo_pipeline_config.yaml` in the repository. For a
+complete starting point, use one of the downloadable templates below and keep
+experiment-specific copies outside the tracked examples.
+
+## Downloadable templates
+
+The single-dataset template exposes every AutoREC-defined pipeline option in a
+flat `dataprep`, `environment`, and `agent` layout:
+
+{download}`Download the complete single-dataset template <../../configs_yaml/examples/full_pipeline_config.yaml>`
+
+For experiments with distinct training and evaluation data, use the nested
+template. It exposes the same complete option set independently for the two
+data-preparation and environment sections:
+
+{download}`Download the complete training/evaluation template <../../configs_yaml/examples/training_eval_pipeline_config.yaml>`
+
+```{note}
+The training/evaluation template expects
+`${AUTOREC_ROOT}/data/examples/test_dataset.pkl`. This file is not distributed
+with AutoREC; provide an evaluation dataset at that path or update the template
+before running it.
+```
 
 ## Pipeline structure
 
@@ -142,6 +164,24 @@ and changing training behavior.
 
 If `action_cap` is `null`, evaluation must receive an explicit `max_actions`
 argument or CLI `--max-actions` value.
+
+## Complete option reference
+
+The listing below is included directly from the downloadable single-dataset
+template, so the displayed configuration and downloaded file remain identical.
+It covers all AutoREC-defined pipeline options. Keras layer, optimizer, and
+learning-rate schedule dictionaries remain extensible and may accept additional
+Keras-specific parameters.
+
+```{literalinclude} ../../configs_yaml/examples/full_pipeline_config.yaml
+:language: yaml
+:caption: Complete single-dataset pipeline configuration
+```
+
+The training/evaluation download applies the same data-preparation and
+environment option sets under separate `training` and `eval` subsections. The
+factory supplies `dataset`, `training_env`, and `eval_env`, so those keys are
+intentionally absent from the templates.
 
 ## Configuration validation
 
