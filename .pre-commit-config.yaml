@@ -8,6 +8,8 @@ repos:
       - id: check-yaml
       - id: check-toml
       - id: check-added-large-files
+        # Curated demonstration datasets are intentional repository artifacts.
+        exclude: ^data/examples/(training|test)_dataset\.pkl$
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.15.14

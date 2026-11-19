@@ -1,8 +1,7 @@
 # Comprehensive AutoREC pipeline template with separate training and evaluation data.
 #
 # Keep the feature representation and model-shaping environment settings compatible
-# across both splits. The evaluation dataset path below must exist before this
-# configuration can be used.
+# across both splits. The bundled datasets are demonstration inputs, not benchmarks.
 
 dataprep:
   training:
@@ -30,7 +29,7 @@ dataprep:
       - nphi
 
   eval:
-    # This file is not bundled with AutoREC; provide it before running the pipeline.
+    # Bundled demonstration evaluation dataset
     path: ${AUTOREC_ROOT}/data/examples/test_dataset.pkl
     mode: load
     evaluation: true  # Require true_circuit labels for evaluation

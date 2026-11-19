@@ -39,9 +39,9 @@ documents its arguments and output layout.
 
 Tracked configurations under
 [`configs_yaml/examples/`](https://github.com/AUTODIAL/AutoREC/tree/main/configs_yaml/examples)
-are starting points. The repository also includes one small processed dataset
-and one trained model for functional walkthroughs. They are not benchmark
-datasets or universal pretrained models.
+are starting points. The repository also includes small processed training and
+evaluation datasets and one trained model for functional walkthroughs. They are
+not benchmark datasets or universal pretrained models.
 
 Keep generated runs outside tracked example directories, record the exact
 configuration used, and review {doc}`models and results <models_and_results>`

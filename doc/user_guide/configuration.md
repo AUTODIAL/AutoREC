@@ -24,10 +24,11 @@ data-preparation and environment sections:
 {download}`Download the complete training/evaluation template <../../configs_yaml/examples/training_eval_pipeline_config.yaml>`
 
 ```{note}
-The training/evaluation template expects
-`${AUTOREC_ROOT}/data/examples/test_dataset.pkl`. This file is not distributed
-with AutoREC; provide an evaluation dataset at that path or update the template
-before running it.
+The training/evaluation template uses the bundled
+`${AUTOREC_ROOT}/data/examples/test_dataset.pkl` as its evaluation input. The
+bundled datasets support functional demonstrations; they are not benchmarks for
+scientific generalization. Replace them with appropriately separated data for
+an actual experiment.
 ```
 
 ## Pipeline structure

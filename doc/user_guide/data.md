@@ -78,6 +78,22 @@ Validation checks representative types and required columns. It does not prove
 data provenance, units, physical validity, or that a dataset is appropriate for
 a particular experiment.
 
+## Bundled demonstration datasets
+
+AutoREC includes two processed pickle files for documentation and functional
+walkthroughs:
+
+- `data/examples/training_dataset.pkl` provides the demonstration training
+  input.
+- `data/examples/test_dataset.pkl` provides a distinct demonstration evaluation
+  input with `true_circuit` labels.
+
+These files make the example configurations usable without preprocessing a new
+dataset. They are not benchmark datasets, and results on them do not establish
+generalization to experimental EIS data. The repository does not currently
+include their raw source spectra or a generation script, so use separately
+prepared, provenance-tracked data for scientific studies.
+
 ## Save and reload processed data
 
 Prefer pickle for processed datasets because array and complex-valued columns
