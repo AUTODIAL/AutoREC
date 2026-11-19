@@ -16,11 +16,13 @@ venv/
 env/
 ENV/
 .conda/
+/.venv-docs/
 .ipynb_checkpoints/
 
 # Packaging/build
 build/
 dist/
+/doc/_build/
 *.egg-info/
 .eggs/
 
@@ -60,6 +62,7 @@ mlruns/
 # Large binary artifacts
 *.pkl
 !data/examples/training_dataset.pkl
+!data/examples/test_dataset.pkl
 *.pickle
 *.h5
 *.keras

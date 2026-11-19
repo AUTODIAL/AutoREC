@@ -1,0 +1,111 @@
+# Comprehensive AutoREC pipeline configuration template.
+#
+# This template uses one dataset and one environment. See the configuration
+# guide for the alternative training/evaluation subsection layout. Review the
+# output path and training duration before starting a run.
+
+dataprep:
+  # Dataset input and preprocessing
+  path: ${AUTOREC_ROOT}/data/examples/training_dataset.pkl
+  mode: load  # "load" for processed .pkl/.pickle/.csv; "process" for raw CSV folders
+  evaluation: false  # Require true_circuit labels when true
+  output: null  # Optional path at which to save the prepared DataFrame as a pickle
+
+  # Linear Kramers-Kronig preprocessing
+  perform_linKK_validation: false
+  tol_linKK: 5.0E-2
+
+  # Frequency interpolation; null bounds use the available minimum/maximum
+  frequency_bounds:
+    - null
+    - null
+  frequency_npoints: null  # null preserves the input point count
+
+  # Features concatenated to form flatten_Z
+  eis_features:
+    - ImZ
+    - phi
+    - mag
+    - nphi
+
+environment:
+  # dataset is supplied by dataprep and must not be repeated here
+  elements:
+    - "+"  # Series operator
+    - "/"  # Parallel operator
+    - R
+    - L
+    - P
+  initial_state:
+    - +RRRRRR
+    - ++RRRRRR
+    - +++RRRRRR
+  seed: 42
+  chromosome_HEAD_len: 10
+
+  # Circuit-fit cache
+  cache_enabled: true
+  cache_capacity: 20000
+  cache_type: lru  # "lru" or "clock"
+
+agent:
+  # Results and model exports
+  save_dir: ./autorec_output
+  save_start: 0
+  save_frequency: 100
+
+  # Episode and reproducibility settings
+  action_cap: null  # null derives the cap from the chromosome dimensions
+  random_seed: 42
+  episodes_trial: 1
+  num_trials: 50  # Increase only after validating the complete pipeline
+  gamma: 0.99
+  continuous_deadloop: 2
+  latent_deadloop: 4
+  invalid_terminals: false
+
+  # Epsilon-greedy exploration
+  initial_epsilon: 1.0
+  epsilon_min: 0.1
+  epsilon_decay: 0.99968
+  start_decay: 10
+
+  # Retained for compatibility; currently inactive in the reward calculation
+  bayesian: false
+
+  # Neural-network source. A non-null model path takes precedence over hidden_layers.
+  model: null
+  hidden_layers:
+    - type: Dense
+      units: 40
+      activation: relu
+    - type: Dense
+      units: 40
+      activation: relu
+
+  # DDQN optimization
+  optimizer:
+    type: Adam
+    learning_rate: 0.0005
+    # A schedule can replace the scalar learning_rate, for example:
+    # learning_rate:
+    #   type: ExponentialDecay
+    #   initial_learning_rate: 0.0005
+    #   decay_steps: 1000
+    #   decay_rate: 0.96
+    #   staircase: true
+  batch_size: 150
+  train_frequency: 5
+  gradient_steps: 1
+  update_target_frequency: 1000
+  NN_sleep: 1000
+  buffer_capacity: 15000
+
+  # Prioritized replay and importance-sampling correction
+  prioritized_replay_alpha: 0.6
+  prioritized_replay_eps: 1.0E-6
+  initial_beta: 0.4
+  beta_jump: 1.06
+  start_jump: null  # null derives the start from num_trials
+  anneal_fraction: null  # null derives the annealing fraction from num_trials
+  final_beta: 0.7

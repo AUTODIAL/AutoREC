@@ -1,0 +1,56 @@
+/* Retain Furo's system fonts and responsive layout. */
+.sidebar-logo {
+    width: 10rem;
+    max-width: 100%;
+    height: auto;
+}
+
+.sidebar-brand-text {
+    font-size: 1.25rem;
+}
+
+.sidebar-tree .reference {
+    overflow-wrap: anywhere;
+    white-space: normal;
+}
+
+.content {
+    line-height: 1.65;
+}
+
+.highlight {
+    border-radius: 0.3rem;
+}
+
+.content a.reference.download {
+    display: inline-block;
+    padding: 0.45rem 0.8rem;
+    border: 1px solid var(--color-brand-primary);
+    border-radius: 0.3rem;
+    color: var(--color-brand-content);
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.content a.reference.download:hover {
+    color: var(--color-background-primary);
+    background: var(--color-brand-primary);
+}
+
+.content a.reference.download code {
+    padding: 0;
+    color: inherit;
+    font: inherit;
+    background: transparent;
+}
+
+a:focus-visible,
+button:focus-visible,
+input:focus-visible {
+    outline: 2px solid var(--color-brand-primary);
+    outline-offset: 3px;
+}
+
+button.copybtn:focus-visible {
+    opacity: 1;
+}
