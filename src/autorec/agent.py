@@ -1,6 +1,7 @@
 from typing import Optional, Dict, Union, Any, Sequence
 from pathlib import Path
 from dataclasses import dataclass, field
+import yaml
 
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -356,6 +357,8 @@ class DDQN_ECM:
         self.model_dir.mkdir(exist_ok=True)
 
         if hidden_layers is None:
+            print("No hidden_layers provided. Using default hidden layers configuration:")
+            print("2 hidden dense layers, each with 40 units and ReLU activation.")
             self.hidden_layers = [config.copy() for config in default_hidden_layers]
         else:
             self.hidden_layers = hidden_layers
@@ -516,7 +519,12 @@ class DDQN_ECM:
 
     def save_model(self, filepath: str | Path, save_format: str = "keras") -> None:
         """
-        Save the trained neural network model to disk for later use.
+        Save the trained neural network model and metadata to disk for later use.
+
+        Notes
+        -----
+        This metadata dictionary is not directly compatible with the factory, but it contains
+        the relevant information for reproducibility and reconstructing the YAML configuration.
 
         Parameters
         ----------
@@ -563,6 +571,11 @@ class DDQN_ECM:
 
         self.model.save(filepath)
         print(f"Model saved to: {filepath}")
+
+        # Save metadata as a yaml file
+        metadata_file = filepath.parent / (filepath.stem + "_metadata.yaml")
+        with open(metadata_file, "w") as f:
+            yaml.dump(self.metadata, f)
 
     def load_model(self, filepath: str | Path) -> None:
         """
@@ -2073,7 +2086,13 @@ class DDQN_ECM:
 
     @property
     def metadata(self) -> dict:
-        """Return metadata about the agent and its training configuration."""
+        """Return metadata about the agent and its training configuration.
+
+        Notes
+        -----
+        This metadata dictionary is not directly compatible with the factory, but it contains
+        the relevant information for reproducibility and reconstructing the YAML configuration.
+        """
         return {
             "training_env": self.training_env.metadata,
             "eval_env": self.eval_env.metadata,
