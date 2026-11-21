@@ -101,14 +101,9 @@ def test_evaluation_results_are_rung_specific_and_refresh_latest(tmp_path, stage
     assert not list(tmp_path.glob(".*.tmp"))
 
 
-def test_worker_checkpoints_before_validation(tmp_path, stage_worker, monkeypatch):
-    save_dir = tmp_path / "run"
-    config_file = tmp_path / "config.yaml"
-    config_file.write_text(
-        yaml.safe_dump(
-            {"agent": {"num_trials": 1_000, "random_seed": 42, "save_dir": str(save_dir)}}
-        )
-    )
+def test_worker_trains_or_resumes_to_full_budget_before_validation(
+    tmp_path, stage_worker, monkeypatch
+):
     calls = []
 
     class FakeAgent:
@@ -121,7 +116,7 @@ def test_worker_checkpoints_before_validation(tmp_path, stage_worker, monkeypatc
             (checkpoint_dir / f"trial-{self.completed_trials:08d}").mkdir(parents=True)
 
         def eval_all_eis(self, *, max_actions, verbose, use_eval_env):
-            assert (save_dir / "checkpoints" / "trial-00001000").is_dir()
+            assert self.completed_trials == 10_000
             calls.append(("evaluate", max_actions, verbose, use_eval_env))
             return pd.DataFrame({"found_solution": [False]})
 
@@ -150,16 +145,32 @@ def test_worker_checkpoints_before_validation(tmp_path, stage_worker, monkeypatc
     )
     monkeypatch.setattr(stage_worker, "_set_evaluation_seed", lambda seed: None)
 
-    stage_worker.run_stage(config_file, 1_000, 42)
-    stage_worker.run_stage(config_file, 2_000, 42)
+    fresh_dir = tmp_path / "fresh"
+    fresh_config = tmp_path / "fresh.yaml"
+    fresh_config.write_text(
+        yaml.safe_dump(
+            {"agent": {"num_trials": 10_000, "random_seed": 42, "save_dir": str(fresh_dir)}}
+        )
+    )
+    stage_worker.run_stage(fresh_config, None, 42)
+
+    resumed_dir = tmp_path / "resumed"
+    resumed_config = tmp_path / "resumed.yaml"
+    resumed_config.write_text(
+        yaml.safe_dump(
+            {"agent": {"num_trials": 10_000, "random_seed": 42, "save_dir": str(resumed_dir)}}
+        )
+    )
+    (resumed_dir / "checkpoints" / "trial-00003000").mkdir(parents=True)
+    stage_worker.run_stage(resumed_config, None, 42)
 
     assert calls == [
         ("seed", 42, True),
-        ("train", 1_000),
+        ("train", 10_000),
         ("evaluate", 24, True, True),
         ("configure_resume_runtime",),
-        ("restore", "trial-00001000", 1_000),
-        ("train", 1_000),
+        ("restore", "trial-00003000", 10_000),
+        ("train", 7_000),
         ("evaluate", 24, True, True),
     ]
 
