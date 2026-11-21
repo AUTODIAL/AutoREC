@@ -4,8 +4,25 @@ from __future__ import annotations
 
 import argparse
 import copy
+import os
 from pathlib import Path
 from pprint import pprint
+
+# Keep the login-node orchestrator lightweight. These limits must be applied before
+# importing numerical libraries, AutoEIS, or TensorFlow through tuning_utils.
+THREAD_LIMIT_VARIABLES = (
+    "OMP_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "BLIS_NUM_THREADS",
+    "NUMEXPR_NUM_THREADS",
+    "NUMEXPR_MAX_THREADS",
+    "TF_NUM_INTRAOP_THREADS",
+    "TF_NUM_INTEROP_THREADS",
+    "JULIA_NUM_THREADS",
+)
+for variable in THREAD_LIMIT_VARIABLES:
+    os.environ[variable] = "1"
 
 import matplotlib
 

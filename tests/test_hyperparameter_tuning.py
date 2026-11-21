@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 from pathlib import Path
 import sys
 import types
@@ -132,6 +133,20 @@ def test_worker_trains_or_resumes_to_full_budget_before_validation(
 def test_runner_submits_only_incomplete_full_budget_candidates(
     tmp_path, tuning_utils, monkeypatch
 ):
+    thread_variables = (
+        "OMP_NUM_THREADS",
+        "OPENBLAS_NUM_THREADS",
+        "MKL_NUM_THREADS",
+        "BLIS_NUM_THREADS",
+        "NUMEXPR_NUM_THREADS",
+        "NUMEXPR_MAX_THREADS",
+        "TF_NUM_INTRAOP_THREADS",
+        "TF_NUM_INTEROP_THREADS",
+        "JULIA_NUM_THREADS",
+    )
+    for variable in thread_variables:
+        monkeypatch.setenv(variable, "8")
+
     optuna = types.ModuleType("optuna")
     optuna_visualization = types.ModuleType("optuna.visualization")
     optuna_matplotlib = types.ModuleType("optuna.visualization.matplotlib")
@@ -140,6 +155,8 @@ def test_runner_submits_only_incomplete_full_budget_candidates(
     monkeypatch.setitem(sys.modules, "optuna.visualization.matplotlib", optuna_matplotlib)
     monkeypatch.setitem(sys.modules, "tuning_utils", tuning_utils)
     runner = _load_module("hyperparameter_tuning_runner", "runner.py")
+    assert runner.THREAD_LIMIT_VARIABLES == thread_variables
+    assert all(os.environ[variable] == "1" for variable in thread_variables)
 
     complete_dir = tmp_path / "complete"
     incomplete_dir = tmp_path / "incomplete"
