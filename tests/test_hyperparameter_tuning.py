@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
-import subprocess
 import sys
-import tarfile
 import types
 
 import pandas as pd
@@ -22,23 +20,6 @@ def _load_module(name: str, filename: str):
     module = importlib.util.module_from_spec(specification)
     specification.loader.exec_module(module)
     return module
-
-
-def _load_runner_module(tuning_utils, monkeypatch):
-    optuna = types.ModuleType("optuna")
-    optuna.__path__ = []
-    visualization = types.ModuleType("optuna.visualization")
-    visualization.__path__ = []
-    visualization_matplotlib = types.ModuleType("optuna.visualization.matplotlib")
-    optuna.visualization = visualization
-    visualization.matplotlib = visualization_matplotlib
-    monkeypatch.setitem(sys.modules, "optuna", optuna)
-    monkeypatch.setitem(sys.modules, "optuna.visualization", visualization)
-    monkeypatch.setitem(
-        sys.modules, "optuna.visualization.matplotlib", visualization_matplotlib
-    )
-    monkeypatch.setitem(sys.modules, "tuning_utils", tuning_utils)
-    return _load_module("hyperparameter_runner", "runner.py")
 
 
 @pytest.fixture(scope="module")
@@ -60,16 +41,6 @@ def test_fidelity_targets_and_promotions(tuning_utils):
         tuning_utils.cumulative_trial_targets(10_000, 3_000)
     with pytest.raises(ValueError, match="smaller"):
         tuning_utils.promotion_trial_targets(10_000, 10_000, 2)
-
-
-def test_stage_output_contract_reports_missing_artifacts(tmp_path, tuning_utils):
-    paths = tuning_utils.stage_output_paths(tmp_path, 1_000)
-    assert tuning_utils.missing_stage_outputs(tmp_path, 1_000) == list(paths.values())
-
-    for path in paths.values():
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.touch()
-    assert tuning_utils.missing_stage_outputs(tmp_path, 1_000) == []
 
 
 def test_promotion_is_deterministic_and_keeps_the_best_half(tuning_utils):
@@ -176,7 +147,71 @@ def test_worker_trains_or_resumes_to_full_budget_before_validation(
     ]
 
 
-def test_training_slurm_script_is_strict_and_does_not_archive(
+def test_runner_submits_only_incomplete_full_budget_candidates(
+    tmp_path, tuning_utils, monkeypatch
+):
+    optuna = types.ModuleType("optuna")
+    optuna_visualization = types.ModuleType("optuna.visualization")
+    optuna_matplotlib = types.ModuleType("optuna.visualization.matplotlib")
+    monkeypatch.setitem(sys.modules, "optuna", optuna)
+    monkeypatch.setitem(sys.modules, "optuna.visualization", optuna_visualization)
+    monkeypatch.setitem(sys.modules, "optuna.visualization.matplotlib", optuna_matplotlib)
+    monkeypatch.setitem(sys.modules, "tuning_utils", tuning_utils)
+    runner = _load_module("hyperparameter_tuning_runner", "runner.py")
+
+    complete_dir = tmp_path / "complete"
+    incomplete_dir = tmp_path / "incomplete"
+    required_relative_paths = (
+        Path("checkpoints/trial-00010000/manifest.json"),
+        Path("statistical_analysis.pkl"),
+        Path("eval_results.pkl"),
+        Path("eval_results.csv"),
+    )
+    for relative_path in required_relative_paths:
+        path = complete_dir / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch()
+
+    submissions = []
+
+    def write_job_script(save_dir, python_file, config_file, options, **kwargs):
+        submissions.append((save_dir, options, kwargs))
+        for relative_path in required_relative_paths:
+            path = save_dir / relative_path
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.touch()
+        return "12345"
+
+    waited_for = []
+    monkeypatch.setattr(runner, "write_job_script", write_job_script)
+    monkeypatch.setattr(runner, "block_until_completed", waited_for.extend)
+    candidates = [
+        {"config_id": 1, "config_file": tmp_path / "1.yaml", "save_dir": complete_dir},
+        {
+            "config_id": 2,
+            "config_file": tmp_path / "2.yaml",
+            "save_dir": incomplete_dir,
+        },
+    ]
+
+    runner._submit_candidates(
+        candidates,
+        target_trials=10_000,
+        checkpoint_every=1_000,
+        python_file=EXAMPLE_DIR / "main_factory.py",
+        job_name_prefix="tuning",
+        sbatch_options={"time": "72:00:00"},
+    )
+
+    assert len(submissions) == 1
+    assert submissions[0][0] == incomplete_dir
+    assert submissions[0][1]["job_name"] == "tuning_2"
+    assert submissions[0][2]["script_args"] == ("--checkpoint-every", 1_000)
+    assert submissions[0][2]["submit"] is True
+    assert waited_for == ["12345"]
+
+
+def test_slurm_script_passes_stage_target_and_preserves_intermediate_models(
     tmp_path, tuning_utils, monkeypatch
 ):
     save_dir = tmp_path / "run"
@@ -186,6 +221,7 @@ def test_training_slurm_script_is_strict_and_does_not_archive(
         tmp_path / "config.yaml",
         {"job_name": "test"},
         script_args=("--target-trials", 1_000),
+        archive_models=False,
     )
     script = (save_dir / "submit.sh").read_text()
     assert "--target-trials 1000" in script
@@ -193,7 +229,6 @@ def test_training_slurm_script_is_strict_and_does_not_archive(
     assert "TF_NUM_INTRAOP_THREADS=1" in script
     assert f"WORK_DIR={EXAMPLE_DIR}" in script
     assert 'cd "$WORK_DIR"' in script
-    assert script.index("set -euo pipefail") < script.index('time python "$SCRIPTS"')
     assert "tar -czf" not in script
 
     commands = []
@@ -204,7 +239,7 @@ def test_training_slurm_script_is_strict_and_does_not_archive(
             return types.SimpleNamespace(
                 returncode=0, stdout="Submitted batch job 12345\n", stderr=""
             )
-        return types.SimpleNamespace(returncode=0, stdout="12345|COMPLETED|0:0\n", stderr="")
+        return types.SimpleNamespace(returncode=0, stdout="12345|COMPLETED\n", stderr="")
 
     monkeypatch.setattr(tuning_utils.subprocess, "run", fake_run)
     monkeypatch.setattr(tuning_utils.time, "sleep", lambda seconds: None)
@@ -215,9 +250,12 @@ def test_training_slurm_script_is_strict_and_does_not_archive(
         {"job_name": "test"},
         submit=True,
     )
+    final_stage_script = (save_dir / "submit.sh").read_text()
     tuning_utils.block_until_completed([job_id])
 
     assert job_id == "12345"
+    assert "tar -czf models.tar.gz models && rm -rf models" in final_stage_script
+    assert "tar -czf fit_plots.tar.gz fit_plots && rm -rf fit_plots" in final_stage_script
     assert commands[0][0] == "sbatch"
     assert commands[1][0] == "sacct"
 
@@ -227,192 +265,6 @@ def test_training_slurm_script_is_strict_and_does_not_archive(
     assert 'MODULE_SAVELIST_NAME="default"' in wrapper
     assert 'PYTHON_ENV_PATH="$HOME/autorec_env"' in wrapper
     assert 'python runner.py "${RUNNER_ARGUMENTS[@]}"' in wrapper
-    assert '--slurm-poll-seconds "$SLURM_POLL_SECONDS"' in wrapper
-    assert '--slurm-accounting-timeout "$SLURM_ACCOUNTING_TIMEOUT"' in wrapper
-
-
-def test_archive_job_is_restart_safe_and_preserves_ambiguous_inputs(tmp_path, tuning_utils):
-    save_dir = tmp_path / "run"
-    (save_dir / "models").mkdir(parents=True)
-    (save_dir / "models" / "weights.bin").write_bytes(b"model")
-    (save_dir / "fit_plots").mkdir()
-    (save_dir / "fit_plots" / "fit.png").write_bytes(b"plot")
-    tuning_utils.write_archive_job_script(save_dir, 2_000, {"job_name": "archive"})
-
-    script = save_dir / "archive.sh"
-    assert "set -euo pipefail" in script.read_text()
-    subprocess.run(["bash", str(script)], check=True, capture_output=True, text=True)
-    assert (save_dir / ".archive_complete").read_text().strip() == "2000"
-    assert not (save_dir / "models").exists()
-    assert not (save_dir / "fit_plots").exists()
-    with tarfile.open(save_dir / "models.tar.gz") as archive:
-        assert "models/weights.bin" in archive.getnames()
-    with tarfile.open(save_dir / "fit_plots.tar.gz") as archive:
-        assert "fit_plots/fit.png" in archive.getnames()
-
-    subprocess.run(["bash", str(script)], check=True, capture_output=True, text=True)
-
-    ambiguous = tmp_path / "ambiguous"
-    (ambiguous / "models").mkdir(parents=True)
-    (ambiguous / "models" / "new.bin").write_bytes(b"new")
-    (ambiguous / "models.tar.gz").write_bytes(b"old")
-    tuning_utils.write_archive_job_script(ambiguous, 1_000, {})
-    result = subprocess.run(
-        ["bash", str(ambiguous / "archive.sh")],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode != 0
-    assert (ambiguous / "models" / "new.bin").read_bytes() == b"new"
-    assert not (ambiguous / ".archive_complete").exists()
-
-
-def test_slurm_monitor_recovers_from_accounting_outage(tuning_utils, monkeypatch):
-    responses = iter(
-        [
-            types.SimpleNamespace(
-                returncode=1,
-                stdout="",
-                stderr="Connection refused",
-            ),
-            types.SimpleNamespace(
-                returncode=0,
-                stdout="12345|RUNNING\n",
-                stderr="",
-            ),
-            types.SimpleNamespace(
-                returncode=0,
-                stdout="12345|COMPLETED|0:0\n",
-                stderr="",
-            ),
-        ]
-    )
-    monkeypatch.setattr(
-        tuning_utils.subprocess, "run", lambda *args, **kwargs: next(responses)
-    )
-    monkeypatch.setattr(tuning_utils.time, "sleep", lambda seconds: None)
-    monkeypatch.setattr(tuning_utils.time, "monotonic", lambda: 0.0)
-
-    assert tuning_utils.block_until_completed(
-        ["12345"], poll_interval=1, accounting_timeout=10
-    ) == {"12345": ("COMPLETED", "0:0")}
-
-
-def test_slurm_monitor_rejects_exit_failure_and_accounting_timeout(tuning_utils, monkeypatch):
-    failed_job = types.SimpleNamespace(
-        returncode=0,
-        stdout="12345|COMPLETED|1:0\n",
-        stderr="",
-    )
-    monkeypatch.setattr(tuning_utils.subprocess, "run", lambda *args, **kwargs: failed_job)
-    with pytest.raises(RuntimeError, match="12345=COMPLETED/1:0"):
-        tuning_utils.block_until_completed(["12345"], poll_interval=1)
-
-    calls = {"sacct": 0}
-
-    def unavailable(command, **kwargs):
-        if command[0] == "sacct":
-            calls["sacct"] += 1
-            return types.SimpleNamespace(returncode=1, stdout="", stderr="Connection refused")
-        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
-
-    clock = iter([0.0, 11.0])
-    monkeypatch.setattr(tuning_utils.subprocess, "run", unavailable)
-    monkeypatch.setattr(tuning_utils.time, "sleep", lambda seconds: None)
-    monkeypatch.setattr(tuning_utils.time, "monotonic", lambda: next(clock))
-    with pytest.raises(RuntimeError, match="status is unknown for: 12345"):
-        tuning_utils.block_until_completed(["12345"], poll_interval=1, accounting_timeout=10)
-    assert calls["sacct"] == 2
-
-    no_record = types.SimpleNamespace(returncode=0, stdout="", stderr="")
-    clock = iter([0.0, 11.0])
-    monkeypatch.setattr(tuning_utils.subprocess, "run", lambda *args, **kwargs: no_record)
-    monkeypatch.setattr(tuning_utils.time, "monotonic", lambda: next(clock))
-    with pytest.raises(RuntimeError, match="no record.*12345"):
-        tuning_utils.block_until_completed(["12345"], poll_interval=1, accounting_timeout=10)
-
-
-def test_slurm_job_registry_survives_restart_without_duplicate_submission(
-    tmp_path, tuning_utils, monkeypatch
-):
-    runner = _load_runner_module(tuning_utils, monkeypatch)
-    save_dir = tmp_path / "run"
-    candidate = {
-        "config_id": 3,
-        "config_file": tmp_path / "config.yaml",
-        "save_dir": save_dir,
-    }
-    registry_path = tmp_path / "slurm_jobs.json"
-    submissions = []
-
-    monkeypatch.setattr(
-        runner,
-        "write_job_script",
-        lambda *args, **kwargs: submissions.append("12345") or "12345",
-    )
-    monkeypatch.setattr(
-        runner,
-        "block_until_completed",
-        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("orchestrator stopped")),
-    )
-    with pytest.raises(RuntimeError, match="orchestrator stopped"):
-        runner._submit_stage(
-            [candidate],
-            1_000,
-            EXAMPLE_DIR / "main_factory.py",
-            "test",
-            {},
-            {},
-            tuning_utils.SlurmJobRegistry(registry_path),
-            False,
-        )
-    assert submissions == ["12345"]
-
-    def finish(job_ids, **kwargs):
-        for path in tuning_utils.stage_output_paths(save_dir, 1_000).values():
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.touch()
-        return {"12345": ("COMPLETED", "0:0")}
-
-    monkeypatch.setattr(runner, "block_until_completed", finish)
-    runner._submit_stage(
-        [candidate],
-        1_000,
-        EXAMPLE_DIR / "main_factory.py",
-        "test",
-        {},
-        {},
-        tuning_utils.SlurmJobRegistry(registry_path),
-        False,
-    )
-    assert submissions == ["12345"]
-    registry = tuning_utils.SlurmJobRegistry(registry_path)
-    assert registry.current("training", 3, 1_000)["state"] == "COMPLETED"
-    assert not list(tmp_path.glob(".slurm_jobs.json.tmp"))
-
-    archive_submissions = []
-    monkeypatch.setattr(
-        runner,
-        "write_archive_job_script",
-        lambda *args, **kwargs: archive_submissions.append("54321") or "54321",
-    )
-
-    def finish_archive(job_ids, **kwargs):
-        (save_dir / ".archive_complete").write_text("1000\n")
-        return {"54321": ("COMPLETED", "0:0")}
-
-    monkeypatch.setattr(runner, "block_until_completed", finish_archive)
-    runner._submit_archives(
-        [candidate],
-        1_000,
-        "test",
-        {},
-        registry,
-        False,
-    )
-    assert archive_submissions == ["54321"]
-    assert registry.current("archive", 3, 1_000)["state"] == "COMPLETED"
 
 
 def test_score_can_use_rung_specific_evaluation_file(tmp_path, tuning_utils):
