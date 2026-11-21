@@ -1,4 +1,4 @@
-"""Focused tests for the staged hyperparameter-tuning example."""
+"""Focused tests for the full-budget hyperparameter-tuning example."""
 
 from __future__ import annotations
 
@@ -265,27 +265,25 @@ def test_slurm_monitor_recovers_from_temporary_accounting_outage(tuning_utils, m
     ) == {"12345": ("COMPLETED", "0:0")}
 
 
-def test_score_can_use_rung_specific_evaluation_file(tmp_path, tuning_utils):
+def test_score_combines_recent_training_reward_and_validation_success(tmp_path, tuning_utils):
     pd.DataFrame({"episodic_cumul_reward": [0.0, 12.0]}).to_pickle(
         tmp_path / "statistical_analysis.pkl"
     )
-    rung_results = tmp_path / "eval_results_trial-00001000.pkl"
-    pd.DataFrame({"found_solution": [False, False]}).to_pickle(rung_results)
+    pd.DataFrame({"found_solution": [False, False]}).to_pickle(tmp_path / "eval_results.pkl")
 
     score, components = tuning_utils.compute_score(
         tmp_path,
         reward_sample_size=1,
         include_exact_rate=False,
-        evaluation_results=rung_results,
     )
 
     assert score == pytest.approx(0.5)
     assert components == pytest.approx((1.0, 0.0, 0.0))
 
 
-def test_base_config_uses_session_budget_and_separate_validation_data():
+def test_base_config_uses_full_budget_and_separate_validation_data():
     config = yaml.safe_load((EXAMPLE_DIR / "base_config.yaml").read_text())
-    assert config["agent"]["num_trials"] == 1_000
+    assert config["agent"]["num_trials"] == 10_000
     assert config["agent"]["start_jump"] == 4_000
     assert config["agent"]["anneal_fraction"] is None
     assert config["agent"]["beta_anneal_trials"] == 5_950

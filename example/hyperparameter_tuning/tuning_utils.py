@@ -723,7 +723,6 @@ def compute_score(
     reward_range: list = [-12, 12],
     include_exact_rate: bool = True,
     simplify_redundancy: bool = False,
-    evaluation_results: Optional[Union[str, Path]] = None,
 ) -> Tuple[float, Tuple[float, float, float]]:
     """Compute the score to maximize for hyperparameter tuning.
 
@@ -747,10 +746,6 @@ def compute_score(
     simplify_redundancy : bool, optional
         Whether to simplify circuits by removing redundant resistors before checking
         equivalence, by default False.
-    evaluation_results : str or Path, optional
-        Rung-specific evaluation pickle. Defaults to ``eval_results.pkl`` in
-        ``results_dir`` for backward compatibility.
-
     Returns
     -------
     avg_score : float
@@ -768,12 +763,7 @@ def compute_score(
     score_mean_reward = (mean_reward_last - min_reward) / (max_reward - min_reward)
 
     # Compute the contributions based on agent success
-    evaluation_results = (
-        results_dir / "eval_results.pkl"
-        if evaluation_results is None
-        else Path(evaluation_results)
-    )
-    eval_results = pd.read_pickle(evaluation_results)
+    eval_results = pd.read_pickle(results_dir / "eval_results.pkl")
     score_success_rate = eval_results["found_solution"].mean()
     # Success exact
     success_exact_count = 0

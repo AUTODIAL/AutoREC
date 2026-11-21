@@ -14,7 +14,7 @@ for top-level scripts below assume the current directory is `example/`.
 | [`main.py`](main.py) | Construct the data preparation, environment, and agent directly in Python | Quick mode trains for 50 trials |
 | [`main_factory.py`](main_factory.py) | Build the same pipeline from YAML configuration | Defaults to the 50-trial demo configuration |
 | [`checkpoint/`](checkpoint/) | Compare continuous, bounded, complete-checkpoint, and model-only continuation | Four controlled 1,000-trial scenarios; intentionally expensive |
-| [`hyperparameter_tuning/`](hyperparameter_tuning/) | Run checkpointed multi-fidelity Optuna tuning on Slurm | Potentially expensive HPC workflow |
+| [`hyperparameter_tuning/`](hyperparameter_tuning/) | Run checkpointed full-budget Optuna tuning on Slurm | Potentially expensive HPC workflow |
 
 ## Direct Python construction
 
@@ -64,24 +64,20 @@ evaluation with exact equality checks where equality is expected.
 See [`checkpoint/README.md`](checkpoint/README.md) for commands, output structure, comparison
 categories, and reproducibility limitations.
 
-## Multi-fidelity hyperparameter tuning
+## Hyperparameter tuning
 
 The [`hyperparameter_tuning/`](hyperparameter_tuning/) workflow uses Optuna, Slurm, and
-complete checkpoints to avoid training every candidate for the maximum 10,000-trial budget.
-Candidates are evaluated every 1,000 trials and synchronously pruned at configured promotion
-budgets. It supports:
+complete checkpoints. Every candidate trains for the configured 10,000-trial budget and is
+evaluated once on separate validation data. It supports:
 
 - direct orchestration from a login node;
-- a low-resource Slurm job that runs the orchestrator on a compute node;
-- direct child-job submission with restart-safe job tracking;
-- separate terminal-candidate jobs that archive model and fit-plot directories;
 - separate training, validation, and held-out test datasets;
-- rung-level objective and promotion reports.
+- periodic recovery checkpoints for interrupted candidate jobs;
+- final objective-component and Optuna reports.
 
 See [`hyperparameter_tuning/readme.md`](hyperparameter_tuning/readme.md) for configuration,
-recovery behavior, cluster requirements, and submission commands. Its training, validation,
-and held-out test datasets are tracked in `hyperparameter_tuning/data/`, so the complete
-directory can be copied to shared HPC storage.
+cluster requirements, recovery behavior, and submission commands. Its dedicated dataset
+pickle files are included in `hyperparameter_tuning/data/`.
 
 ## Runtime expectations
 
