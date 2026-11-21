@@ -12,9 +12,6 @@ from pathlib import Path
 from glob import glob
 from typing import Optional, Sequence, Tuple, Union
 import copy
-import json
-import math
-import os
 import yaml
 import re
 import shlex
@@ -40,158 +37,6 @@ class SlurmJobsFailed(RuntimeError):
     def __init__(self, message: str, results: dict[str, tuple[str, str]]):
         super().__init__(message)
         self.results = results
-
-
-class SlurmJobRegistry:
-    """Atomically persist submitted jobs so a restart cannot duplicate them."""
-
-    VERSION = 1
-
-    def __init__(self, path: Union[str, Path]):
-        self.path = Path(path)
-        if self.path.is_file():
-            try:
-                payload = json.loads(self.path.read_text())
-            except (OSError, json.JSONDecodeError) as error:
-                raise ValueError(f"Slurm job registry is unreadable: {self.path}") from error
-            if (
-                type(payload) is not dict
-                or set(payload) != {"version", "jobs"}
-                or payload["version"] != self.VERSION
-                or type(payload["jobs"]) is not dict
-            ):
-                raise ValueError(f"Slurm job registry has an unsupported schema: {self.path}")
-            self.jobs = payload["jobs"]
-        elif self.path.exists():
-            raise ValueError(f"Slurm job registry is not a regular file: {self.path}")
-        else:
-            self.jobs = {}
-
-    @staticmethod
-    def key(kind: str, config_id: int, target_trials: int) -> str:
-        return f"{kind}:{config_id:04d}:{target_trials:08d}"
-
-    def current(self, kind: str, config_id: int, target_trials: int) -> dict | None:
-        record = self.jobs.get(self.key(kind, config_id, target_trials))
-        return None if record is None else record["attempts"][-1]
-
-    def record_submission(
-        self,
-        *,
-        kind: str,
-        config_id: int,
-        target_trials: int,
-        job_id: str,
-        save_dir: Union[str, Path],
-        script: Union[str, Path],
-        log: Union[str, Path],
-    ) -> None:
-        key = self.key(kind, config_id, target_trials)
-        metadata = {
-            "kind": kind,
-            "config_id": config_id,
-            "target_trials": target_trials,
-            "save_dir": str(Path(save_dir)),
-        }
-        record = self.jobs.setdefault(key, {**metadata, "attempts": []})
-        if {name: record.get(name) for name in metadata} != metadata:
-            raise ValueError(f"Slurm job registry metadata conflicts for {key}.")
-        record["attempts"].append(
-            {
-                "job_id": str(job_id),
-                "state": "SUBMITTED",
-                "exit_code": None,
-                "script": str(Path(script)),
-                "log": str(Path(log)),
-            }
-        )
-        self._write()
-
-    def record_results(self, results: dict[str, tuple[str, str]]) -> None:
-        pending = dict(results)
-        for record in self.jobs.values():
-            for attempt in record["attempts"]:
-                result = pending.pop(attempt["job_id"], None)
-                if result is not None:
-                    attempt["state"], attempt["exit_code"] = result
-        if pending:
-            raise ValueError(f"Slurm results contain unregistered jobs: {sorted(pending)}")
-        self._write()
-
-    def _write(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = self.path.with_name(f".{self.path.name}.tmp")
-        with temporary.open("w") as stream:
-            json.dump({"version": self.VERSION, "jobs": self.jobs}, stream, indent=2)
-            stream.flush()
-            os.fsync(stream.fileno())
-        temporary.replace(self.path)
-
-
-def cumulative_trial_targets(max_trials: int, session_trials: int) -> list[int]:
-    """Return cumulative evaluation/checkpoint targets for fixed-size sessions."""
-    for value, name in ((max_trials, "max_trials"), (session_trials, "session_trials")):
-        if type(value) is not int or value < 1:
-            raise ValueError(f"{name} must be a positive integer.")
-    if max_trials % session_trials:
-        raise ValueError("max_trials must be divisible by session_trials.")
-    return list(range(session_trials, max_trials + 1, session_trials))
-
-
-def promotion_trial_targets(
-    max_trials: int,
-    grace_trials: int,
-    reduction_factor: int,
-) -> list[int]:
-    """Return geometric cumulative budgets where synchronous pruning occurs."""
-    if type(grace_trials) is not int or grace_trials < 1:
-        raise ValueError("grace_trials must be a positive integer.")
-    if type(reduction_factor) is not int or reduction_factor < 2:
-        raise ValueError("reduction_factor must be an integer of at least 2.")
-    if grace_trials >= max_trials:
-        raise ValueError("grace_trials must be smaller than max_trials.")
-
-    targets = []
-    target = grace_trials
-    while target < max_trials:
-        targets.append(target)
-        target *= reduction_factor
-    return targets
-
-
-def stage_output_paths(save_dir: Union[str, Path], target_trials: int) -> dict[str, Path]:
-    """Return the required checkpoint and evaluation artifacts for one fidelity stage."""
-    save_dir = Path(save_dir)
-    stem = f"eval_results_trial-{target_trials:08d}"
-    return {
-        "checkpoint manifest": (
-            save_dir / "checkpoints" / f"trial-{target_trials:08d}" / "manifest.json"
-        ),
-        "evaluation pickle": save_dir / f"{stem}.pkl",
-        "evaluation CSV": save_dir / f"{stem}.csv",
-    }
-
-
-def missing_stage_outputs(save_dir: Union[str, Path], target_trials: int) -> list[Path]:
-    """Return required stage artifacts that have not been published."""
-    return [
-        path
-        for path in stage_output_paths(save_dir, target_trials).values()
-        if not path.is_file()
-    ]
-
-
-def select_promoted_config_ids(scores: dict[int, float], reduction_factor: int) -> set[int]:
-    """Select the highest-scoring fraction with deterministic config-ID tie breaking."""
-    if not scores:
-        return set()
-    if type(reduction_factor) is not int or reduction_factor < 2:
-        raise ValueError("reduction_factor must be an integer of at least 2.")
-    if not all(np.isfinite(score) for score in scores.values()):
-        raise ValueError("Promotion scores must be finite.")
-    count = max(1, math.ceil(len(scores) / reduction_factor))
-    ranked = sorted(scores, key=lambda config_id: (-scores[config_id], config_id))
-    return set(ranked[:count])
 
 
 class CustomLogScaler:
@@ -614,6 +459,19 @@ def write_job_script(
     arguments = ["--config", str(config_file), *(script_args or ())]
     argument_array = " ".join(shlex.quote(str(value)) for value in arguments)
 
+    archive_lines = [
+        "# ARCHIVE INTERMEDIATE OUTPUTS",
+        "echo 'Archiving intermediate models and fit plots...'",
+        f"cd {shlex.quote(str(save_dir))}",
+        "if [ -d models ]; then tar -czf models.tar.gz models && rm -rf models; fi",
+        (
+            "if [ -d fit_plots ]; then tar -czf fit_plots.tar.gz fit_plots "
+            "&& rm -rf fit_plots; fi"
+        ),
+        "cd - >/dev/null",
+        "",
+    ]
+
     submit_script = "\n".join(
         [
             "#!/bin/bash",
@@ -670,6 +528,7 @@ def write_job_script(
             "",
             'time python "$SCRIPTS" "${ARGS[@]}"',
             "",
+            *archive_lines,
             "echo 'All done!'",
             "echo 'Job ended at: `date`'",
             "echo '------------------------------------------------------------'",
@@ -681,126 +540,23 @@ def write_job_script(
         f.write(submit_script)
 
     if submit:
-        return _submit_script(save_dir / "submit.sh")
-
-
-def write_archive_job_script(
-    save_dir: Union[str, Path],
-    target_trials: int,
-    sbatch_options: dict,
-    submit: bool = False,
-) -> Optional[str]:
-    """Write a restart-safe Slurm job that archives terminal run outputs."""
-    save_dir = Path(save_dir).resolve()
-    time_limit = sbatch_options.get("time", "2:00:00")
-    cpus_per_task = sbatch_options.get("cpus_per_task", 1)
-    nodes = sbatch_options.get("nodes", 1)
-    mem_per_cpu = sbatch_options.get("mem_per_cpu", "1G")
-    job_name = sbatch_options.get("job_name", "archive_hyperparameter_tuning")
-    quoted_save_dir = shlex.quote(str(save_dir))
-
-    archive_script = "\n".join(
-        [
-            "#!/bin/bash",
-            "",
-            f"#SBATCH --time={time_limit}   # walltime",
-            f"#SBATCH --cpus-per-task={cpus_per_task}   # number of processor cores",
-            f"#SBATCH --nodes={nodes}   # number of nodes",
-            f"#SBATCH --mem-per-cpu={mem_per_cpu}   # memory per CPU core",
-            f"#SBATCH --job-name='{job_name}'   # job name",
-            "#SBATCH --account=rrg-j3goals",
-            "#SBATCH --constraint='turin'",
-            f"#SBATCH --output={save_dir}/%x_slurm-%A.out   # output and error log",
-            "",
-            "set -euo pipefail",
-            f"SAVE_DIR={quoted_save_dir}",
-            f"TARGET_TRIALS={target_trials}",
-            'COMPLETE_MARKER="$SAVE_DIR/.archive_complete"',
-            'IN_PROGRESS_MARKER="$SAVE_DIR/.archive_in_progress"',
-            'MARKER_TEMP="$SAVE_DIR/.archive_complete.tmp"',
-            "",
-            'if [[ -f "$COMPLETE_MARKER" ]]; then',
-            '    if [[ "$(cat "$COMPLETE_MARKER")" != "$TARGET_TRIALS" ]]; then',
-            '        echo "Archive marker target does not match $TARGET_TRIALS." >&2',
-            "        exit 1",
-            "    fi",
-            '    echo "Run outputs are already archived."',
-            "    exit 0",
-            "fi",
-            "",
-            'if [[ ! -f "$IN_PROGRESS_MARKER" ]]; then',
-            "    for name in models fit_plots; do",
-            '        if [[ -d "$SAVE_DIR/$name" && -e "$SAVE_DIR/$name.tar.gz" ]]; then',
-            '            echo "Refusing ambiguous archive state for $name." >&2',
-            "            exit 1",
-            "        fi",
-            "    done",
-            '    printf "%s\\n" "$TARGET_TRIALS" > "$IN_PROGRESS_MARKER.tmp"',
-            '    mv "$IN_PROGRESS_MARKER.tmp" "$IN_PROGRESS_MARKER"',
-            "fi",
-            "",
-            "cleanup() {",
-            '    rm -f "$SAVE_DIR/.models.tar.gz.tmp"',
-            '    rm -f "$SAVE_DIR/.fit_plots.tar.gz.tmp" "$MARKER_TEMP"',
-            "}",
-            "trap cleanup EXIT",
-            "",
-            "archive_directory() {",
-            '    local name="$1"',
-            '    local source="$SAVE_DIR/$name"',
-            '    local archive="$SAVE_DIR/$name.tar.gz"',
-            '    local temporary="$SAVE_DIR/.$name.tar.gz.tmp"',
-            "",
-            '    if [[ -f "$archive" ]]; then',
-            '        tar -tzf "$archive" >/dev/null',
-            '        if [[ -d "$source" ]]; then',
-            '            rm -rf "$source"',
-            "        fi",
-            '    elif [[ -d "$source" ]]; then',
-            '        tar -czf "$temporary" -C "$SAVE_DIR" "$name"',
-            '        tar -tzf "$temporary" >/dev/null',
-            '        mv "$temporary" "$archive"',
-            '        rm -rf "$source"',
-            '    elif [[ -e "$source" || -e "$archive" ]]; then',
-            '        echo "Unsupported archive input type for $name." >&2',
-            "        exit 1",
-            "    else",
-            '        echo "No $name directory to archive."',
-            "    fi",
-            "}",
-            "",
-            "archive_directory models",
-            "archive_directory fit_plots",
-            'printf "%s\\n" "$TARGET_TRIALS" > "$MARKER_TEMP"',
-            'mv "$MARKER_TEMP" "$COMPLETE_MARKER"',
-            'rm -f "$IN_PROGRESS_MARKER"',
-            'echo "Archived terminal outputs for trial $TARGET_TRIALS."',
-        ]
-    )
-    save_dir.mkdir(parents=True, exist_ok=True)
-    script_path = save_dir / "archive.sh"
-    script_path.write_text(archive_script)
-    if submit:
-        return _submit_script(script_path)
-
-
-def _submit_script(script_path: Path) -> str:
-    """Submit one generated Slurm script and return its numeric job ID."""
-    submit_command = ["sbatch", str(script_path.resolve())]
-    submit_process = subprocess.run(
-        submit_command, capture_output=True, text=True, check=False
-    )
-    output = submit_process.stdout.strip()
-    print(f"Submitted job with command: {shlex.join(submit_command)}")
-    print(f"Output: {output}")
-    if submit_process.returncode:
-        raise RuntimeError(f"Slurm submission failed: {submit_process.stderr.strip()}")
-    match = re.search(r"Submitted batch job (\d+)", output)
-    if match:
-        job_id = match.group(1)
-        print(f"Job ID: {job_id}")
-        return job_id
-    raise RuntimeError(f"Could not parse a Slurm job ID from: {output!r}")
+        # Submit the job
+        submit_command = ["sbatch", str((save_dir / "submit.sh").resolve())]
+        submit_process = subprocess.run(
+            submit_command, capture_output=True, text=True, check=False
+        )
+        output = submit_process.stdout.strip()
+        print(f"Submitted job with command: {shlex.join(submit_command)}")
+        print(f"Output: {output}")
+        if submit_process.returncode:
+            raise RuntimeError(f"Slurm submission failed: {submit_process.stderr.strip()}")
+        # Get the job ID from the output
+        match = re.search(r"Submitted batch job (\d+)", output)
+        if match:
+            job_id = match.group(1)
+            print(f"Job ID: {job_id}")
+            return job_id
+        raise RuntimeError(f"Could not parse a Slurm job ID from: {output!r}")
 
 
 def block_until_completed(

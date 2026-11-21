@@ -32,24 +32,6 @@ def stage_worker():
     return _load_module("hyperparameter_stage_worker", "main_factory.py")
 
 
-def test_fidelity_targets_and_promotions(tuning_utils):
-    assert tuning_utils.cumulative_trial_targets(10_000, 1_000) == list(
-        range(1_000, 10_001, 1_000)
-    )
-    assert tuning_utils.promotion_trial_targets(10_000, 2_000, 2) == [2_000, 4_000, 8_000]
-    with pytest.raises(ValueError, match="divisible"):
-        tuning_utils.cumulative_trial_targets(10_000, 3_000)
-    with pytest.raises(ValueError, match="smaller"):
-        tuning_utils.promotion_trial_targets(10_000, 10_000, 2)
-
-
-def test_promotion_is_deterministic_and_keeps_the_best_half(tuning_utils):
-    scores = {7: 0.5, 2: 0.9, 5: 0.5, 9: 0.1, 3: 0.8}
-    assert tuning_utils.select_promoted_config_ids(scores, 2) == {2, 3, 5}
-    with pytest.raises(ValueError, match="finite"):
-        tuning_utils.select_promoted_config_ids({1: float("nan")}, 2)
-
-
 def test_evaluation_results_are_published_atomically(tmp_path, stage_worker):
     results = pd.DataFrame({"found_solution": [True, False], "value": [1, 2]})
     stage_worker._write_evaluation_results(results, tmp_path)
@@ -211,7 +193,7 @@ def test_runner_submits_only_incomplete_full_budget_candidates(
     assert waited_for == ["12345"]
 
 
-def test_slurm_script_passes_stage_target_and_preserves_intermediate_models(
+def test_slurm_script_runs_full_candidate_and_archives_outputs(
     tmp_path, tuning_utils, monkeypatch
 ):
     save_dir = tmp_path / "run"
@@ -220,16 +202,20 @@ def test_slurm_script_passes_stage_target_and_preserves_intermediate_models(
         EXAMPLE_DIR / "main_factory.py",
         tmp_path / "config.yaml",
         {"job_name": "test"},
-        script_args=("--target-trials", 1_000),
-        archive_models=False,
+        script_args=("--checkpoint-every", 1_000),
     )
     script = (save_dir / "submit.sh").read_text()
-    assert "--target-trials 1000" in script
+    assert "--checkpoint-every 1000" in script
     assert "CUDA_VISIBLE_DEVICES=-1" in script
     assert "TF_NUM_INTRAOP_THREADS=1" in script
     assert f"WORK_DIR={EXAMPLE_DIR}" in script
     assert 'cd "$WORK_DIR"' in script
-    assert "tar -czf" not in script
+    assert "set -euo pipefail" in script
+    assert script.index("set -euo pipefail") < script.index('time python "$SCRIPTS"')
+    assert script.index('time python "$SCRIPTS"') < script.index("tar -czf models.tar.gz")
+    assert "tar -czf models.tar.gz models && rm -rf models" in script
+    assert "tar -czf fit_plots.tar.gz fit_plots && rm -rf fit_plots" in script
+    assert "checkpoints" not in script[script.index("# ARCHIVE INTERMEDIATE OUTPUTS") :]
 
     commands = []
 
@@ -239,7 +225,7 @@ def test_slurm_script_passes_stage_target_and_preserves_intermediate_models(
             return types.SimpleNamespace(
                 returncode=0, stdout="Submitted batch job 12345\n", stderr=""
             )
-        return types.SimpleNamespace(returncode=0, stdout="12345|COMPLETED\n", stderr="")
+        return types.SimpleNamespace(returncode=0, stdout="12345|COMPLETED|0:0\n", stderr="")
 
     monkeypatch.setattr(tuning_utils.subprocess, "run", fake_run)
     monkeypatch.setattr(tuning_utils.time, "sleep", lambda seconds: None)
@@ -259,12 +245,24 @@ def test_slurm_script_passes_stage_target_and_preserves_intermediate_models(
     assert commands[0][0] == "sbatch"
     assert commands[1][0] == "sacct"
 
-    wrapper = (EXAMPLE_DIR / "runner_job.sh").read_text()
-    assert 'RUN_DIR=${SLURM_SUBMIT_DIR:-"$SCRIPT_DIR"}' in wrapper
-    assert 'cd "$RUN_DIR"' in wrapper
-    assert 'MODULE_SAVELIST_NAME="default"' in wrapper
-    assert 'PYTHON_ENV_PATH="$HOME/autorec_env"' in wrapper
-    assert 'python runner.py "${RUNNER_ARGUMENTS[@]}"' in wrapper
+
+def test_slurm_monitor_recovers_from_temporary_accounting_outage(tuning_utils, monkeypatch):
+    responses = iter(
+        [
+            types.SimpleNamespace(returncode=1, stdout="", stderr="Connection refused"),
+            types.SimpleNamespace(returncode=0, stdout="12345|RUNNING\n", stderr=""),
+            types.SimpleNamespace(returncode=0, stdout="12345|COMPLETED|0:0\n", stderr=""),
+        ]
+    )
+    monkeypatch.setattr(
+        tuning_utils.subprocess, "run", lambda *args, **kwargs: next(responses)
+    )
+    monkeypatch.setattr(tuning_utils.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(tuning_utils.time, "monotonic", lambda: 0.0)
+
+    assert tuning_utils.block_until_completed(
+        ["12345"], poll_interval=1, accounting_timeout=10
+    ) == {"12345": ("COMPLETED", "0:0")}
 
 
 def test_score_can_use_rung_specific_evaluation_file(tmp_path, tuning_utils):
