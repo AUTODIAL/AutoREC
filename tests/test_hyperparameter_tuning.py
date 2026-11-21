@@ -79,23 +79,10 @@ def test_promotion_is_deterministic_and_keeps_the_best_half(tuning_utils):
         tuning_utils.select_promoted_config_ids({1: float("nan")}, 2)
 
 
-def test_stage_worker_selects_latest_eligible_checkpoint(tmp_path, stage_worker):
-    checkpoint_dir = tmp_path / "checkpoints"
-    for trial in (1_000, 2_000, 4_000):
-        (checkpoint_dir / f"trial-{trial:08d}").mkdir(parents=True)
-    (checkpoint_dir / "trial-invalid").mkdir()
-
-    assert stage_worker._latest_checkpoint(checkpoint_dir, 3_000).name == "trial-00002000"
-    assert stage_worker._latest_checkpoint(checkpoint_dir, 500) is None
-
-
-def test_evaluation_results_are_rung_specific_and_refresh_latest(tmp_path, stage_worker):
+def test_evaluation_results_are_published_atomically(tmp_path, stage_worker):
     results = pd.DataFrame({"found_solution": [True, False], "value": [1, 2]})
-    stage_worker._write_evaluation_results(results, tmp_path, 1_000)
+    stage_worker._write_evaluation_results(results, tmp_path)
 
-    rung_csv, rung_pickle = stage_worker._evaluation_paths(tmp_path, 1_000)
-    assert pd.read_pickle(rung_pickle).equals(results)
-    assert pd.read_csv(rung_csv).equals(results)
     assert pd.read_pickle(tmp_path / "eval_results.pkl").equals(results)
     assert pd.read_csv(tmp_path / "eval_results.csv").equals(results)
     assert not list(tmp_path.glob(".*.tmp"))
@@ -110,8 +97,8 @@ def test_worker_trains_or_resumes_to_full_budget_before_validation(
         def __init__(self, completed_trials=0):
             self.completed_trials = completed_trials
 
-        def train(self, *, additional_trials, checkpoint_dir):
-            calls.append(("train", additional_trials))
+        def train(self, *, additional_trials, checkpoint_dir, checkpoint_every):
+            calls.append(("train", additional_trials, checkpoint_every))
             self.completed_trials += additional_trials
             (checkpoint_dir / f"trial-{self.completed_trials:08d}").mkdir(parents=True)
 
@@ -130,12 +117,26 @@ def test_worker_trains_or_resumes_to_full_budget_before_validation(
     runtime_module.configure_autorec_runtime = lambda **kwargs: None
     agent_module = types.ModuleType("autorec.agent")
     agent_module.DDQN_ECM = FakeDDQN
+    checkpoint_module = types.ModuleType("autorec.checkpoint")
+
+    def plan_training_recovery(checkpoint_dir, target_trials):
+        candidates = sorted(checkpoint_dir.glob("trial-*"))
+        checkpoint = candidates[-1] if candidates else None
+        completed = 0 if checkpoint is None else int(checkpoint.name.removeprefix("trial-"))
+        return types.SimpleNamespace(
+            checkpoint=checkpoint,
+            completed_trials=completed,
+            additional_trials=target_trials - completed,
+        )
+
+    checkpoint_module.plan_training_recovery = plan_training_recovery
     factory_module = types.ModuleType("autorec.factory")
     factory_module.pipeline_builder = lambda path: (None, None, None, None, FakeAgent())
     utils_module = types.ModuleType("autorec.utils")
     utils_module.set_global_seed = lambda *args: calls.append(("seed", *args))
     monkeypatch.setitem(sys.modules, "autorec.runtime", runtime_module)
     monkeypatch.setitem(sys.modules, "autorec.agent", agent_module)
+    monkeypatch.setitem(sys.modules, "autorec.checkpoint", checkpoint_module)
     monkeypatch.setitem(sys.modules, "autorec.factory", factory_module)
     monkeypatch.setitem(sys.modules, "autorec.utils", utils_module)
     monkeypatch.setattr(
@@ -152,7 +153,7 @@ def test_worker_trains_or_resumes_to_full_budget_before_validation(
             {"agent": {"num_trials": 10_000, "random_seed": 42, "save_dir": str(fresh_dir)}}
         )
     )
-    stage_worker.run_stage(fresh_config, None, 42)
+    stage_worker.run_candidate(fresh_config, 42, 1_000)
 
     resumed_dir = tmp_path / "resumed"
     resumed_config = tmp_path / "resumed.yaml"
@@ -162,15 +163,15 @@ def test_worker_trains_or_resumes_to_full_budget_before_validation(
         )
     )
     (resumed_dir / "checkpoints" / "trial-00003000").mkdir(parents=True)
-    stage_worker.run_stage(resumed_config, None, 42)
+    stage_worker.run_candidate(resumed_config, 42, 1_000)
 
     assert calls == [
         ("seed", 42, True),
-        ("train", 10_000),
+        ("train", 10_000, 1_000),
         ("evaluate", 24, True, True),
         ("configure_resume_runtime",),
         ("restore", "trial-00003000", 10_000),
-        ("train", 7_000),
+        ("train", 7_000, 1_000),
         ("evaluate", 24, True, True),
     ]
 
