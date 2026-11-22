@@ -77,6 +77,7 @@ def test_worker_trains_or_resumes_to_full_budget_before_validation(
         candidates = sorted(checkpoint_dir.glob("trial-*"))
         checkpoint = candidates[-1] if candidates else None
         completed = 0 if checkpoint is None else int(checkpoint.name.removeprefix("trial-"))
+        calls.append(("plan_recovery", completed))
         return types.SimpleNamespace(
             checkpoint=checkpoint,
             completed_trials=completed,
@@ -95,8 +96,8 @@ def test_worker_trains_or_resumes_to_full_budget_before_validation(
     monkeypatch.setitem(sys.modules, "autorec.utils", utils_module)
     monkeypatch.setattr(
         stage_worker,
-        "_configure_checkpoint_tensorflow",
-        lambda: calls.append(("configure_resume_runtime",)),
+        "_configure_deterministic_tensorflow",
+        lambda: calls.append(("configure_deterministic_runtime",)),
     )
     monkeypatch.setattr(stage_worker, "_set_evaluation_seed", lambda seed: None)
 
@@ -120,12 +121,17 @@ def test_worker_trains_or_resumes_to_full_budget_before_validation(
     stage_worker.run_candidate(resumed_config, 42, 1_000)
 
     assert calls == [
+        ("configure_deterministic_runtime",),
+        ("plan_recovery", 0),
         ("seed", 42, True),
         ("train", 10_000, 1_000),
+        ("plan_recovery", 10_000),
         ("evaluate", 24, True, True),
-        ("configure_resume_runtime",),
+        ("configure_deterministic_runtime",),
+        ("plan_recovery", 3_000),
         ("restore", "trial-00003000", 10_000),
         ("train", 7_000, 1_000),
+        ("plan_recovery", 10_000),
         ("evaluate", 24, True, True),
     ]
 

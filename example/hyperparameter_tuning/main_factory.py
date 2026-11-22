@@ -46,7 +46,8 @@ def _write_evaluation_results(results, save_dir: Path) -> None:
         temporary.replace(destination)
 
 
-def _configure_checkpoint_tensorflow() -> None:
+def _configure_deterministic_tensorflow() -> None:
+    """Match the TensorFlow runtime recorded in fresh and resumed checkpoints."""
     import tensorflow as tf
 
     tf.config.threading.set_inter_op_parallelism_threads(1)
@@ -82,6 +83,9 @@ def run_candidate(config_file: Path, evaluation_seed: int, checkpoint_every: int
     from autorec.runtime import configure_autorec_runtime
 
     configure_autorec_runtime(thread_count=1, warmup_autoeis=True, suppress_tf_logs=True)
+    # Runtime compatibility is validated while discovering the latest checkpoint, so
+    # determinism and thread settings must be active before recovery planning begins.
+    _configure_deterministic_tensorflow()
 
     from autorec.agent import DDQN_ECM
     from autorec.checkpoint import plan_training_recovery
@@ -103,9 +107,7 @@ def run_candidate(config_file: Path, evaluation_seed: int, checkpoint_every: int
         set_global_seed(config["agent"].get("random_seed", 42), True)
         _, _, _, _, agent = pipeline_builder(config_file)
     else:
-        # Match the initial session's deterministic runtime without reseeding. The
-        # checkpoint loader restores its saved RNG streams last.
-        _configure_checkpoint_tensorflow()
+        # Do not reseed: the checkpoint loader restores its saved RNG streams last.
         print(f"Restoring checkpoint: {recovery.checkpoint}")
         agent = DDQN_ECM.from_checkpoint(
             recovery.checkpoint,
