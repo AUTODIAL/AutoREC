@@ -1,4 +1,4 @@
-"""Run one baseline reward hyperparameter-tuning fidelity stage."""
+"""Train or resume one full-budget baseline reward tuning candidate."""
 
 from pathlib import Path
 import sys

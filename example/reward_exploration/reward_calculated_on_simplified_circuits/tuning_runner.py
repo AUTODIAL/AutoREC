@@ -1,4 +1,4 @@
-"""Run simplified-circuit reward multi-fidelity hyperparameter tuning."""
+"""Run full-budget simplified-circuit reward hyperparameter tuning."""
 
 from pathlib import Path
 import sys

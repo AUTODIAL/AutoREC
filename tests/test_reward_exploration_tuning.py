@@ -5,6 +5,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import types
 
 import pandas as pd
 import yaml
@@ -64,19 +65,12 @@ def test_reward_tuning_datasets_match_reference_splits():
         assert (DATA_ROOT / name).read_bytes() == (REFERENCE_DATA / name).read_bytes()
 
 
-def test_shared_reward_tuning_targets_scoring_and_slurm_script(tmp_path):
-    assert tuning_utils.cumulative_trial_targets(10_000, 1_000) == list(
-        range(1_000, 10_001, 1_000)
-    )
-    assert tuning_utils.promotion_trial_targets(10_000, 2_000, 2) == [2_000, 4_000, 8_000]
-    assert tuning_utils.select_promoted_config_ids({1: 0.1, 2: 0.9, 3: 0.5}, 2) == {
-        2,
-        3,
-    }
-
+def test_shared_reward_tuning_results_and_slurm_script(tmp_path):
     results = pd.DataFrame({"found_solution": [True, False]})
-    stage._write_evaluation_results(results, tmp_path, 1_000)
-    assert pd.read_pickle(tmp_path / "eval_results_trial-00001000.pkl").equals(results)
+    stage._write_evaluation_results(results, tmp_path)
+    assert pd.read_pickle(tmp_path / "eval_results.pkl").equals(results)
+    assert pd.read_csv(tmp_path / "eval_results.csv").equals(results)
+    assert not list(tmp_path.glob(".*.tmp"))
 
     worker = tmp_path / "case" / "tuning_main_factory.py"
     worker.parent.mkdir()
@@ -86,18 +80,128 @@ def test_shared_reward_tuning_targets_scoring_and_slurm_script(tmp_path):
         worker,
         tmp_path / "config.yaml",
         {"job_name": "reward_tuning"},
-        script_args=("--target-trials", 1_000),
-        archive_models=False,
+        script_args=("--checkpoint-every", 1_000),
     )
     script = (tmp_path / "run" / "submit.sh").read_text()
-    assert "--target-trials 1000" in script
+    assert "--checkpoint-every 1000" in script
     assert f"WORK_DIR={worker.parent}" in script
     assert "MODULE_SAVELIST_NAME='basic'" in script
     assert "PYTHON_ENV_PATH=$HOME/eis_env" in script
+    assert "set -euo pipefail" in script
+    assert "tar -czf models.tar.gz models && rm -rf models" in script
+    assert "tar -czf fit_plots.tar.gz fit_plots && rm -rf fit_plots" in script
     assert "test_dataset" not in script
 
 
+def test_shared_reward_worker_configures_runtime_before_full_budget_recovery(
+    tmp_path, monkeypatch
+):
+    calls = []
+
+    class FakeAgent:
+        def __init__(self, completed_trials=0):
+            self.completed_trials = completed_trials
+
+        def train(self, *, additional_trials, checkpoint_dir, checkpoint_every):
+            calls.append(("train", additional_trials, checkpoint_every))
+            self.completed_trials += additional_trials
+            (checkpoint_dir / f"trial-{self.completed_trials:08d}").mkdir(parents=True)
+
+        def eval_all_eis(self, *, max_actions, verbose, use_eval_env):
+            assert self.completed_trials == 10_000
+            calls.append(("evaluate", max_actions, verbose, use_eval_env))
+            return pd.DataFrame({"found_solution": [False]})
+
+    class FakeDDQN:
+        @classmethod
+        def from_checkpoint(cls, path, *, save_dir, num_trials):
+            calls.append(("restore", path.name, num_trials))
+            return FakeAgent(int(path.name.removeprefix("trial-")))
+
+    def plan_training_recovery(checkpoint_dir, target_trials):
+        candidates = sorted(checkpoint_dir.glob("trial-*"))
+        checkpoint = candidates[-1] if candidates else None
+        completed = 0 if checkpoint is None else int(checkpoint.name.removeprefix("trial-"))
+        calls.append(("plan_recovery", completed))
+        return types.SimpleNamespace(
+            checkpoint=checkpoint,
+            completed_trials=completed,
+            additional_trials=target_trials - completed,
+        )
+
+    runtime_module = types.ModuleType("autorec.runtime")
+    runtime_module.configure_autorec_runtime = lambda **kwargs: None
+    agent_module = types.ModuleType("autorec.agent")
+    agent_module.DDQN_ECM = FakeDDQN
+    checkpoint_module = types.ModuleType("autorec.checkpoint")
+    checkpoint_module.plan_training_recovery = plan_training_recovery
+    factory_module = types.ModuleType("autorec.factory")
+    factory_module.pipeline_builder = lambda path: None
+    utils_module = types.ModuleType("autorec.utils")
+    utils_module.set_global_seed = lambda *args: calls.append(("seed", *args))
+    monkeypatch.setitem(sys.modules, "autorec.runtime", runtime_module)
+    monkeypatch.setitem(sys.modules, "autorec.agent", agent_module)
+    monkeypatch.setitem(sys.modules, "autorec.checkpoint", checkpoint_module)
+    monkeypatch.setitem(sys.modules, "autorec.factory", factory_module)
+    monkeypatch.setitem(sys.modules, "autorec.utils", utils_module)
+    monkeypatch.setattr(
+        stage,
+        "_configure_deterministic_tensorflow",
+        lambda: calls.append(("configure_deterministic_runtime",)),
+    )
+    monkeypatch.setattr(stage, "_set_evaluation_seed", lambda seed: None)
+
+    def prepare_runtime():
+        calls.append(("prepare_case_runtime",))
+
+    def build_pipeline(config_file):
+        calls.append(("build_case_pipeline", config_file.name))
+        return None, None, None, None, FakeAgent()
+
+    fresh_dir = tmp_path / "fresh"
+    fresh_config = tmp_path / "fresh.yaml"
+    fresh_config.write_text(
+        yaml.safe_dump(
+            {"agent": {"num_trials": 10_000, "random_seed": 42, "save_dir": str(fresh_dir)}}
+        )
+    )
+    stage.run_candidate(fresh_config, 42, 1_000, build_pipeline, prepare_runtime)
+
+    resumed_dir = tmp_path / "resumed"
+    resumed_config = tmp_path / "resumed.yaml"
+    resumed_config.write_text(
+        yaml.safe_dump(
+            {"agent": {"num_trials": 10_000, "random_seed": 42, "save_dir": str(resumed_dir)}}
+        )
+    )
+    (resumed_dir / "checkpoints" / "trial-00003000").mkdir(parents=True)
+    stage.run_candidate(resumed_config, 42, 1_000, build_pipeline, prepare_runtime)
+
+    assert calls == [
+        ("configure_deterministic_runtime",),
+        ("prepare_case_runtime",),
+        ("plan_recovery", 0),
+        ("seed", 42, True),
+        ("build_case_pipeline", "fresh.yaml"),
+        ("train", 10_000, 1_000),
+        ("plan_recovery", 10_000),
+        ("evaluate", 24, True, True),
+        ("configure_deterministic_runtime",),
+        ("prepare_case_runtime",),
+        ("plan_recovery", 3_000),
+        ("restore", "trial-00003000", 10_000),
+        ("train", 7_000, 1_000),
+        ("plan_recovery", 10_000),
+        ("evaluate", 24, True, True),
+    ]
+
+
 def test_case_tuning_configurations_and_entrypoints_are_isolated():
+    shared_runner = (REWARD_ROOT / "tuning" / "runner.py").read_text()
+    assert "--checkpoint-every" in shared_runner
+    assert "--max-trials" not in shared_runner
+    assert "promotion" not in shared_runner
+
     reward_settings = {
         CASES[0]: {},
         CASES[1]: {},
@@ -113,7 +217,7 @@ def test_case_tuning_configurations_and_entrypoints_are_isolated():
         config = yaml.safe_load((case_dir / "tuning_base_config.yaml").read_text())
         assert config["dataprep"]["training"]["path"] == "../../data/training_dataset.pkl"
         assert config["dataprep"]["eval"]["path"] == "../../data/validation_dataset.pkl"
-        assert config["agent"]["num_trials"] == 1_000
+        assert config["agent"]["num_trials"] == 10_000
         assert config["agent"]["start_jump"] == 4_000
         assert config["agent"]["beta_anneal_trials"] == 5_950
         for environment_name in ("training", "eval"):
@@ -132,7 +236,7 @@ def test_case_tuning_configurations_and_entrypoints_are_isolated():
         assert "battery_dataset" not in combined
         assert "experimental_dataset" not in combined
         assert (case_dir / "submit_job.sh").is_file()
-        assert (case_dir / "tuning_runner_job.sh").is_file()
+        assert not (case_dir / "tuning_runner_job.sh").exists()
 
         worker = (case_dir / "tuning_main_factory.py").read_text()
         runner = (case_dir / "tuning_runner.py").read_text()
@@ -142,6 +246,7 @@ def test_case_tuning_configurations_and_entrypoints_are_isolated():
         assert "EXPLORATION_ROOT = CASE_DIR.parent" in runner
         assert "from tuning." not in worker
         assert "from tuning." not in runner
+        assert "full-budget" in runner
 
         if case_name != "baseline":
             assert "def prepare_experimental_runtime" in worker
@@ -176,3 +281,6 @@ def test_reward_tuning_documentation_uses_local_requirements():
     assert "--config ../pipeline_config.yaml" in readme
     assert "example/reward_exploration/tuning/requirements.txt" in readme
     assert "local `tuning/` package" in readme
+    assert "full-budget tuning workflow" in readme
+    assert "candidate_scores.csv" in readme
+    assert "tuning_runner_job.sh" not in readme

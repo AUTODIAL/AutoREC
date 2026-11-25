@@ -1,4 +1,4 @@
-"""Run continuous-FIM reward multi-fidelity hyperparameter tuning."""
+"""Run full-budget continuous-FIM reward hyperparameter tuning."""
 
 from pathlib import Path
 import sys

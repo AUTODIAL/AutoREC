@@ -93,7 +93,7 @@ def test_every_progressive_exploration_config_uses_same_components():
     }
 
 
-def test_tuning_configs_only_add_progressive_section():
+def test_progressive_tuning_configs_retain_staged_budget_and_spectrum_settings():
     for case in CASES:
         progressive = _read_yaml(EXAMPLE_ROOT / case / "tuning_base_config.yaml")
         full_spectrum = _read_yaml(REWARD_ROOT / case / "tuning_base_config.yaml")
@@ -110,6 +110,9 @@ def test_tuning_configs_only_add_progressive_section():
         comparable["dataprep"]["eval"]["frequency_npoints"] = full_spectrum["dataprep"][
             "eval"
         ]["frequency_npoints"]
+        assert progressive["agent"]["num_trials"] == 1_000
+        assert full_spectrum["agent"]["num_trials"] == 10_000
+        comparable["agent"]["num_trials"] = full_spectrum["agent"]["num_trials"]
         assert comparable == full_spectrum
 
 
@@ -205,16 +208,15 @@ def test_tuning_entrypoints_use_local_progressive_package():
             REWARD_ROOT / case / "tuning_search_space.yaml"
         )
 
-    for name in (
-        "__init__.py",
-        "requirements.txt",
-        "runner.py",
-        "stage.py",
-        "tuning_utils.py",
-    ):
-        assert (EXAMPLE_ROOT / "tuning" / name).read_bytes() == (
-            REWARD_ROOT / "tuning" / name
-        ).read_bytes()
+    for root in (EXAMPLE_ROOT, REWARD_ROOT):
+        for name in (
+            "__init__.py",
+            "requirements.txt",
+            "runner.py",
+            "stage.py",
+            "tuning_utils.py",
+        ):
+            assert (root / "tuning" / name).is_file()
 
 
 def test_progressive_tuning_worker_imports_from_standalone_copy(tmp_path):

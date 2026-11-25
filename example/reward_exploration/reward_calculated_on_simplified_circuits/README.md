@@ -30,10 +30,9 @@ to `calculation_output/`. The SLURM log is written beside the submission script.
 
 ## Hyperparameter tuning
 
-From this directory, run `python tuning_runner.py` directly or submit
-`tuning_runner_job.sh`. Every candidate uses this directory's simplified-circuit reward
-environment; only the common RL hyperparameters in `tuning_search_space.yaml` are varied.
-Training uses `../../data/training_dataset.pkl`, while promotion scores use
+From this directory, run `python tuning_runner.py` on the Slurm login node. Every candidate
+uses the full 10,000-trial budget, periodic recovery checkpoints, and this directory's
+simplified-circuit reward environment. Training uses
+`../../data/training_dataset.pkl`, while final tuning scores use
 `../../data/validation_dataset.pkl`. See the parent [reward exploration
-README](../README.md#hyperparameter-tuning) for requirements, budgets, outputs, and the
-separate role of `submit_job.sh`.
+README](../README.md#hyperparameter-tuning) for requirements, recovery, and outputs.

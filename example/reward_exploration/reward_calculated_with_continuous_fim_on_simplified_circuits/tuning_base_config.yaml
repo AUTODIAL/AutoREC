@@ -78,7 +78,7 @@ agent:
   save_frequency: 100
   action_cap: null
   random_seed: 42
-  num_trials: 1000
+  num_trials: 10000
   episodes_trial: 1
   gamma: 0.99
   continuous_deadloop: 2

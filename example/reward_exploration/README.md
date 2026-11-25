@@ -102,14 +102,15 @@ script from a Slurm spool directory.
 
 ## Hyperparameter tuning
 
-Each experiment directory also contains a checkpointed multi-fidelity tuning workflow. It
-uses the same successive-halving policy as `example/hyperparameter_tuning`: candidates train
-in 1,000-trial stages up to 10,000 trials, are first eligible for pruning at 2,000 trials,
-and resume promoted candidates from their latest complete checkpoint. The shared
-orchestrator is included in this folder's local `tuning/` package, so a copied
-`reward_exploration/` directory does not import tuning code from the repository layout.
+Each experiment directory contains a full-budget tuning workflow matching
+`example/hyperparameter_tuning`. Every candidate trains for the 10,000 trials configured in
+its local `tuning_base_config.yaml`; there is no early pruning or promotion. Complete
+checkpoints are saved every 1,000 trials by default, allowing a failed candidate job to
+resume from its latest valid checkpoint. The shared orchestrator is included in this
+folder's local `tuning/` package, so a copied `reward_exploration/` directory remains
+self-contained.
 
-The tuning datasets have deliberately separate roles:
+The datasets have deliberately separate roles:
 
 - `../data/training_dataset.pkl` supplies RL training interactions and learning-curve rewards;
 - `../data/validation_dataset.pkl` supplies the evaluation success rate used in the tuning
@@ -126,38 +127,30 @@ Install the additional orchestration dependencies once:
 pip install -r example/reward_exploration/tuning/requirements.txt
 ```
 
-Then enter the experiment directory. Run the orchestrator directly on a node that may call
-`sbatch` and `sacct`:
+Run the orchestrator from the selected case directory on a Slurm login node:
 
 ```bash
 cd example/reward_exploration/baseline
 python tuning_runner.py
 ```
 
-Alternatively, submit the lightweight seven-day orchestration job:
-
-```bash
-sbatch tuning_runner_job.sh
-```
-
-The shell script contains editable resource, environment, and tuning-budget variables. It
-defaults to one core, 16 GB, five initial candidates, ten Optuna iterations, and a maximum
-10,000-trial budget. `tuning_runner.py --help` lists command-line overrides for direct use.
+`tuning_runner.py --help` lists the target directory, batch-size, iteration, and checkpoint
+interval options. The runner submits and monitors compute jobs and should not itself be
+submitted as a Slurm job.
 
 The two Slurm scripts serve different purposes:
 
-- `submit_job.sh` trains one selected configuration to completion and evaluates all four
-  datasets.
-- `tuning_runner_job.sh` orchestrates many checkpointed candidates and evaluates only the
-  validation data needed for promotion decisions.
+- `submit_job.sh` trains one selected configuration and evaluates all four datasets.
+- `tuning_runner.py` orchestrates many full-budget candidates and evaluates only the
+  validation data needed for hyperparameter scoring.
 
 Tuning outputs are written under the case's `hyperparameter_tuning/` directory. The main
-summary files are `rung_scores.csv`, `optuna_trials.csv`, `optimization_history.png`, and
-`param_importances.png`; candidate directories contain configurations, checkpoints, and
-rung-specific validation results. The baseline hyperparameter configuration is never
-pruned.
+summary files are `candidate_scores.csv`, `optuna_trials.csv`,
+`optimization_history.png`, and `param_importances.png`; candidate directories contain
+configurations, checkpoints, and final validation results.
 
-The tuning wrappers depend on the shared `tuning/` package and the sibling `example/data/`
-directory. When moving this workflow to shared HPC storage, preserve their relative layout.
-Relative dataset paths are resolved from the case directory because generated training jobs
-change to that directory before starting Python.
+If a child job is interrupted, rerun the same `python tuning_runner.py` command after fixing
+the external cause. Completed candidates are skipped, while incomplete candidates restore
+their newest checkpoint and train only the remaining trials. The wrappers depend on the
+shared `tuning/` package and sibling `example/data/` directory; preserve that relative
+layout when copying the workflow to HPC storage.

@@ -1,4 +1,4 @@
-"""Run one continuous-FIM reward hyperparameter-tuning fidelity stage."""
+"""Train or resume one full-budget continuous-FIM reward tuning candidate."""
 
 from pathlib import Path
 import sys

@@ -1,1 +1,1 @@
-"""Shared multi-fidelity infrastructure for reward-exploration cases."""
+"""Shared full-budget tuning infrastructure for reward-exploration cases."""

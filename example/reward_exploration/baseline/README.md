@@ -26,10 +26,9 @@ environment, perform all four evaluations, and write outputs to `calculation_out
 
 ## Hyperparameter tuning
 
-From this directory, run `python tuning_runner.py` to orchestrate the baseline reward search
-directly, or `sbatch tuning_runner_job.sh` to run the orchestrator as a low-resource Slurm
-job. The tuning configuration uses `../../data/training_dataset.pkl` for training and
-`../../data/validation_dataset.pkl` for promotion scores. It does not use held-out test,
+From this directory, run `python tuning_runner.py` on the Slurm login node. Every candidate
+uses the full 10,000-trial budget and saves periodic recovery checkpoints. The tuning
+configuration uses `../../data/training_dataset.pkl` for training and
+`../../data/validation_dataset.pkl` for its final score; it does not use held-out test,
 battery, or experimental results. See the parent [reward exploration
-README](../README.md#hyperparameter-tuning) for budgets, outputs, requirements, and the
-difference from `submit_job.sh`.
+README](../README.md#hyperparameter-tuning) for recovery, outputs, and requirements.

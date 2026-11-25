@@ -45,11 +45,10 @@ and write outputs to `calculation_output/`.
 
 ## Hyperparameter tuning
 
-From this directory, run `python tuning_runner.py` directly or submit
-`tuning_runner_job.sh`. Every candidate uses the continuous-FIM reward environment. The
-threshold (`1e-6`), sharpness (`2.0`), and scale (`2.0`) remain fixed in training and
-validation and are not part of the search space. Training uses
-`../../data/training_dataset.pkl`, while promotion scores use
+From this directory, run `python tuning_runner.py` on the Slurm login node. Every candidate
+uses the full 10,000-trial budget, periodic recovery checkpoints, and the continuous-FIM
+reward environment. The threshold (`1e-6`), sharpness (`2.0`), and scale (`2.0`) remain
+fixed and are not part of the search space. Training uses
+`../../data/training_dataset.pkl`, while final tuning scores use
 `../../data/validation_dataset.pkl`. See the parent [reward exploration
-README](../README.md#hyperparameter-tuning) for requirements, budgets, outputs, and the
-separate role of `submit_job.sh`.
+README](../README.md#hyperparameter-tuning) for requirements, recovery, and outputs.
