@@ -21,7 +21,6 @@ import time
 
 import numpy as np
 import pandas as pd
-from sklearn.preprocessing import StandardScaler
 import autoeis as ae
 
 from autorec.parser import _simplify_P, simplify
@@ -74,115 +73,6 @@ def select_promoted_config_ids(scores: dict[int, float], reduction_factor: int) 
     count = max(1, math.ceil(len(scores) / reduction_factor))
     ranked = sorted(scores, key=lambda config_id: (-scores[config_id], config_id))
     return set(ranked[:count])
-
-
-class CustomLogScaler:
-    """Log-transform and normalize continuous features.
-
-    Integer features are left unchanged.
-
-    Parameters
-    ----------
-    integer_features : list of str or str
-        List of feature names that should be treated as integers.
-    continuous_features : list of str or str
-        List of feature names that should be treated as continuous values.
-    """
-
-    def __init__(
-        self, integer_features: Union[list, str], continuous_features: Union[list, str]
-    ):
-        self.integer_features = integer_features
-        self.continuous_features = continuous_features
-        self.scaler = StandardScaler()
-        self.fitted = False
-
-    def fit(self, df: pd.DataFrame) -> "CustomLogScaler":
-        """Fit the scaler to continuous features.
-
-        Parameters
-        ----------
-        df : pandas.DataFrame
-            Data frame containing the continuous features to log-transform and
-            standardize.
-
-        Returns
-        -------
-        CustomLogScaler
-            The fitted scaler.
-        """
-        # Log-transform continuous features
-        log_transformed = np.log(df[self.continuous_features].values)
-        # Fit internal StandardScaler
-        self.scaler.fit(log_transformed)
-        self.fitted = True
-        return self
-
-    def transform(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Transform continuous features and leave integer features unchanged.
-
-        Parameters
-        ----------
-        df : pandas.DataFrame
-            Data frame to transform.
-
-        Returns
-        -------
-        pandas.DataFrame
-            A copy of ``df`` with transformed continuous features.
-
-        Raises
-        ------
-        ValueError
-            If the scaler has not been fitted.
-        """
-        if not self.fitted:
-            raise ValueError("CustomLogScaler must be fitted before calling transform().")
-        # Copy to avoid modifying original data
-        df_new = df.copy()
-        # Apply log + standardize to continuous features
-        df_new[self.continuous_features] = self.scaler.transform(
-            np.log(df[self.continuous_features].values)
-        )
-        # Leave integer features untouched
-        return df_new
-
-    def fit_transform(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Fit the scaler and transform the data frame.
-
-        Parameters
-        ----------
-        df : pandas.DataFrame
-            Data frame to fit and transform.
-
-        Returns
-        -------
-        pandas.DataFrame
-            A transformed copy of ``df``.
-        """
-        return self.fit(df).transform(df)
-
-    def inverse_transform(self, df_scaled: pd.DataFrame) -> pd.DataFrame:
-        """Undo the scaling and log transformation.
-
-        Parameters
-        ----------
-        df_scaled : pandas.DataFrame
-            Data frame containing scaled continuous features.
-
-        Returns
-        -------
-        pandas.DataFrame
-            A copy of ``df_scaled`` with continuous features restored to their
-            original scale.
-        """
-        df = df_scaled.copy()
-        # Undo standardization in log space
-        log_vals = self.scaler.inverse_transform(df[self.continuous_features].values)
-        # Undo log transformation
-        df[self.continuous_features] = np.exp(log_vals)
-        # Integers remain unchanged
-        return df
 
 
 class ConfigurationHandler:
@@ -386,36 +276,6 @@ class ConfigurationHandler:
         self.configs_list[config_id] = config
         self.configs_ids.append(config_id)
         return config_id
-
-    def remove_config(self, item: Union[int, dict]) -> None:
-        """Remove a configuration from the internal storage.
-
-        Parameters
-        ----------
-        item : int or dict
-            The configuration ID or configuration dictionary to remove.
-
-        Raises
-        ------
-        ValueError
-            If ``item`` is neither an integer nor a dictionary.
-        """
-        if isinstance(item, dict):
-            config_id = self.get_config_id(item)
-        elif isinstance(item, int):
-            config_id = item
-        else:
-            raise ValueError("item must be an int (config ID) or a dict (configuration).")
-
-        if config_id in self.configs_ids:
-            self.configs_ids.remove(config_id)
-            self.configs_list.pop(config_id, None)
-            # Update the list of missing IDs
-            self.missing_config_ids.append(config_id)
-            # Optionally, remove the file as well
-            config_filename = self.configs_dir / f"{self.basename}_{config_id:04d}.yaml"
-            if config_filename.exists():
-                config_filename.unlink()
 
     def write_config(
         self, config: dict, results_dir: Optional[Union[str, Path]] = None
