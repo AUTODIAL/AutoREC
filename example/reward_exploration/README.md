@@ -135,8 +135,9 @@ python tuning_runner.py
 ```
 
 `tuning_runner.py --help` lists the target directory, batch-size, iteration, and checkpoint
-interval options. The runner submits and monitors compute jobs and should not itself be
-submitted as a Slurm job.
+interval options. By default, it runs one seeded baseline and four other initial candidates,
+then nine batches of five candidates, for 50 full-budget candidates in total. The runner
+submits and monitors compute jobs and should not itself be submitted as a Slurm job.
 
 The two Slurm scripts serve different purposes:
 

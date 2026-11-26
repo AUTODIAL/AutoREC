@@ -198,6 +198,9 @@ def test_shared_reward_worker_configures_runtime_before_full_budget_recovery(
 
 def test_case_tuning_configurations_and_entrypoints_are_isolated():
     shared_runner = (REWARD_ROOT / "tuning" / "runner.py").read_text()
+    assert '"--num-initial", type=_positive_integer, default=5' in shared_runner
+    assert '"--num-iterations", type=_positive_integer, default=10' in shared_runner
+    assert '"--batch-size", type=_positive_integer, default=5' in shared_runner
     assert "--checkpoint-every" in shared_runner
     assert "--max-trials" not in shared_runner
     assert "promotion" not in shared_runner

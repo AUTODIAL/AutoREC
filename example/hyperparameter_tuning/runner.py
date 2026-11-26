@@ -57,8 +57,8 @@ def _parse_args() -> argparse.Namespace:
         type=Path,
         default=WORK_DIR / "search_space.yaml",
     )
-    parser.add_argument("--num-initial", type=_positive_integer, default=10)
-    parser.add_argument("--num-iterations", type=_positive_integer, default=5)
+    parser.add_argument("--num-initial", type=_positive_integer, default=5)
+    parser.add_argument("--num-iterations", type=_positive_integer, default=10)
     parser.add_argument("--batch-size", type=_positive_integer, default=5)
     parser.add_argument(
         "--max-trials",

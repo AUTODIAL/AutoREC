@@ -32,6 +32,14 @@ def stage_worker():
     return _load_module("hyperparameter_stage_worker", "main_factory.py")
 
 
+def test_runner_defaults_match_documented_tuning_schedule():
+    runner = (EXAMPLE_DIR / "runner.py").read_text()
+
+    assert '"--num-initial", type=_positive_integer, default=5' in runner
+    assert '"--num-iterations", type=_positive_integer, default=10' in runner
+    assert '"--batch-size", type=_positive_integer, default=5' in runner
+
+
 def test_fidelity_targets_and_promotions(tuning_utils):
     assert tuning_utils.cumulative_trial_targets(10_000, 1_000) == list(
         range(1_000, 10_001, 1_000)
