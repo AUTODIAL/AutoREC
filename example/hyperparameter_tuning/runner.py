@@ -1,11 +1,28 @@
-"""Run synchronous multi-fidelity hyperparameter tuning on a Slurm cluster."""
+"""Run full-budget batch hyperparameter tuning from a Slurm login node."""
 
 from __future__ import annotations
 
 import argparse
 import copy
+import os
 from pathlib import Path
 from pprint import pprint
+
+# Keep the login-node orchestrator lightweight. These limits must be applied before
+# importing numerical libraries, AutoEIS, or TensorFlow through tuning_utils.
+THREAD_LIMIT_VARIABLES = (
+    "OMP_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "BLIS_NUM_THREADS",
+    "NUMEXPR_NUM_THREADS",
+    "NUMEXPR_MAX_THREADS",
+    "TF_NUM_INTRAOP_THREADS",
+    "TF_NUM_INTEROP_THREADS",
+    "JULIA_NUM_THREADS",
+)
+for variable in THREAD_LIMIT_VARIABLES:
+    os.environ[variable] = "1"
 
 import matplotlib
 
@@ -20,15 +37,13 @@ from tuning_utils import (
     ConfigurationHandler,
     block_until_completed,
     compute_score,
-    cumulative_trial_targets,
-    promotion_trial_targets,
-    select_promoted_config_ids,
     write_job_script,
 )
 
 
 SEED = 42
 WORK_DIR = Path(__file__).resolve().parent
+REWARD_SAMPLE_SIZE = 1_000
 
 
 def _positive_integer(value: str) -> int:
@@ -61,28 +76,10 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--num-iterations", type=_positive_integer, default=10)
     parser.add_argument("--batch-size", type=_positive_integer, default=5)
     parser.add_argument(
-        "--max-trials",
-        type=_positive_integer,
-        default=10_000,
-        help="Maximum cumulative training budget per promoted candidate.",
-    )
-    parser.add_argument(
-        "--session-trials",
+        "--checkpoint-every",
         type=_positive_integer,
         default=1_000,
-        help="Trials added before each checkpoint and validation score.",
-    )
-    parser.add_argument(
-        "--grace-trials",
-        type=_positive_integer,
-        default=2_000,
-        help="First cumulative trial count at which candidates may be pruned.",
-    )
-    parser.add_argument(
-        "--reduction-factor",
-        type=_positive_integer,
-        default=2,
-        help="Keep the best ceil(1 / factor) candidates at each promotion rung.",
+        help="Save each candidate every N trials (default: 1000).",
     )
     return parser.parse_args()
 
@@ -121,19 +118,14 @@ def _optuna_distributions(handler: ConfigurationHandler) -> dict:
     }
 
 
-def _stage_paths(save_dir: Path, target_trials: int) -> tuple[Path, Path]:
-    checkpoint = save_dir / "checkpoints" / f"trial-{target_trials:08d}"
-    evaluation = save_dir / f"eval_results_trial-{target_trials:08d}.pkl"
-    return checkpoint, evaluation
-
-
-def _stage_complete(save_dir: Path, target_trials: int) -> bool:
-    checkpoint, evaluation = _stage_paths(save_dir, target_trials)
-    return (
-        (checkpoint / "manifest.json").is_file()
-        and evaluation.is_file()
-        and evaluation.with_suffix(".csv").is_file()
+def _candidate_complete(save_dir: Path, target_trials: int) -> bool:
+    required = (
+        save_dir / "checkpoints" / f"trial-{target_trials:08d}" / "manifest.json",
+        save_dir / "statistical_analysis.pkl",
+        save_dir / "eval_results.pkl",
+        save_dir / "eval_results.csv",
     )
+    return all(path.is_file() for path in required)
 
 
 def _write_csv_atomic(rows: list[dict], destination: Path) -> None:
@@ -160,10 +152,25 @@ def _export_study(study: optuna.Study, results_dir: Path) -> None:
         plt.close(figure)
 
 
-def _submit_stage(
+def _candidate(
+    handler: ConfigurationHandler,
+    config: dict,
+    results_dir: Path,
+    trial: optuna.trial.Trial | None = None,
+) -> dict:
+    config_id, config_file, written_config = handler.write_config(config, results_dir)
+    return {
+        "trial": trial,
+        "config_id": config_id,
+        "config_file": config_file.resolve(),
+        "save_dir": Path(written_config["agent"]["save_dir"]).resolve(),
+    }
+
+
+def _submit_candidates(
     candidates: list[dict],
     target_trials: int,
-    max_trials: int,
+    checkpoint_every: int,
     python_file: Path,
     job_name_prefix: str,
     sbatch_options: dict,
@@ -173,32 +180,49 @@ def _submit_stage(
     for candidate in candidates:
         config_id = candidate["config_id"]
         save_dir = candidate["save_dir"]
-        if config_id in submitted_config_ids or _stage_complete(save_dir, target_trials):
+        if config_id in submitted_config_ids or _candidate_complete(save_dir, target_trials):
             continue
         submitted_config_ids.add(config_id)
         options = dict(sbatch_options)
-        options["job_name"] = f"{job_name_prefix}_{config_id}_{target_trials}"
+        options["job_name"] = f"{job_name_prefix}_{config_id}"
         job_id = write_job_script(
             save_dir,
             python_file,
             candidate["config_file"],
             options,
-            script_args=("--target-trials", target_trials),
-            archive_models=target_trials == max_trials,
+            script_args=("--checkpoint-every", checkpoint_every),
             submit=True,
         )
         if job_id is None:
             raise RuntimeError(f"Slurm did not return a job ID for config {config_id}.")
         job_ids.append(job_id)
+
     block_until_completed(job_ids)
+    incomplete = [
+        candidate["config_id"]
+        for candidate in candidates
+        if not _candidate_complete(candidate["save_dir"], target_trials)
+    ]
+    if incomplete:
+        raise RuntimeError(f"Candidates did not produce complete results: {incomplete}")
 
 
-def _score_candidate(candidate: dict, target_trials: int, reward_sample_size: int):
-    _, evaluation = _stage_paths(candidate["save_dir"], target_trials)
-    return compute_score(
-        candidate["save_dir"],
-        reward_sample_size,
-        evaluation_results=evaluation,
+def _score_candidate(candidate: dict):
+    return compute_score(candidate["save_dir"], REWARD_SAMPLE_SIZE)
+
+
+def _record_score(rows: list[dict], group: str, candidate: dict, score, components) -> None:
+    trial = candidate["trial"]
+    rows.append(
+        {
+            "group": group,
+            "trial_number": 0 if trial is None else trial.number,
+            "config_id": candidate["config_id"],
+            "score": score,
+            "mean_reward_score": components[0],
+            "success_rate": components[1],
+            "exact_rate": components[2],
+        }
     )
 
 
@@ -207,57 +231,35 @@ def _run_baseline(
     handler: ConfigurationHandler,
     distributions: dict,
     results_dir: Path,
-    targets: list[int],
+    target_trials: int,
+    checkpoint_every: int,
     python_file: Path,
     job_name_prefix: str,
     sbatch_options: dict,
-    reward_sample_size: int,
-    rung_rows: list[dict],
+    score_rows: list[dict],
 ) -> None:
-    config_id, config_file, config = handler.write_config(
-        copy.deepcopy(handler.base_config), results_dir
+    candidate = _candidate(
+        handler, copy.deepcopy(handler.base_config), results_dir, trial=None
     )
-    candidate = {
-        "config_id": config_id,
-        "config_file": config_file.resolve(),
-        "save_dir": Path(config["agent"]["save_dir"]).resolve(),
-    }
-    intermediate_values = {}
-    final_score = None
-    for target in targets:
-        _submit_stage(
-            [candidate],
-            target,
-            targets[-1],
-            python_file,
-            job_name_prefix,
-            sbatch_options,
-        )
-        final_score, components = _score_candidate(candidate, target, reward_sample_size)
-        intermediate_values[target] = float(final_score)
-        rung_rows.append(
-            {
-                "group": "baseline",
-                "trial_number": 0,
-                "config_id": config_id,
-                "target_trials": target,
-                "score": final_score,
-                "mean_reward_score": components[0],
-                "success_rate": components[1],
-                "exact_rate": components[2],
-                "status": "complete" if target == targets[-1] else "continued",
-            }
-        )
-        _write_csv_atomic(rung_rows, results_dir / "rung_scores.csv")
-    params = handler.config_to_sample(config)
+    _submit_candidates(
+        [candidate],
+        target_trials,
+        checkpoint_every,
+        python_file,
+        job_name_prefix,
+        sbatch_options,
+    )
+    score, components = _score_candidate(candidate)
+    params = handler.config_to_sample(handler.configs_list[candidate["config_id"]])
     study.add_trial(
         optuna.trial.create_trial(
             params=params,
             distributions=distributions,
-            value=float(final_score),
-            intermediate_values=intermediate_values,
+            value=float(score),
         )
     )
+    _record_score(score_rows, "baseline", candidate, score, components)
+    _write_csv_atomic(score_rows, results_dir / "candidate_scores.csv")
 
 
 def _run_candidate_group(
@@ -266,93 +268,39 @@ def _run_candidate_group(
     study: optuna.Study,
     handler: ConfigurationHandler,
     results_dir: Path,
-    targets: list[int],
-    promotion_targets: set[int],
-    reduction_factor: int,
+    target_trials: int,
+    checkpoint_every: int,
     python_file: Path,
     job_name_prefix: str,
     sbatch_options: dict,
-    reward_sample_size: int,
-    rung_rows: list[dict],
+    score_rows: list[dict],
 ) -> None:
-    candidates = []
-    for trial in trials:
-        config_id, config_file, config = handler.write_config(
-            handler.sample_to_config(trial.params), results_dir
+    candidates = [
+        _candidate(
+            handler,
+            handler.sample_to_config(trial.params),
+            results_dir,
+            trial=trial,
         )
-        candidates.append(
-            {
-                "trial": trial,
-                "config_id": config_id,
-                "config_file": config_file.resolve(),
-                "save_dir": Path(config["agent"]["save_dir"]).resolve(),
-            }
-        )
-
-    active = candidates
-    for target in targets:
-        _submit_stage(
-            active,
-            target,
-            targets[-1],
-            python_file,
-            job_name_prefix,
-            sbatch_options,
-        )
-        scores = {}
-        components_by_trial = {}
-        for candidate in active:
-            score, components = _score_candidate(candidate, target, reward_sample_size)
-            trial = candidate["trial"]
-            trial.report(float(score), step=target)
-            scores[trial.number] = float(score)
-            components_by_trial[trial.number] = components
-
-        promoted = set(scores)
-        if target in promotion_targets:
-            promoted = select_promoted_config_ids(scores, reduction_factor)
-
-        next_active = []
-        for candidate in active:
-            trial = candidate["trial"]
-            components = components_by_trial[trial.number]
-            if target == targets[-1]:
-                status = "complete"
-                study.tell(trial, scores[trial.number])
-            elif trial.number in promoted:
-                status = "promoted" if target in promotion_targets else "continued"
-                next_active.append(candidate)
-            else:
-                status = "pruned"
-                study.tell(trial, state=optuna.trial.TrialState.PRUNED)
-            rung_rows.append(
-                {
-                    "group": group_name,
-                    "trial_number": trial.number,
-                    "config_id": candidate["config_id"],
-                    "target_trials": target,
-                    "score": scores[trial.number],
-                    "mean_reward_score": components[0],
-                    "success_rate": components[1],
-                    "exact_rate": components[2],
-                    "status": status,
-                }
-            )
-        _write_csv_atomic(rung_rows, results_dir / "rung_scores.csv")
-        active = next_active
+        for trial in trials
+    ]
+    _submit_candidates(
+        candidates,
+        target_trials,
+        checkpoint_every,
+        python_file,
+        job_name_prefix,
+        sbatch_options,
+    )
+    for candidate in candidates:
+        score, components = _score_candidate(candidate)
+        study.tell(candidate["trial"], float(score))
+        _record_score(score_rows, group_name, candidate, score, components)
+    _write_csv_atomic(score_rows, results_dir / "candidate_scores.csv")
 
 
 def main() -> None:
     args = _parse_args()
-    if args.reduction_factor < 2:
-        raise ValueError("--reduction-factor must be at least 2.")
-    targets = cumulative_trial_targets(args.max_trials, args.session_trials)
-    promotion_targets = promotion_trial_targets(
-        args.max_trials, args.grace_trials, args.reduction_factor
-    )
-    if not set(promotion_targets).issubset(targets):
-        raise ValueError("Every promotion budget must align with a session boundary.")
-
     results_dir = args.target_dir.resolve()
     results_dir.mkdir(parents=True, exist_ok=True)
     bounds, integer_variables = _load_search_space(args.search_space.resolve())
@@ -362,8 +310,11 @@ def main() -> None:
         search_space_bounds=bounds,
         integer_variables=integer_variables,
     )
-    if handler.base_config["agent"]["num_trials"] != args.session_trials:
-        raise ValueError("agent.num_trials must equal --session-trials.")
+    target_trials = handler.base_config["agent"]["num_trials"]
+    if isinstance(target_trials, bool) or not isinstance(target_trials, int):
+        raise ValueError("agent.num_trials must be a positive integer.")
+    if target_trials < 1:
+        raise ValueError("agent.num_trials must be a positive integer.")
 
     distributions = _optuna_distributions(handler)
     sampler = optuna.samplers.TPESampler(n_startup_trials=args.num_initial, seed=SEED)
@@ -371,17 +322,15 @@ def main() -> None:
     python_file = WORK_DIR / "main_factory.py"
     job_name_prefix = results_dir.name
     sbatch_options = {"time": "72:00:00", "mem_per_cpu": "12G"}
-    reward_sample_size = args.session_trials
-    rung_rows = []
+    score_rows = []
 
-    print("============================================")
-    print("# MULTI-FIDELITY HYPERPARAMETER TUNING #")
-    print("============================================")
+    print("=====================================")
+    print("# FULL-BUDGET HYPERPARAMETER TUNING #")
+    print("=====================================")
     print(f"Results: {results_dir}")
-    print(f"Cumulative targets: {targets}")
-    print(f"Promotion targets: {promotion_targets}")
-    print("Slurm commands run directly on the current node.")
-    print("The baseline is protected from pruning and runs to the maximum budget.")
+    print(f"Training budget per candidate: {target_trials} trials")
+    print(f"Checkpoint interval: {args.checkpoint_every} trials")
+    print("Run this orchestrator on the Slurm login node.")
     pprint(handler.search_space_bounds, sort_dicts=False)
 
     _run_baseline(
@@ -389,12 +338,12 @@ def main() -> None:
         handler,
         distributions,
         results_dir,
-        targets,
+        target_trials,
+        args.checkpoint_every,
         python_file,
         job_name_prefix,
         sbatch_options,
-        reward_sample_size,
-        rung_rows,
+        score_rows,
     )
     _export_study(study, results_dir)
 
@@ -413,14 +362,12 @@ def main() -> None:
             study,
             handler,
             results_dir,
-            targets,
-            set(promotion_targets),
-            args.reduction_factor,
+            target_trials,
+            args.checkpoint_every,
             python_file,
             job_name_prefix,
             sbatch_options,
-            reward_sample_size,
-            rung_rows,
+            score_rows,
         )
         _export_study(study, results_dir)
 

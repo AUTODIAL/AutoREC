@@ -14,7 +14,7 @@ for top-level scripts below assume the current directory is `example/`.
 | [`main.py`](main.py) | Construct the data preparation, environment, and agent directly in Python | Quick mode trains for 50 trials |
 | [`main_factory.py`](main_factory.py) | Build the same pipeline from YAML configuration | Defaults to the 50-trial demo configuration |
 | [`checkpoint/`](checkpoint/) | Compare continuous, bounded, complete-checkpoint, and model-only continuation | Four controlled 1,000-trial scenarios; intentionally expensive |
-| [`hyperparameter_tuning/`](hyperparameter_tuning/) | Run full-budget Optuna tuning with checkpoint recovery on Slurm | Potentially expensive HPC workflow |
+| [`hyperparameter_tuning/`](hyperparameter_tuning/) | Run checkpointed full-budget Optuna tuning on Slurm | Potentially expensive HPC workflow |
 | [`reward_exploration/`](reward_exploration/) | Compare the standard reward with simplified-circuit and FIM-based complexity penalties | Experimental workflows range from a 50-trial demo to 10,000-trial HPC runs |
 | [`progressive_exploration/`](progressive_exploration/) | Compare the same reward variants with three cumulative spectrum windows | Experimental workflows range from a 50-trial demo to 10,000-trial HPC runs |
 
@@ -69,16 +69,17 @@ categories, and reproducibility limitations.
 ## Full-budget hyperparameter tuning
 
 The [`hyperparameter_tuning/`](hyperparameter_tuning/) workflow uses Optuna, Slurm, and
-complete checkpoints to train each candidate for a fixed 10,000-trial budget while allowing
-interrupted child jobs to resume. It supports:
+complete checkpoints. Every candidate trains for the configured 10,000-trial budget and is
+evaluated once on separate validation data. It supports:
 
 - direct orchestration from a login node;
-- direct Slurm child-job submission and monitoring;
 - separate training, validation, and held-out test datasets;
+- periodic recovery checkpoints for interrupted candidate jobs;
 - final objective-component and Optuna reports.
 
 See [`hyperparameter_tuning/readme.md`](hyperparameter_tuning/readme.md) for configuration,
-cluster requirements, recovery behavior, and submission commands.
+cluster requirements, recovery behavior, and submission commands. Its dedicated dataset
+pickle files are included in `hyperparameter_tuning/data/`.
 
 ## Reward exploration
 

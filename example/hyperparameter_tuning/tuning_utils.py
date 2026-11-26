@@ -12,7 +12,6 @@ from pathlib import Path
 from glob import glob
 from typing import Optional, Sequence, Tuple, Union
 import copy
-import math
 import yaml
 import re
 import shlex
@@ -31,48 +30,12 @@ MODULE_SAVELIST_NAME = "default"
 PYTHON_ENV_PATH = "$HOME/autorec_env"
 
 
-def cumulative_trial_targets(max_trials: int, session_trials: int) -> list[int]:
-    """Return cumulative evaluation/checkpoint targets for fixed-size sessions."""
-    for value, name in ((max_trials, "max_trials"), (session_trials, "session_trials")):
-        if type(value) is not int or value < 1:
-            raise ValueError(f"{name} must be a positive integer.")
-    if max_trials % session_trials:
-        raise ValueError("max_trials must be divisible by session_trials.")
-    return list(range(session_trials, max_trials + 1, session_trials))
+class SlurmJobsFailed(RuntimeError):
+    """Report terminal Slurm failures while retaining every observed final result."""
 
-
-def promotion_trial_targets(
-    max_trials: int,
-    grace_trials: int,
-    reduction_factor: int,
-) -> list[int]:
-    """Return geometric cumulative budgets where synchronous pruning occurs."""
-    if type(grace_trials) is not int or grace_trials < 1:
-        raise ValueError("grace_trials must be a positive integer.")
-    if type(reduction_factor) is not int or reduction_factor < 2:
-        raise ValueError("reduction_factor must be an integer of at least 2.")
-    if grace_trials >= max_trials:
-        raise ValueError("grace_trials must be smaller than max_trials.")
-
-    targets = []
-    target = grace_trials
-    while target < max_trials:
-        targets.append(target)
-        target *= reduction_factor
-    return targets
-
-
-def select_promoted_config_ids(scores: dict[int, float], reduction_factor: int) -> set[int]:
-    """Select the highest-scoring fraction with deterministic config-ID tie breaking."""
-    if not scores:
-        return set()
-    if type(reduction_factor) is not int or reduction_factor < 2:
-        raise ValueError("reduction_factor must be an integer of at least 2.")
-    if not all(np.isfinite(score) for score in scores.values()):
-        raise ValueError("Promotion scores must be finite.")
-    count = max(1, math.ceil(len(scores) / reduction_factor))
-    ranked = sorted(scores, key=lambda config_id: (-scores[config_id], config_id))
-    return set(ranked[:count])
+    def __init__(self, message: str, results: dict[str, tuple[str, str]]):
+        super().__init__(message)
+        self.results = results
 
 
 class ConfigurationHandler:
@@ -320,7 +283,6 @@ def write_job_script(
     config_file: Union[str, Path],
     sbatch_options: dict,
     script_args: Optional[Sequence[Union[str, int, Path]]] = None,
-    archive_models: bool = True,
     submit: bool = False,
 ) -> Optional[str]:
     """Write a Slurm job submission script with the specified options and parameters.
@@ -339,9 +301,6 @@ def write_job_script(
         mem_per_cpu, and job_name.
     script_args : sequence, optional
         Additional command-line arguments passed to the training script after ``--config``.
-    archive_models : bool, optional
-        Archive and remove intermediate model exports and fit plots after the job. Disable
-        this for non-final multi-fidelity sessions.
     submit : bool, optional
         Whether to submit the job immediately after writing the script, by default False.
 
@@ -360,20 +319,18 @@ def write_job_script(
     arguments = ["--config", str(config_file), *(script_args or ())]
     argument_array = " ".join(shlex.quote(str(value)) for value in arguments)
 
-    archive_lines = []
-    if archive_models:
-        archive_lines = [
-            "# ARCHIVE INTERMEDIATE OUTPUTS",
-            "echo 'Archiving intermediate models and fit plots...'",
-            f"cd {shlex.quote(str(save_dir))}",
-            "if [ -d models ]; then tar -czf models.tar.gz models && rm -rf models; fi",
-            (
-                "if [ -d fit_plots ]; then tar -czf fit_plots.tar.gz fit_plots "
-                "&& rm -rf fit_plots; fi"
-            ),
-            "cd - >/dev/null",
-            "",
-        ]
+    archive_lines = [
+        "# ARCHIVE INTERMEDIATE OUTPUTS",
+        "echo 'Archiving intermediate models and fit plots...'",
+        f"cd {shlex.quote(str(save_dir))}",
+        "if [ -d models ]; then tar -czf models.tar.gz models && rm -rf models; fi",
+        (
+            "if [ -d fit_plots ]; then tar -czf fit_plots.tar.gz fit_plots "
+            "&& rm -rf fit_plots; fi"
+        ),
+        "cd - >/dev/null",
+        "",
+    ]
 
     submit_script = "\n".join(
         [
@@ -387,6 +344,8 @@ def write_job_script(
             "#SBATCH --account=rrg-j3goals",
             "#SBATCH --constraint='turin'",
             f"#SBATCH --output={save_dir}/%x_slurm-%A.out   # output and error log",
+            "",
+            "set -euo pipefail",
             "",
             "echo '------------------------------------------------------------'",
             "echo 'Running job $SLURM_JOB_NAME'",
@@ -463,7 +422,8 @@ def write_job_script(
 def block_until_completed(
     jobid_list: list,
     poll_interval: int = 60,
-) -> None:
+    accounting_timeout: int = 3_600,
+) -> dict[str, tuple[str, str]]:
     """Block until all jobs reach a terminal Slurm state.
 
     Parameters
@@ -472,26 +432,42 @@ def block_until_completed(
         A list of Slurm job IDs to monitor.
     poll_interval : int, optional
         The interval (in seconds) at which to poll the job status, by default 60 seconds.
+    accounting_timeout : int, optional
+        Maximum continuous ``sacct`` outage tolerated before failing, by default one hour.
+
+    Returns
+    -------
+    dict
+        Final ``(state, exit_code)`` pair for every requested job ID.
     """
     if not jobid_list:
-        return
+        return {}
+    if type(poll_interval) is not int or poll_interval < 1:
+        raise ValueError("poll_interval must be a positive integer.")
+    if type(accounting_timeout) is not int or accounting_timeout < 1:
+        raise ValueError("accounting_timeout must be a positive integer.")
 
     # Convert all job IDs to strings
     jobid_list = list(map(str, jobid_list))
     jobid_str = ",".join(jobid_list)  # This is so that we can check all at once
 
-    # Track completion status of each job
-    completed = {jobid: False for jobid in jobid_list}
+    terminal_results = {}
+    accounting_failure_started = None
+    missing_since = {}
 
     # These are a list of terminal states in Slurm
     terminal_states = {
         "COMPLETED",
         "FAILED",
         "CANCELLED",
+        "DEADLINE",
         "TIMEOUT",
         "OUT_OF_MEMORY",
         "NODE_FAIL",
         "PREEMPTED",
+        "REVOKED",
+        "SPECIAL_EXIT",
+        "BOOT_FAIL",
     }
 
     while True:
@@ -499,7 +475,7 @@ def block_until_completed(
             "sacct",
             "-j",
             jobid_str,
-            "--format=JobIDRaw,State",
+            "--format=JobIDRaw,State,ExitCode",
             "--parsable2",
             "--noheader",
         ]
@@ -510,40 +486,93 @@ def block_until_completed(
             check=False,
         )
         if result.returncode:
-            raise RuntimeError(f"Could not query Slurm jobs: {result.stderr.strip()}")
+            now = time.monotonic()
+            if accounting_failure_started is None:
+                accounting_failure_started = now
+            elapsed = now - accounting_failure_started
+            remaining = [jobid for jobid in jobid_list if jobid not in terminal_results]
+            queue_result = subprocess.run(
+                [
+                    "squeue",
+                    "--jobs",
+                    ",".join(remaining),
+                    "--noheader",
+                    "--format=%A|%T",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            active_text = (
+                queue_result.stdout.strip()
+                if queue_result.returncode == 0 and queue_result.stdout.strip()
+                else "active state unavailable"
+            )
+            error = result.stderr.strip() or result.stdout.strip() or "unknown sacct error"
+            print(
+                f"Slurm accounting is unavailable ({elapsed:.0f}s): {error}. "
+                f"squeue: {active_text}"
+            )
+            if elapsed >= accounting_timeout:
+                ids = ", ".join(remaining)
+                raise RuntimeError(
+                    f"Slurm accounting remained unavailable for {elapsed:.0f}s; "
+                    f"job status is unknown for: {ids}. Last sacct error: {error}"
+                )
+            time.sleep(poll_interval)
+            continue
+        accounting_failure_started = None
 
         # Track the *best* (final) state per job
-        job_states = {}
+        observed = set()
         for line in result.stdout.splitlines():
-            jobid_raw, state = line.split("|")[:2]
-            # Ignore job steps (e.g. 12345.batch)
-            if "." in jobid_raw:
+            columns = line.split("|")
+            if len(columns) < 3:
                 continue
-            job_states[jobid_raw] = state.split()[0].rstrip("+")
+            jobid_raw, state, exit_code = columns[:3]
+            # Ignore job steps (e.g. 12345.batch)
+            if "." in jobid_raw or jobid_raw not in jobid_list:
+                continue
+            observed.add(jobid_raw)
+            state = state.split()[0].rstrip("+")
+            if state in terminal_states and jobid_raw not in terminal_results:
+                terminal_results[jobid_raw] = (state, exit_code)
+                print(f"Job {jobid_raw} finished with state: {state}, exit code: {exit_code}")
 
-        for jobid in completed:
-            if not completed[jobid]:
-                state = job_states.get(jobid)
-                # sacct can lag briefly right after submission
-                if state is None:
-                    continue
+        now = time.monotonic()
+        remaining = [jobid for jobid in jobid_list if jobid not in terminal_results]
+        for jobid in remaining:
+            if jobid in observed:
+                missing_since.pop(jobid, None)
+            else:
+                missing_since.setdefault(jobid, now)
+        expired = [
+            jobid
+            for jobid, started in missing_since.items()
+            if now - started >= accounting_timeout
+        ]
+        if expired:
+            raise RuntimeError(
+                "Slurm accounting returned no record within the status timeout for: "
+                + ", ".join(expired)
+            )
 
-                if state in terminal_states:
-                    completed[jobid] = True
-                    print(f"Job {jobid} finished with state: {state}")
-
-        if all(completed.values()):
+        if len(terminal_results) == len(jobid_list):
             print("All jobs have completed.")
-            time.sleep(60)  # ensure files are flushed
             failed = {
-                jobid: state
-                for jobid, state in job_states.items()
-                if jobid in completed and state != "COMPLETED"
+                jobid: result
+                for jobid, result in terminal_results.items()
+                if result != ("COMPLETED", "0:0")
             }
             if failed:
-                details = ", ".join(f"{jobid}={state}" for jobid, state in failed.items())
-                raise RuntimeError(f"One or more Slurm jobs failed: {details}")
-            return
+                details = ", ".join(
+                    f"{jobid}={state}/{exit_code}"
+                    for jobid, (state, exit_code) in failed.items()
+                )
+                raise SlurmJobsFailed(
+                    f"One or more Slurm jobs failed: {details}", terminal_results
+                )
+            return terminal_results
 
         time.sleep(poll_interval)
 
@@ -554,7 +583,6 @@ def compute_score(
     reward_range: list = [-12, 12],
     include_exact_rate: bool = True,
     simplify_redundancy: bool = False,
-    evaluation_results: Optional[Union[str, Path]] = None,
 ) -> Tuple[float, Tuple[float, float, float]]:
     """Compute the score to maximize for hyperparameter tuning.
 
@@ -578,10 +606,6 @@ def compute_score(
     simplify_redundancy : bool, optional
         Whether to simplify circuits by removing redundant resistors before checking
         equivalence, by default False.
-    evaluation_results : str or Path, optional
-        Rung-specific evaluation pickle. Defaults to ``eval_results.pkl`` in
-        ``results_dir`` for backward compatibility.
-
     Returns
     -------
     avg_score : float
@@ -599,12 +623,7 @@ def compute_score(
     score_mean_reward = (mean_reward_last - min_reward) / (max_reward - min_reward)
 
     # Compute the contributions based on agent success
-    evaluation_results = (
-        results_dir / "eval_results.pkl"
-        if evaluation_results is None
-        else Path(evaluation_results)
-    )
-    eval_results = pd.read_pickle(evaluation_results)
+    eval_results = pd.read_pickle(results_dir / "eval_results.pkl")
     score_success_rate = eval_results["found_solution"].mean()
     # Success exact
     success_exact_count = 0

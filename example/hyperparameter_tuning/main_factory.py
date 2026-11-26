@@ -1,4 +1,4 @@
-"""Train or resume one cumulative hyperparameter-tuning fidelity stage."""
+"""Train or resume one full-budget hyperparameter candidate."""
 
 from __future__ import annotations
 
@@ -30,35 +30,10 @@ def _read_config(config_file: Path) -> dict:
     return config
 
 
-def _checkpoint_trial(path: Path) -> int | None:
-    prefix = "trial-"
-    if not path.is_dir() or not path.name.startswith(prefix):
-        return None
-    suffix = path.name[len(prefix) :]
-    return int(suffix) if suffix.isdigit() else None
-
-
-def _latest_checkpoint(checkpoint_dir: Path, target_trials: int) -> Path | None:
-    candidates = [
-        (trial, path)
-        for path in checkpoint_dir.glob("trial-*")
-        if (trial := _checkpoint_trial(path)) is not None and trial <= target_trials
-    ]
-    return max(candidates, default=(None, None), key=lambda item: item[0])[1]
-
-
-def _evaluation_paths(save_dir: Path, target_trials: int) -> tuple[Path, Path]:
-    stem = f"eval_results_trial-{target_trials:08d}"
-    return save_dir / f"{stem}.csv", save_dir / f"{stem}.pkl"
-
-
-def _write_evaluation_results(results, save_dir: Path, target_trials: int) -> None:
-    """Atomically publish rung-specific results and refresh legacy latest-result paths."""
+def _write_evaluation_results(results, save_dir: Path) -> None:
+    """Atomically publish the candidate's validation results."""
     save_dir.mkdir(parents=True, exist_ok=True)
-    rung_csv, rung_pickle = _evaluation_paths(save_dir, target_trials)
     destinations = (
-        (rung_csv, "csv"),
-        (rung_pickle, "pickle"),
         (save_dir / "eval_results.csv", "csv"),
         (save_dir / "eval_results.pkl", "pickle"),
     )
@@ -71,7 +46,8 @@ def _write_evaluation_results(results, save_dir: Path, target_trials: int) -> No
         temporary.replace(destination)
 
 
-def _configure_checkpoint_tensorflow() -> None:
+def _configure_deterministic_tensorflow() -> None:
+    """Match the TensorFlow runtime recorded in fresh and resumed checkpoints."""
     import tensorflow as tf
 
     tf.config.threading.set_inter_op_parallelism_threads(1)
@@ -91,18 +67,13 @@ def _set_evaluation_seed(seed: int) -> None:
     tf.random.set_seed(seed)
 
 
-def run_stage(config_file: Path, target_trials: int | None, evaluation_seed: int) -> None:
+def run_candidate(config_file: Path, evaluation_seed: int, checkpoint_every: int) -> None:
     config = _read_config(config_file)
-    session_trials = config["agent"]["num_trials"]
-    target_trials = session_trials if target_trials is None else target_trials
+    target_trials = config["agent"]["num_trials"]
     save_dir = Path(config["agent"]["save_dir"])
     checkpoint_dir = save_dir / "checkpoints"
     target_checkpoint = checkpoint_dir / f"trial-{target_trials:08d}"
-    rung_csv, rung_pickle = _evaluation_paths(save_dir, target_trials)
-
-    if target_checkpoint.is_dir() and rung_csv.is_file() and rung_pickle.is_file():
-        print(f"Cumulative trial {target_trials} is already trained and evaluated.")
-        return
+    result_paths = (save_dir / "eval_results.csv", save_dir / "eval_results.pkl")
 
     os.environ.setdefault("CUDA_VISIBLE_DEVICES", "-1")
     os.environ.setdefault("TF_NUM_INTRAOP_THREADS", "1")
@@ -112,50 +83,56 @@ def run_stage(config_file: Path, target_trials: int | None, evaluation_seed: int
     from autorec.runtime import configure_autorec_runtime
 
     configure_autorec_runtime(thread_count=1, warmup_autoeis=True, suppress_tf_logs=True)
+    # Runtime compatibility is validated while discovering the latest checkpoint, so
+    # determinism and thread settings must be active before recovery planning begins.
+    _configure_deterministic_tensorflow()
 
     from autorec.agent import DDQN_ECM
+    from autorec.checkpoint import plan_training_recovery
     from autorec.factory import pipeline_builder
     from autorec.utils import set_global_seed
 
-    previous_checkpoint = _latest_checkpoint(checkpoint_dir, target_trials)
-    previous_trials = (
-        0 if previous_checkpoint is None else int(_checkpoint_trial(previous_checkpoint))
-    )
-    additional_trials = target_trials - previous_trials
+    recovery = plan_training_recovery(checkpoint_dir, target_trials)
+    if not recovery.additional_trials and all(path.is_file() for path in result_paths):
+        print(f"Candidate is already trained and evaluated through trial {target_trials}.")
+        return
 
     print("#" * 55)
     print("TRAINING RL AGENT FOR GENERATING ECM FROM EIS DATA")
     print("#" * 55)
     print(f"Configuration file: {config_file}")
-    print(f"Cumulative target: {target_trials} trials")
+    print(f"Full training budget: {target_trials} trials")
 
-    if previous_checkpoint is None:
+    if recovery.checkpoint is None:
         set_global_seed(config["agent"].get("random_seed", 42), True)
         _, _, _, _, agent = pipeline_builder(config_file)
     else:
-        # Match the initial session's deterministic runtime without reseeding. The
-        # checkpoint loader restores its saved RNG streams last.
-        _configure_checkpoint_tensorflow()
-        print(f"Restoring checkpoint: {previous_checkpoint}")
+        # Do not reseed: the checkpoint loader restores its saved RNG streams last.
+        print(f"Restoring checkpoint: {recovery.checkpoint}")
         agent = DDQN_ECM.from_checkpoint(
-            previous_checkpoint,
+            recovery.checkpoint,
             save_dir=save_dir,
-            num_trials=session_trials,
+            num_trials=target_trials,
         )
 
-    if additional_trials:
-        print(f"Training {additional_trials} additional trials...")
-        agent.train(additional_trials=additional_trials, checkpoint_dir=checkpoint_dir)
-    if not target_checkpoint.is_dir():
+    if recovery.additional_trials:
+        print(f"Training {recovery.additional_trials} remaining trials...")
+        agent.train(
+            additional_trials=recovery.additional_trials,
+            checkpoint_dir=checkpoint_dir,
+            checkpoint_every=checkpoint_every,
+        )
+    completed = plan_training_recovery(checkpoint_dir, target_trials)
+    if completed.additional_trials:
         raise RuntimeError(f"Expected checkpoint was not created: {target_checkpoint}")
 
-    # Save before evaluation. The next stage restores this immutable checkpoint, so
-    # validation RNG, environment, and cache changes cannot affect continued training.
-    print(f"Evaluating cumulative trial {target_trials} on the validation dataset...")
+    # Checkpoint before evaluation so validation RNG, environment, and cache changes
+    # cannot affect a later restoration of the completed candidate.
+    print(f"Evaluating trial {target_trials} on the validation dataset...")
     _set_evaluation_seed(evaluation_seed)
     results = agent.eval_all_eis(max_actions=24, verbose=True, use_eval_env=True)
-    _write_evaluation_results(results, save_dir, target_trials)
-    print(f"Completed cumulative trial {target_trials}.")
+    _write_evaluation_results(results, save_dir)
+    print(f"Completed candidate at trial {target_trials}.")
 
 
 def main() -> None:
@@ -168,10 +145,10 @@ def main() -> None:
         help="Configuration for one hyperparameter candidate.",
     )
     parser.add_argument(
-        "--target-trials",
+        "--checkpoint-every",
         type=_positive_integer,
-        default=None,
-        help="Cumulative trial target; defaults to agent.num_trials.",
+        default=1_000,
+        help="Save a complete checkpoint every N trials (default: 1000).",
     )
     parser.add_argument(
         "--evaluation-seed",
@@ -180,7 +157,7 @@ def main() -> None:
         help="Seed used only for validation evaluation.",
     )
     args = parser.parse_args()
-    run_stage(args.config.resolve(), args.target_trials, args.evaluation_seed)
+    run_candidate(args.config.resolve(), args.evaluation_seed, args.checkpoint_every)
 
 
 if __name__ == "__main__":

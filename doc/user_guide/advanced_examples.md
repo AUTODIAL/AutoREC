@@ -44,9 +44,11 @@ for exact commands and output locations.
 
 [`example/hyperparameter_tuning/`](https://github.com/AUTODIAL/AutoREC/tree/main/example/hyperparameter_tuning)
 contains an Optuna workflow that generates configurations, submits Slurm jobs,
-waits for batches, and scores their outputs. It has extra requirements in its
-own `requirements.txt` and cluster-specific job-script assumptions in
-`tuning_utils.py`.
+waits for batches, and scores their outputs. Every candidate runs to the full
+budget configured in `base_config.yaml`; periodic checkpoints let a resubmitted
+candidate continue after an interrupted job. Run the orchestrator on the login
+node. It has extra requirements in its own `requirements.txt` and
+cluster-specific job-script assumptions in `tuning_utils.py`.
 
 Treat this workflow as a template requiring review for your scheduler,
 partitions, environment modules, filesystem, resource limits, and accounting.
